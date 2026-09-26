@@ -89,136 +89,132 @@ export async function exigirSuporte(inter, oque) {
    o tradutor parte sempre do portugues, e o portugues e' o texto original. */
 const COR_SUPORTE = 0x5865F2;
 
+/* Cada texto e' um cartao: uma frase de abertura e secoes curtas em campos,
+   em vez de um bloco corrido. Numa sala de leitura a pessoa bate o olho e
+   acha o que procura -- e campo curto traduz melhor que paragrafo longo. */
+const RODAPE = {
+  pt: "CYRON Support · 🌐 toque no botão para ler na sua língua",
+  en: "CYRON Support · 🌐 tap the button to read in your language",
+};
+
 export const TEXTOS = {
   boas: {
     pt: {
       title: "👋 Bem-vindo ao suporte do CYRON",
-      description: [
-        "O CYRON é um bot de tradução para Discord: cada pessoa escreve na língua dela e todo mundo lê na sua.",
-        "",
-        "**Por onde começar:**",
-        "🌐 Escolha o seu idioma. As salas aparecem na sua língua.",
-        "📜 Leia as regras.",
-        "📖 Veja como usar o bot.",
-        "💬 Tem uma dúvida, quer assinar ou o pagamento deu errado? Escreva no chat do seu idioma.",
-        "",
-        "No chat, cada pessoa escreve na língua dela e a equipe lê traduzido. Aqui a gente se entende.",
-      ].join("\n"),
+      description: "O **CYRON** traduz o seu servidor do Discord: cada pessoa escreve na língua dela, e todo mundo lê na sua.",
+      fields: [
+        { name: "1️⃣ Escolha o seu idioma", value: "As salas aparecem na sua língua, só para você." },
+        { name: "2️⃣ Leia as regras e o modo de usar", value: "📜 regras · 📖 como usar · 💳 planos" },
+        { name: "3️⃣ Precisa de ajuda?", value: "Escreva no **💬 chat** do seu idioma, na sua língua. A equipe lê traduzido e responde." },
+        { name: "💡 Ideias e 🐞 defeitos", value: "Abra um post no fórum de sugestões ou no de bugs." },
+      ],
+      footer: { text: RODAPE.pt },
     },
     en: {
       title: "👋 Welcome to CYRON Support",
-      description: [
-        "CYRON is a translation bot for Discord: everyone writes in their own language and everyone reads in theirs.",
-        "",
-        "**Where to start:**",
-        "🌐 Pick your language. The rooms show up in your language.",
-        "📜 Read the rules.",
-        "📖 See how to use the bot.",
-        "💬 Got a question, want to subscribe, or had a payment problem? Write in your language's chat.",
-        "",
-        "In the chat, everyone writes in their own language and the team reads it translated. We'll understand each other here.",
-      ].join("\n"),
+      description: "**CYRON** translates your Discord server: everyone writes in their own language, and everyone reads in theirs.",
+      fields: [
+        { name: "1️⃣ Pick your language", value: "The rooms show up in your language, just for you." },
+        { name: "2️⃣ Read the rules and how to use it", value: "📜 rules · 📖 how to use · 💳 plans" },
+        { name: "3️⃣ Need help?", value: "Write in your language's **💬 chat**, in your own language. The team reads it translated and replies." },
+        { name: "💡 Ideas and 🐞 defects", value: "Open a post in the suggestions or bugs forum." },
+      ],
+      footer: { text: RODAPE.en },
     },
   },
   regras: {
     pt: {
       title: "📜 Regras",
-      description: [
-        "**1.** Respeito com todo mundo. Sem ofensa, preconceito ou provocação.",
-        "**2.** Sem spam e sem propaganda de outros servidores ou bots.",
-        "**3.** Escreva na língua que quiser. O CYRON traduz.",
-        "**4.** Nunca poste token, senha ou chave de API. A equipe **nunca** pede isso.",
-        "**5.** A equipe **nunca** chama você no privado para cobrar. Pagamento é só pelo botão do bot. Se alguém pedir dinheiro no privado, é golpe: avise a gente.",
-        "**6.** Dúvida e pagamento no chat do seu idioma, defeito na sala de bugs, ideia na sala de sugestões.",
-        "",
-        "Quem não cumprir as regras pode ser removido do servidor.",
-      ].join("\n"),
+      description: "Poucas regras, para todo mundo se entender bem.",
+      fields: [
+        { name: "🤝 Respeito", value: "Sem ofensa, preconceito ou provocação." },
+        { name: "🚫 Sem spam", value: "Sem propaganda de outros servidores ou bots." },
+        { name: "🌐 Qualquer língua", value: "Escreva na sua. O CYRON traduz." },
+        { name: "🔑 Nada de senha", value: "Nunca poste token, senha ou chave de API. A equipe **nunca** pede isso." },
+        { name: "⚠️ Cuidado com golpe", value: "A equipe **nunca** cobra no privado. Pagamento é só pelo botão do bot. Se alguém pedir dinheiro no privado, avise a gente." },
+        { name: "📍 Cada coisa no seu lugar", value: "Dúvida e pagamento no 💬 chat · ideia no 💡 fórum de sugestões · defeito no 🐞 fórum de bugs." },
+      ],
+      footer: { text: "Quem não cumprir as regras pode ser removido. · 🌐 toque no botão para ler na sua língua" },
     },
     en: {
       title: "📜 Rules",
-      description: [
-        "**1.** Be respectful to everyone. No insults, hate or provocation.",
-        "**2.** No spam and no advertising other servers or bots.",
-        "**3.** Write in any language you like. CYRON translates.",
-        "**4.** Never post a token, password or API key. Staff will **never** ask for one.",
-        "**5.** Staff will **never** DM you asking for payment. Payment happens only through the bot's button. If someone asks you for money in DMs, it's a scam: let us know.",
-        "**6.** Questions and payments go in your language's chat, defects in bugs, ideas in suggestions.",
-        "",
-        "Anyone who breaks the rules may be removed from the server.",
-      ].join("\n"),
+      description: "A few rules so everyone gets along.",
+      fields: [
+        { name: "🤝 Respect", value: "No insults, hate or provocation." },
+        { name: "🚫 No spam", value: "No advertising other servers or bots." },
+        { name: "🌐 Any language", value: "Write in yours. CYRON translates." },
+        { name: "🔑 No passwords", value: "Never post a token, password or API key. Staff will **never** ask for one." },
+        { name: "⚠️ Watch out for scams", value: "Staff **never** charges in DMs. Payment happens only through the bot's button. If someone asks you for money in DMs, let us know." },
+        { name: "📍 Everything in its place", value: "Questions and payments in 💬 chat · ideas in the 💡 suggestions forum · defects in the 🐞 bugs forum." },
+      ],
+      footer: { text: "Anyone who breaks the rules may be removed. · 🌐 tap the button to read in your language" },
     },
   },
   uso: {
     pt: {
       title: "📖 Como usar o CYRON",
-      description: [
-        "**1. Instale.** Use o link de instalação e escolha o seu servidor. Eu crio um canal onde cada pessoa escolhe o idioma dela, e um painel para a administração.",
-        "",
-        "**2. Abra o painel com /cyron.** Lá você marca os canais que quer traduzir e vê o seu plano.",
-        "",
-        "**3. Cada pessoa escolhe o idioma** no canal 🌐, uma vez só.",
-        "",
-        "**Traduzir uma mensagem solta:** reaja com a bandeira do idioma, ou use o botão direito na mensagem → Apps → Translate.",
-        "",
-        "**No Pro e na Aliança:** cada idioma ganha salas próprias, e quem escreve numa sala aparece traduzido nas outras, com nome e foto. Também traduzo texto em imagem 🖼️ e áudio 🎧.",
-        "",
-        "**Teste grátis:** no /cyron, o botão 🎁 liga 7 dias de Pro. Para liberar, é preciso estar neste servidor.",
-      ].join("\n"),
+      description: "Do zero ao servidor traduzido em três passos.",
+      fields: [
+        { name: "1️⃣ Instale", value: "Use o link de instalação e escolha o seu servidor. O bot cria o canal 🌐 de idiomas e um painel para a administração." },
+        { name: "2️⃣ Configure com /cyron", value: "No painel, marque os canais que quer traduzir e veja o seu plano." },
+        { name: "3️⃣ Cada pessoa escolhe o idioma", value: "No canal 🌐, uma vez só. Pronto." },
+        { name: "💬 Traduzir uma mensagem solta", value: "Reaja com a bandeira do idioma, ou use o botão direito → Apps → Translate." },
+        { name: "⭐ No Pro e na Aliança", value: "Cada idioma ganha salas próprias e um chat onde todos conversam traduzidos, com nome e foto. Também traduz 🖼️ imagem e 🎧 áudio." },
+        { name: "🎁 Teste grátis", value: "No /cyron, o botão 🎁 liga 7 dias de Pro. É preciso estar neste servidor." },
+      ],
+      footer: { text: RODAPE.pt },
     },
     en: {
       title: "📖 How to use CYRON",
-      description: [
-        "**1. Install.** Use the install link and pick your server. I create a channel where each person picks their language, plus a panel for the admins.",
-        "",
-        "**2. Open the panel with /cyron.** There you mark the channels you want translated and see your plan.",
-        "",
-        "**3. Everyone picks their language** in the 🌐 channel, just once.",
-        "",
-        "**Translate a single message:** react with the language's flag, or right-click the message → Apps → Translate.",
-        "",
-        "**On Pro and Alliance:** each language gets its own rooms, and whoever writes in one room shows up translated in the others, with name and avatar. I also translate text in images 🖼️ and audio 🎧.",
-        "",
-        "**Free trial:** in /cyron, the 🎁 button turns on 7 days of Pro. To unlock it, you need to be in this server.",
-      ].join("\n"),
+      description: "From zero to a translated server in three steps.",
+      fields: [
+        { name: "1️⃣ Install", value: "Use the install link and pick your server. The bot creates the 🌐 language channel and a panel for the admins." },
+        { name: "2️⃣ Set it up with /cyron", value: "In the panel, mark the channels you want translated and see your plan." },
+        { name: "3️⃣ Everyone picks their language", value: "In the 🌐 channel, just once. Done." },
+        { name: "💬 Translate a single message", value: "React with the language's flag, or right-click → Apps → Translate." },
+        { name: "⭐ On Pro and Alliance", value: "Each language gets its own rooms and a chat where everyone talks translated, with name and avatar. It also translates 🖼️ images and 🎧 audio." },
+        { name: "🎁 Free trial", value: "In /cyron, the 🎁 button turns on 7 days of Pro. You need to be in this server." },
+      ],
+      footer: { text: RODAPE.en },
     },
-  },
-  novidades: {
-    pt: { title: "📣 Novidades", description: "Aqui saem as novidades do CYRON: recursos novos, correções e avisos importantes. Siga este canal para receber no seu servidor." },
-    en: { title: "📣 News", description: "CYRON news lands here: new features, fixes and important notices. Follow this channel to get them in your own server." },
   },
   pagamento: {
     pt: {
-      title: "💳 Planos e pagamentos",
-      description: [
-        "⭐ **Pro** — R$ 29,90 ou US$ 6 por mês: até 5 idiomas, 3 canais copiados, imagem e áudio.",
-        "🏆 **Aliança** — R$ 79 ou US$ 15 por mês: até 20 idiomas, 10 canais copiados e o triplo de tradução e de áudio.",
-        "",
-        "🇧🇷 **No Brasil:** no /cyron, clique em 💠 Pagar com Pix. O plano liga sozinho quando o Pix cai.",
-        "🌍 **Fora do Brasil:** escreva no chat do seu idioma qual plano você quer e o nome do seu servidor. A gente combina o pagamento com você.",
-        "",
-        "Pagamento é só pelo botão do bot ou combinado no chat. A equipe nunca cobra no privado.",
-      ].join("\n"),
+      title: "💳 Planos",
+      description: "Comece de graça. Assine quando quiser mais.",
+      fields: [
+        { name: "🆓 Grátis", value: "Tradução por bandeira e botão de tradução, sem limite." },
+        { name: "⭐ Pro · R$ 29,90 ou US$ 6 por mês", value: "Até 5 idiomas, 3 canais copiados, 🖼️ imagem e 🎧 áudio." },
+        { name: "🏆 Aliança · R$ 79 ou US$ 15 por mês", value: "Até 20 idiomas, 10 canais copiados e o triplo de tradução e de áudio." },
+        { name: "🇧🇷 Pagar no Brasil", value: "No /cyron, toque em 💠 Pagar com Pix. O plano liga sozinho quando o Pix cai." },
+        { name: "🌍 Pagar de fora do Brasil", value: "Escreva no 💬 chat do seu idioma qual plano quer e o nome do servidor. A gente combina com você." },
+      ],
+      footer: { text: "A equipe nunca cobra no privado. · 🌐 toque no botão para ler na sua língua" },
     },
     en: {
-      title: "💳 Plans and payments",
-      description: [
-        "⭐ **Pro** — US$ 6 (R$ 29.90) per month: up to 5 languages, 3 mirrored channels, images and audio.",
-        "🏆 **Alliance** — US$ 15 (R$ 79) per month: up to 20 languages, 10 mirrored channels and triple the translation and audio.",
-        "",
-        "🇧🇷 **In Brazil:** in /cyron, click 💠 Pagar com Pix. The plan turns on by itself when the Pix lands.",
-        "🌍 **Outside Brazil:** write in your language's chat which plan you want and your server's name. We'll arrange payment with you.",
-        "",
-        "Payment happens only through the bot's button or arranged in the chat. Staff never charges in DMs.",
-      ].join("\n"),
+      title: "💳 Plans",
+      description: "Start free. Subscribe when you want more.",
+      fields: [
+        { name: "🆓 Free", value: "Flag translation and the translate button, unlimited." },
+        { name: "⭐ Pro · US$ 6 (R$ 29.90) per month", value: "Up to 5 languages, 3 mirrored channels, 🖼️ images and 🎧 audio." },
+        { name: "🏆 Alliance · US$ 15 (R$ 79) per month", value: "Up to 20 languages, 10 mirrored channels and triple the translation and audio." },
+        { name: "🇧🇷 Paying in Brazil", value: "In /cyron, tap 💠 Pagar com Pix. The plan turns on by itself when the Pix lands." },
+        { name: "🌍 Paying from outside Brazil", value: "Write in your language's 💬 chat which plan you want and your server's name. We'll arrange it with you." },
+      ],
+      footer: { text: "Staff never charges in DMs. · 🌐 tap the button to read in your language" },
     },
   },
+  novidades: {
+    pt: { title: "📣 Novidades", description: "Aqui saem as novidades do CYRON: recursos novos, correções e avisos importantes.\n\nToque em **Seguir** para receber no seu servidor.", footer: { text: RODAPE.pt } },
+    en: { title: "📣 News", description: "CYRON news lands here: new features, fixes and important notices.\n\nTap **Follow** to get them in your own server.", footer: { text: RODAPE.en } },
+  },
   sugestoes: {
-    pt: { title: "💡 Sugestões", description: "Tem uma ideia para o CYRON? Escreva aqui. Reaja com 👍 nas ideias que você também quer: as mais votadas vêm primeiro." },
-    en: { title: "💡 Suggestions", description: "Got an idea for CYRON? Write it here. React 👍 on the ideas you want too: the most voted come first." },
+    pt: { title: "💡 Sugestões", description: "Tem uma ideia para o CYRON? Abra um post, um por ideia.\n\nReaja com 👍 nas ideias que você também quer: as mais votadas vêm primeiro." },
+    en: { title: "💡 Suggestions", description: "Got an idea for CYRON? Open a post, one per idea.\n\nReact 👍 on the ideas you want too: the most voted come first." },
   },
   bugs: {
-    pt: { title: "🐞 Bugs", description: "Achou um defeito? Conte aqui:\n**1.** O que você fez.\n**2.** O que esperava que acontecesse.\n**3.** O que aconteceu de verdade.\nUm print ajuda muito." },
-    en: { title: "🐞 Bugs", description: "Found a defect? Tell us here:\n**1.** What you did.\n**2.** What you expected to happen.\n**3.** What actually happened.\nA screenshot helps a lot." },
+    pt: { title: "🐞 Bugs", description: "Achou um defeito? Abra um post contando:\n**1.** O que você fez.\n**2.** O que esperava.\n**3.** O que aconteceu de verdade.\nUm print ajuda muito." },
+    en: { title: "🐞 Bugs", description: "Found a defect? Open a post telling us:\n**1.** What you did.\n**2.** What you expected.\n**3.** What actually happened.\nA screenshot helps a lot." },
   },
 };
 
@@ -239,11 +235,25 @@ export const ESTRUTURA = [
     { nome: "💳・plans", chave: "plans", texto: "pagamento", leitura: true },
     { nome: "📣・news", chave: "news", texto: "novidades", leitura: true },
   ] },
+  /* Bugs e sugestoes sao FORUM: cada relato e' um post proprio, com
+     etiqueta de andamento. Numa sala comum, dez ideias viravam uma conversa
+     so', e ninguem sabia o que ja' tinha sido feito. */
   { categoria: "💬 HELP", canais: [
-    { nome: "💡・suggestions", texto: "sugestoes", topico: "Ideas for CYRON · Ideias para o CYRON" },
-    { nome: "🐞・bugs", texto: "bugs", topico: "Report a defect · Conte um defeito" },
+    { nome: "💡・suggestions", texto: "sugestoes", forum: true, reacao: "👍", etiquetas: [
+      ["💭", "New · Nova"], ["📌", "Planned · Planejada"], ["✅", "Done · Feita"], ["❌", "Declined · Recusada"],
+    ] },
+    { nome: "🐞・bugs", texto: "bugs", forum: true, etiquetas: [
+      ["🟡", "Open · Aberto"], ["🔍", "Investigating · Investigando"], ["✅", "Fixed · Resolvido"],
+    ] },
   ] },
 ];
+
+/* As regras do forum, no lugar onde o Discord as mostra: ao abrir um post.
+   Ingles e portugues juntos, porque o Discord nao tem botao 🌐 ali. */
+export function regrasDoForum(chave) {
+  const t = TEXTOS[chave];
+  return `${t.en.description}\n\n—\n\n${t.pt.description}`.replace(/\*\*/g, "").slice(0, 4096);
+}
 
 /* Salas que existiram numa versao anterior e sairam. So' somem se ninguem
    conversou nelas: apagar a pergunta de um cliente seria pior que deixar
@@ -314,7 +324,15 @@ async function postarOuEditar(canal, chave) {
   const recentes = await canal.messages.fetch({ limit: 30 }).catch(() => null);
   const meu = recentes?.find((m) => m.author?.id === d.client.user.id &&
     m.components?.some((l) => l.components?.some((c) => c.customId === `${PREFIXO_LER}${chave}`)));
-  if (meu) { await meu.edit(corpo); return "editado"; }
+  if (meu) {
+    const antes = meu.embeds?.[0]?.toJSON?.() ?? meu.embeds?.[0] ?? meu.corpo?.embeds?.[0] ?? {};
+    const agora = corpo.embeds[0];
+    const igual = JSON.stringify([antes.title, antes.description, (antes.fields || []).map((f) => [f.name, f.value])]) ===
+      JSON.stringify([agora.title, agora.description, (agora.fields || []).map((f) => [f.name, f.value])]);
+    if (igual) return "igual";
+    await meu.edit(corpo);
+    return "editado";
+  }
   await canal.send(corpo);
   return "postado";
 }
@@ -323,6 +341,7 @@ export async function montarSuporte(guild) {
   const { ChannelType, PermissionFlagsBits: P } = d;
   const feito = [];
   const leitura = [];
+  const mudaram = [];
   await guild.channels.fetch();
   const eu = d.client.user.id;
 
@@ -333,6 +352,10 @@ export async function montarSuporte(guild) {
       feito.push(`📁 ${bloco.categoria}`);
     }
     for (const c of bloco.canais) {
+      if (c.forum) {
+        for (const f of await garantirForum(guild, categoria, c)) feito.push(f);
+        continue;
+      }
       let canal = guild.channels.cache.find((x) => x.type === ChannelType.GuildText && x.name === c.nome);
       if (!canal) {
         canal = await guild.channels.create({
@@ -348,6 +371,7 @@ export async function montarSuporte(guild) {
       }
       const como = await postarOuEditar(canal, c.texto);
       if (como === "postado") feito.push(`📝 texto em #${c.nome}`);
+      if (como === "editado") { feito.push(`✏️ texto novo em #${c.nome}`); mudaram.push(canal.id); }
       if (c.sistema && guild.systemChannelId !== canal.id) {
         await guild.setSystemChannel(canal).then(() => feito.push(`👋 entradas anunciadas em #${c.nome}`)).catch(() => {});
       }
@@ -364,7 +388,66 @@ export async function montarSuporte(guild) {
     if (r?.apagadas) feito.push(`🗑️ ${r.apagadas} ${r.apagadas === 1 ? "cópia sem origem apagada" : "cópias sem origem apagadas"}`);
   }
 
+  /* Texto que mudou: as copias traduzidas guardam o texto velho (a copia
+     nao acompanha edicao). Elas saem, e a varredura seguinte as refaz com o
+     texto novo -- a sala do suporte e' so' de leitura, nao ha' conversa ali
+     para perder. */
+  if (d.refazerCopias && mudaram.length) {
+    const n = await d.refazerCopias(guild, mudaram).catch(() => 0);
+    if (n) feito.push(`🔄 ${n} ${n === 1 ? "cópia traduzida refeita" : "cópias traduzidas refeitas"} na próxima varredura`);
+  }
+
   for (const f of await limparSobras(guild)) feito.push(f);
+  return feito;
+}
+
+/* O forum de bugs ou de sugestoes.
+
+   Forum so' existe em servidor com Comunidade ligada -- sem ela o Discord
+   recusa. Ai' a sala fica como sala comum, com o texto de sempre, e o dono
+   fica sabendo o que ligar. Sala comum antiga com o mesmo nome vira forum
+   so' se ninguem conversou nela: o Discord nao converte, entao converter e'
+   apagar e criar de novo. */
+async function garantirForum(guild, categoria, c) {
+  const { ChannelType } = d;
+  const feito = [];
+  const etiquetas = c.etiquetas.map(([emoji, name]) => ({ name, emoji: { id: null, name: emoji } }));
+  let forum = guild.channels.cache.find((x) => x.type === ChannelType.GuildForum && x.name === c.nome);
+  if (forum) {
+    const faltam = etiquetas.filter((e) => !(forum.availableTags || []).some((t) => t.name === e.name));
+    if (faltam.length) {
+      await forum.setAvailableTags([...(forum.availableTags || []), ...faltam].slice(0, 20)).catch(() => {});
+      feito.push(`🏷️ etiquetas em ${c.nome}`);
+    }
+    return feito;
+  }
+
+  const comum = guild.channels.cache.find((x) => x.type === ChannelType.GuildText && x.name === c.nome);
+  if (comum && !await semConversa(comum)) {
+    feito.push(`⚠️ #${c.nome} tem conversa: continua sala comum (apague você para virar fórum)`);
+    return feito;
+  }
+
+  try {
+    forum = await guild.channels.create({
+      name: c.nome, type: ChannelType.GuildForum, parent: categoria.id,
+      topic: regrasDoForum(c.texto), availableTags: etiquetas,
+      ...(c.reacao ? { defaultReactionEmoji: { id: null, name: c.reacao } } : {}),
+    });
+  } catch (e) {
+    /* Sem Comunidade: fica a sala comum. */
+    if (!comum) {
+      const sala = await guild.channels.create({ name: c.nome, type: ChannelType.GuildText, parent: categoria.id });
+      await postarOuEditar(sala, c.texto);
+      feito.push(`#${c.nome}`);
+    } else {
+      await postarOuEditar(comum, c.texto);
+    }
+    feito.push(`⚠️ ${c.nome} ficou sala comum: para virar fórum, ligue Configurações do servidor → Ativar Comunidade e aperte de novo`);
+    return feito;
+  }
+  if (comum) await comum.delete("virou fórum").catch(() => {});
+  feito.push(`🗂️ fórum ${c.nome}`);
   return feito;
 }
 

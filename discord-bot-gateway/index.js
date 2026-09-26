@@ -8944,6 +8944,27 @@ async function fontesDoSuporte(guild, ids) {
   return await apagarOrfas(guild, servidor);
 }
 
+/* Apaga as copias traduzidas destas salas de origem; a varredura seguinte
+   as refaz, ja' com o texto novo. So' o servidor de suporte chama: la' as
+   copias sao de leitura e nao guardam conversa. */
+async function refazerCopias(guild, idsDeOrigem) {
+  const servidor = await servidorDoGuild(guild.id);
+  if (!servidor) return 0;
+  const fontes = await fontesReplica(servidor.id);
+  const tipos = new Set(idsDeOrigem.map((id) => fontes.get(id)).filter(Boolean));
+  const replicas = (await sb(
+    `discord_canal_idioma?servidor_id=eq.${servidor.id}&select=id,tipo,canal_id`)) || [];
+  let refeitas = 0;
+  for (const r of replicas.filter((x) => tipos.has(x.tipo))) {
+    const canal = guild.channels.cache.get(r.canal_id);
+    if (canal && !await canal.delete("texto do suporte mudou; a cópia é refeita").then(() => true).catch(() => false)) continue;
+    await sbDel(`discord_canal_idioma?id=eq.${encodeURIComponent(r.id)}`);
+    refeitas++;
+  }
+  cacheReplicas.delete(servidor.id);
+  return refeitas;
+}
+
 /* O menu manda o conjunto inteiro, entao a gravacao e' a diferenca. */
 async function definirFontes(guild, servidor, ids) {
   const antigas = await sb(
@@ -12040,7 +12061,7 @@ function botaoDeSuporte() {
 /* Aqui, e nao junto do ligarAlianca: SUPORTE so' existe a partir daqui, e
    entregar antes dava erro de variavel ainda nao criada na partida. */
 ligarSuporte({ client, SUPORTE, COR, traduzirEmbed, idiomaEscolhido, idiomaDoAplicativo, ChannelType, PermissionFlagsBits,
-  fontesDoSuporte });
+  fontesDoSuporte, refazerCopias });
 
 /* O estado da conversa mora no custom_id, e nao numa tabela.
 

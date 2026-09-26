@@ -8658,20 +8658,28 @@ function conferirCartao(onde, embed, componentes = []) {
   const canais = new Map();
   let criados = 0, enviados = 0, editados = 0, sistema = null;
   const apagados = [];
+  let comunidade = true;
+  let proximoId = 0;
   const fazCanal = (o) => {
-    const c = { id: `c${canais.size + 1}`, name: o.name, type: o.type, parent: o.parent, topic: o.topic, over: o.permissionOverwrites,
+    const c = { id: `c${++proximoId}`, name: o.name, type: o.type, parent: o.parent, topic: o.topic, over: o.permissionOverwrites,
       msgs: [], parentId: o.parent, members: new Map(),
+      availableTags: o.availableTags, reacao: o.defaultReactionEmoji,
+      setAvailableTags: async (t) => { c.availableTags = t; },
       delete: async () => { canais.delete(c.id); apagados.push(c.name); },
       messages: { fetch: async () => ({ find: (f) => c.msgs.find(f), values: () => c.msgs.values() }) },
-      send: async (corpo) => { enviados++; c.msgs.push({ author: { id: "bot" }, corpo,
+      send: async (corpo) => { enviados++; const m = { author: { id: "bot", bot: true }, corpo,
         components: corpo.components.map((l) => ({ components: l.components.map((b) => ({ customId: b.custom_id })) })),
-        edit: async () => { editados++; } }); } };
+        edit: async (novo) => { editados++; m.corpo = novo; } }; c.msgs.push(m); } };
     canais.set(c.id, c); criados++; return c;
   };
   const guild = {
     id: "g-sup", name: "CYRON SUPPORT", systemChannelId: null,
     roles: { everyone: { id: "everyone" } },
-    channels: { fetch: async () => {}, get cache() { return [...canais.values()]; }, create: async (o) => fazCanal(o) },
+    channels: { fetch: async () => {}, get cache() { return [...canais.values()]; },
+      create: async (o) => {
+        if (o.type === ChannelType.GuildForum && !comunidade) throw new Error("forum pede Comunidade");
+        return fazCanal(o);
+      } },
     setSystemChannel: async (c) => { sistema = c.id; guild.systemChannelId = c.id; },
     members: { fetch: async ({ user }) => {
       if (erroEstranho) throw Object.assign(new Error("gateway caiu"), { code: 0 });
@@ -8681,6 +8689,7 @@ function conferirCartao(onde, embed, componentes = []) {
   };
   const ligacao = { link: "https://discord.gg/suporte" };
   const fontesDoSuporte = [];
+  const refeitas = [];
   S.ligarSuporte({
     client: { user: { id: "bot" }, fetchInvite: async () => (temGuild ? { guild: { id: "g-sup" } } : null),
       guilds: { cache: new Map([["g-sup", guild]]) } },
@@ -8689,6 +8698,7 @@ function conferirCartao(onde, embed, componentes = []) {
     idiomaEscolhido: async () => "", idiomaDoAplicativo: (l) => String(l || "").split("-")[0],
     ChannelType, PermissionFlagsBits,
     fontesDoSuporte: async (g, ids) => { fontesDoSuporte.push(...ids); return { apagadas: 1, total: 1 }; },
+    refazerCopias: async (g, ids) => { refeitas.push(...ids); return ids.length; },
   });
   const clique = (id, locale = "pt-BR") => {
     const i = { user: { id }, locale, customId: "", deferred: false, replied: false,
@@ -8737,7 +8747,21 @@ function conferirCartao(onde, embed, componentes = []) {
   canais.delete([...canais.values()].find((c) => c.name === "❓・help").id);
   const total = S.ESTRUTURA.reduce((n, b) => n + 1 + b.canais.length, 0);
   ok("a primeira montagem cria todas as categorias e salas", criados, total);
-  ok("e posta um texto em cada sala", enviados, S.ESTRUTURA.reduce((n, b) => n + b.canais.length, 0));
+  const naoForum = S.ESTRUTURA.flatMap((b) => b.canais).filter((c) => !c.forum);
+  ok("e posta um texto em cada sala que não é fórum", enviados, naoForum.length);
+
+  /* ---- bugs e sugestões são fórum ---- */
+  const foruns = [...canais.values()].filter((c) => c.type === ChannelType.GuildForum);
+  ok("bugs e sugestões nascem como fórum", foruns.map((c) => c.name).sort(), ["💡・suggestions", "🐞・bugs"].sort());
+  const sug = foruns.find((c) => c.name.includes("suggestions"));
+  verdade("sugestões: etiquetas de andamento", sug.availableTags.some((t) => t.name.startsWith("Planned")) &&
+    sug.availableTags.every((t) => t.emoji?.name));
+  ok("sugestões: 👍 já vem em cada post", sug.reacao?.name, "👍");
+  verdade("bugs: etiquetas Aberto e Resolvido",
+    foruns.find((c) => c.name.includes("bugs")).availableTags.some((t) => t.name.startsWith("Fixed")));
+  verdade("as regras do fórum vêm em inglês e português",
+    S.regrasDoForum("bugs").includes("Found a defect") && S.regrasDoForum("bugs").includes("Achou um defeito"));
+  verdade("e cabem no Discord", ["bugs", "sugestoes"].every((k) => S.regrasDoForum(k).length <= 4096));
   verdade("as entradas são anunciadas na sala de boas-vindas",
     canais.get(sistema)?.name === S.ESTRUTURA[0].canais.find((c) => c.sistema).nome);
   const regras = [...canais.values()].find((c) => c.name.endsWith("rules"));
@@ -8761,7 +8785,36 @@ function conferirCartao(onde, embed, componentes = []) {
   await S.montarSuporte(guild);
   ok("montar de novo não cria sala nenhuma", criados, c0);
   ok("nem posta texto repetido", enviados, e0);
-  ok("edita os textos que já estavam lá", editados, e0);
+  ok("texto igual: não mexe (nem edita, nem refaz cópia)", [editados, refeitas.length], [0, 0]);
+  const tituloVelho = S.TEXTOS.regras.en.title;
+  S.TEXTOS.regras.en.title = "📜 Rules (v2)";
+  const mudou = await S.montarSuporte(guild);
+  S.TEXTOS.regras.en.title = tituloVelho;
+  ok("texto mudou: só aquele é editado", editados, 1);
+  ok("e as cópias traduzidas daquela sala são refeitas", refeitas.map((id) => canais.get(id).name), ["📜・rules"]);
+  verdade("o dono fica sabendo", mudou.some((f) => f.includes("refeita")));
+  await S.montarSuporte(guild);
+  editados = 0; refeitas.length = 0;
+  for (const c of foruns) c.availableTags = [];
+  await S.montarSuporte(guild);
+  verdade("fórum sem etiquetas: elas voltam", foruns.every((c) => c.availableTags.length > 0));
+
+  /* Sem Comunidade o Discord recusa fórum: fica sala comum, e o dono sabe. */
+  for (const c of foruns) canais.delete(c.id);
+  comunidade = false;
+  const semCom = await S.montarSuporte(guild);
+  verdade("sem Comunidade: bugs vira sala comum, com o texto",
+    [...canais.values()].some((c) => c.type === ChannelType.GuildText && c.name === "🐞・bugs" && c.msgs.length));
+  verdade("e o dono é avisado do que ligar", semCom.some((f) => f.includes("Ativar Comunidade")));
+  comunidade = true;
+  canais.get([...canais.values()].find((c) => c.name === "🐞・bugs").id).msgs.push({ author: { id: "cliente" } });
+  const comConversa = await S.montarSuporte(guild);
+  verdade("Comunidade ligada, mas a sala comum tem conversa: não apaga",
+    [...canais.values()].some((c) => c.type === ChannelType.GuildText && c.name === "🐞・bugs") &&
+    comConversa.some((f) => f.includes("🐞・bugs") && f.includes("conversa")));
+  verdade("sugestões, sem conversa, vira fórum",
+    [...canais.values()].some((c) => c.type === ChannelType.GuildForum && c.name === "💡・suggestions") &&
+    ![...canais.values()].some((c) => c.type === ChannelType.GuildText && c.name === "💡・suggestions"));
 
   temGuild = false; ligacao.link = "https://discord.gg/outro";
   verdade("sem servidor de suporte achável: ninguém é barrado", await S.estaNoSuporte("ninguem"));
@@ -8791,13 +8844,16 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade(`#${c.nome}: o nome cabe no Discord`, c.nome.length <= 100);
     for (const l of ["pt", "en"]) {
       verdade(`#${c.nome} (${l}): a descrição cabe`, t[l].description.length <= 4096);
+      verdade(`#${c.nome} (${l}): até 25 campos, cada um cabe`, (t[l].fields || []).length <= 25 &&
+        (t[l].fields || []).every((f) => f.name.length <= 256 && f.value.length <= 1024));
+      ok(`#${c.nome}: português e inglês com as mesmas seções`, (t.pt.fields || []).length, (t.en.fields || []).length);
     }
   }
   const armadilhas = Object.values(S.TEXTOS).flatMap((t) => t.pt.description.split(/\n+/))
     .map((l) => l.replace(/^[_*\s\d.]+/, "").trim()).filter((l) => /^(Nada|Ninguém|Nenhum|Tudo|Todos)\b/i.test(l));
   ok("nenhuma frase do suporte começa por pronome que o tradutor confunde", armadilhas, []);
-  verdade("as regras avisam do golpe no privado", /nunca/i.test(S.TEXTOS.regras.pt.description) &&
-    /privado/.test(S.TEXTOS.regras.pt.description));
+  const regrasTexto = [S.TEXTOS.regras.pt.description, ...S.TEXTOS.regras.pt.fields.map((f) => f.value)].join(" ");
+  verdade("as regras avisam do golpe no privado", /nunca/i.test(regrasTexto) && /privado/.test(regrasTexto));
 
   /* ---- o 🌐 de cada texto ---- */
   const lerEn = clique("x", "en-US"); lerEn.customId = `${S.PREFIXO_LER}regras`;
@@ -8930,6 +8986,31 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("cartão do suporte que eu posto numa fonte vai para os idiomas, antes do filtro de bot",
     /ehCartaoDoSuporte\(msg\)\) \{[\s\S]{0,300}replicarPorIdioma\(msg, servidor\.id, tipo[\s\S]{0,80}if \(msg\.author\.bot\) return;/.test(idx));
   Object.assign(globalThis, { client: salvo.c, clienteDoWebhook: salvo.w, traduzirLongo: salvo.t, vantajosoTraduzir: salvo.v });
+}
+
+/* ---- texto do suporte mudou: as cópias daquela sala são refeitas ---- */
+{
+  const salvo = { a: globalThis.servidorDoGuild, b: globalThis.fontesReplica, c: globalThis.sb, d: globalThis.sbDel,
+    e: globalThis.cacheReplicas };
+  const apagadasDb = [], apagadosDc = [];
+  const fontes = new Map([["orig-rules", "rules"], ["orig-news", "news"]]);
+  globalThis.servidorDoGuild = async () => ({ id: "s1" });
+  globalThis.fontesReplica = async () => fontes;
+  globalThis.sb = async () => [
+    { id: "r1", tipo: "rules", canal_id: "rules-ja" }, { id: "r2", tipo: "rules", canal_id: "rules-pt" },
+    { id: "r3", tipo: "news", canal_id: "news-ja" }, { id: "r4", tipo: "rules", canal_id: "recusa" }];
+  globalThis.sbDel = async (q) => { apagadasDb.push(q); };
+  globalThis.cacheReplicas = new Map([["s1", {}]]);
+  const canal = (id, ok = true) => ({ delete: async () => { if (!ok) throw new Error("sem permissão"); apagadosDc.push(id); } });
+  const guild = { id: "g", channels: { cache: new Map([["rules-ja", canal("rules-ja")], ["rules-pt", canal("rules-pt")],
+    ["news-ja", canal("news-ja")], ["recusa", canal("recusa", false)]]) } };
+  const { refazerCopias } = carregar(["refazerCopias"]);
+  const n = await refazerCopias(guild, ["orig-rules"]);
+  ok("só as cópias da sala que mudou saem", apagadosDc.sort(), ["rules-ja", "rules-pt"]);
+  ok("e só elas saem do banco (a varredura as refaz)", n, 2);
+  verdade("canal que o Discord recusou apagar fica registrado", !apagadasDb.some((q) => q.includes("r4")));
+  verdade("o cache das cópias é esquecido", !globalThis.cacheReplicas.has("s1"));
+  Object.assign(globalThis, { servidorDoGuild: salvo.a, fontesReplica: salvo.b, sb: salvo.c, sbDel: salvo.d, cacheReplicas: salvo.e });
 }
 
 /* ---- o painel do dono pelo privado ---- */
