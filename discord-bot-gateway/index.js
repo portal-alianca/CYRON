@@ -21,7 +21,8 @@ import { CATEGORIAS, doCliente } from "./catalogo.js";
    produto. Ver o comentario no topo do alianca.js. */
 import { ligarAlianca, COMANDOS_DA_ALIANCA, comandoDaAlianca, boasVindasDaAlianca,
   seletorNasBoasVindas, rosasDaAlianca } from "./alianca.js";
-import { ligarSuporte, exigirSuporte, montarSuporte, guildDoSuporte, cliqueSuporte, PREFIXO_LER } from "./suporte.js";
+import { ligarSuporte, exigirSuporte, montarSuporte, guildDoSuporte, cliqueSuporte, PREFIXO_LER,
+  nomeNoIdioma } from "./suporte.js";
 import { fileURLToPath } from "node:url";
 
 /* A fonte da imagem traduzida vai JUNTO com o bot, e nao e' a da maquina: a
@@ -4563,6 +4564,17 @@ async function traduzirLongo(texto, alvo, motor = MOTOR_AUTO) {
 
    Se a fonte sumir, o prefixo simples serve de rede -- e' feio, mas e' melhor
    do que nao criar o canal. */
+/* No suporte a copia leva o nome na lingua de quem a le ("👋・ようこそ");
+   nos clientes, o de sempre ("anuncios-ja"). */
+function nomeDaSala(modelo, rotulo, idioma, doSuporte) {
+  return doSuporte && nomeNoIdioma(modelo, idioma) || nomeDaReplica(modelo, rotulo, idioma);
+}
+
+/* No suporte o chat vem primeiro, entao as copias descem uma casa. */
+function posicaoDaReplica(i, doSuporte) {
+  return doSuporte ? i + 1 : i;
+}
+
 function nomeDaReplica(modelo, rotulo, idioma) {
   return `${modelo || rotulo}-${idioma}`.toLowerCase().slice(0, 100);
 }
@@ -5053,7 +5065,8 @@ async function montarCategorias(guild, servidorId, porIdioma, pago, orcamento, l
 
       for (let i = 0; i < tipos.length; i++) {
         const def = tipos[i];
-        const nome = nomeDaReplica(def.nomeBase, def.tipo, sala.idioma);
+        const nome = nomeDaSala(def.nomeBase, def.tipo, sala.idioma, doSuporte);
+        const posicao = posicaoDaReplica(i, doSuporte);
         /* O canal de origem e os cargos dos OUTROS idiomas: os dois lados da
            conta que portasDaReplica faz. Origem sumida vira replica do cargo
            do idioma, que e' o comportamento de sempre. */
@@ -5066,7 +5079,7 @@ async function montarCategorias(guild, servidorId, porIdioma, pago, orcamento, l
 
         if (!jaExiste) {
           if (!podeCriarCanal(orcamento, guild, limite)) continue;
-          await garantirReplica(guild, servidorId, sala, categoria, def, i, nome,
+          await garantirReplica(guild, servidorId, sala, categoria, def, posicao, nome,
             fonte, outrosCargos, replicaFala(pago, doSuporte));
           continue;
         }
@@ -5105,8 +5118,8 @@ async function montarCategorias(guild, servidorId, porIdioma, pago, orcamento, l
           console.log(`idioma: #${canal.name} teve as portas refeitas pelo canal de origem`);
         }
 
-        if (canal.position !== i && umaVezPorProcesso(`pos:${canal.id}:${i}`)) {
-          await canal.setPosition(i).catch((e) =>
+        if (canal.position !== posicao && umaVezPorProcesso(`pos:${canal.id}:${posicao}`)) {
+          await canal.setPosition(posicao).catch((e) =>
             console.error("idioma: nao consegui ordenar", canal.name, e?.message || e));
         }
       }
@@ -5127,7 +5140,8 @@ async function montarCategorias(guild, servidorId, porIdioma, pago, orcamento, l
          a ele. */
       const chat = sala.canal_id ? await guild.channels.fetch(sala.canal_id).catch(() => null) : null;
       if (chat) {
-        const nomeChat = nomeDaReplica(modelos.get("chat"), PREFIXO_SALA.replace(/-$/, ""), sala.idioma);
+        const nomeChat = doSuporte && nomeNoIdioma("chat", sala.idioma) ||
+          nomeDaReplica(modelos.get("chat"), PREFIXO_SALA.replace(/-$/, ""), sala.idioma);
         if (chat.name !== nomeChat && umaVezPorProcesso(`nome:${chat.id}:${nomeChat}`)) {
           console.log(`idioma: chat de ${sala.idioma} vira #${nomeChat}`);
           await chat.setName(nomeChat, "chat segue o nome do canal original");
@@ -5136,9 +5150,12 @@ async function montarCategorias(guild, servidorId, porIdioma, pago, orcamento, l
           await chat.setParent(categoria.id, { lockPermissions: false, reason: "chat vai pra categoria do idioma" });
           console.log(`idioma: chat de ${sala.idioma} movido pra ${categoria.name}`);
         }
-        /* O chat fecha a categoria: ler o aviso vem antes de responder a ele. */
-        if (chat.position !== tipos.length && umaVezPorProcesso(`pos:${chat.id}:${tipos.length}`)) {
-          await chat.setPosition(tipos.length).catch(() => { /* posicao e' capricho */ });
+        /* O chat fecha a categoria: ler o aviso vem antes de responder a ele.
+           No suporte, abre: la' o chat E' o atendimento, e a pessoa chega
+           para perguntar, nao para ler. */
+        const posChat = doSuporte ? 0 : tipos.length;
+        if (chat.position !== posChat && umaVezPorProcesso(`pos:${chat.id}:${posChat}`)) {
+          await chat.setPosition(posChat).catch(() => { /* posicao e' capricho */ });
         }
       }
 
@@ -6290,6 +6307,28 @@ function assinaturaDoCartao(embed, componentes) {
    conta de qual ficou sem origem, o estrago e' meu e o prejuizo e' de quem
    nem sabia que eu ia mexer. Entao eles aparecem no painel, com um botao ao
    lado -- o clique do administrador e' a confirmacao. */
+/* Apaga as copias que perderam a origem. Serve ao botao do painel e a
+   montagem do servidor de suporte. */
+async function apagarOrfas(guild, servidor) {
+  const orfas = await replicasOrfas(guild, servidor);
+  let apagadas = 0;
+  for (const o of orfas) {
+    const canal = guild.channels.cache.get(o.canal_id);
+    if (canal) {
+      const foi = await canal.delete("cópia sem canal de origem").then(() => true).catch(() => false);
+      /* Se o Discord recusou, a linha FICA. Apagar o registro de um canal
+         que continua existindo faria o canal virar invisivel pra mim: ele
+         some do painel, ninguem mais e' avisado dele, e ele fica no
+         servidor pra sempre sem ninguem saber de onde veio. */
+      if (!foi) continue;
+    }
+    await sbDel(`discord_canal_idioma?id=eq.${encodeURIComponent(o.id)}`);
+    apagadas++;
+  }
+  cacheReplicas.delete(servidor.id);
+  return { apagadas, total: orfas.length };
+}
+
 async function replicasOrfas(guild, servidor) {
   const fontes = await sb(
     `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&select=tipo`) || [];
@@ -8895,24 +8934,14 @@ async function refrescarPainel(inter, servidor) {
   }
 }
 
-/* Soma canais as fontes sem tirar nenhum -- para quem monta salas pelo
-   bot (o servidor de suporte), e nao pelo menu. */
-async function somarFontes(guild, ids) {
+/* As fontes do servidor de suporte sao EXATAMENTE as salas de leitura que
+   o bot monta: o que sobrou de uma montagem antiga sai, e as copias que
+   ficaram sem origem vao junto. */
+async function fontesDoSuporte(guild, ids) {
   const servidor = await servidorDoGuild(guild.id);
-  if (!servidor) return 0;
-  const ja = new Set(((await sb(
-    `discord_fonte_replica?servidor_id=eq.${servidor.id}&select=canal_id`)) || []).map((f) => f.canal_id));
-  let somadas = 0;
-  for (const id of ids) {
-    if (ja.has(id)) continue;
-    const canal = guild.channels.cache.get(id);
-    await sbPost("discord_fonte_replica", {
-      servidor_id: servidor.id, canal_id: id, tipo: rotuloDoCanal(canal?.name || "canal"),
-    });
-    somadas++;
-  }
-  cacheFontes.delete(servidor.id);
-  return somadas;
+  if (!servidor) return null;
+  await definirFontes(guild, servidor, ids);
+  return await apagarOrfas(guild, servidor);
 }
 
 /* O menu manda o conjunto inteiro, entao a gravacao e' a diferenca. */
@@ -9192,26 +9221,12 @@ async function cliquePainel(inter) {
   }
 
   if (acao === "limpar") {
-    const orfas = await replicasOrfas(inter.guild, servidor);
-    if (!orfas.length) {
+    const { apagadas, total } = await apagarOrfas(inter.guild, servidor);
+    const orfas = { length: total };
+    if (!total) {
       await inter.followUp({ flags: 64, content: "Não sobrou nenhuma cópia sem origem." });
       return refrescarPainel(inter, servidor);
     }
-    let apagadas = 0;
-    for (const o of orfas) {
-      const canal = inter.guild.channels.cache.get(o.canal_id);
-      if (canal) {
-        const foi = await canal.delete("cópia sem canal de origem, apagada pelo painel").then(() => true).catch(() => false);
-        /* Se o Discord recusou, a linha FICA. Apagar o registro de um canal
-           que continua existindo faria o canal virar invisivel pra mim: ele
-           some do painel, ninguem mais e' avisado dele, e ele fica no
-           servidor pra sempre sem ninguem saber de onde veio. */
-        if (!foi) continue;
-      }
-      await sbDel(`discord_canal_idioma?id=eq.${encodeURIComponent(o.id)}`);
-      apagadas++;
-    }
-    cacheReplicas.delete(servidor.id);
     await inter.followUp({
       flags: 64,
       content: apagadas === orfas.length
@@ -12025,7 +12040,7 @@ function botaoDeSuporte() {
 /* Aqui, e nao junto do ligarAlianca: SUPORTE so' existe a partir daqui, e
    entregar antes dava erro de variavel ainda nao criada na partida. */
 ligarSuporte({ client, SUPORTE, COR, traduzirEmbed, idiomaEscolhido, idiomaDoAplicativo, ChannelType, PermissionFlagsBits,
-  somarFontes });
+  fontesDoSuporte });
 
 /* O estado da conversa mora no custom_id, e nao numa tabela.
 

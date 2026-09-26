@@ -684,7 +684,18 @@ function conferirCartao(onde, embed, componentes = []) {
     const chamadas = [...idx.matchAll(/portasDaReplica\(guild, sala\.role_id, fonte, outrosCargos, ([^)]+\)?)\)/g)].map((m) => m[1]);
     ok("as portas refeitas pela varredura seguem a regra", chamadas, ["podeConversar", "replicaFala(pago, doSuporte)"]);
     verdade("e a réplica nasce seguindo a regra",
-      /await garantirReplica\(guild, servidorId, sala, categoria, def, i, nome,\s*fonte, outrosCargos, replicaFala\(pago, doSuporte\)\)/.test(idx));
+      /await garantirReplica\(guild, servidorId, sala, categoria, def, posicao, nome,\s*fonte, outrosCargos, replicaFala\(pago, doSuporte\)\)/.test(idx));
+    /* Nome traduzido e chat em primeiro: só no suporte. */
+    globalThis.nomeNoIdioma = (modelo, idioma) => (modelo === "📜・rules" && idioma === "ja" ? "📜・ルール" : null);
+    const { nomeDaSala, posicaoDaReplica } = carregar(["nomeDaReplica", "nomeDaSala", "posicaoDaReplica"]);
+    ok("no suporte, a cópia leva o nome na língua", nomeDaSala("📜・rules", "rules", "ja", true), "📜・ルール");
+    ok("no cliente, o nome de sempre", nomeDaSala("📜・rules", "rules", "ja", false), "📜・rules-ja");
+    ok("no cliente, a primeira cópia fica no topo", posicaoDaReplica(0, false), 0);
+    ok("no suporte, desce uma casa (o chat vem primeiro)", posicaoDaReplica(0, true), 1);
+    verdade("no suporte o chat abre a categoria; no cliente, fecha",
+      /const posChat = doSuporte \? 0 : tipos\.length;/.test(idx));
+    verdade("o chat do suporte leva o nome na língua",
+      /const nomeChat = doSuporte && nomeNoIdioma\("chat", sala\.idioma\) \|\|/.test(idx));
     const garantir = idx.slice(idx.indexOf("async function garantirReplica"), idx.indexOf("const jaTentado"));
     verdade("o histórico traduzido só é posto no servidor de suporte",
       garantir.indexOf("if (!await ehServidorDoSuporte(guild.id)) return;") > 0 &&
@@ -8646,10 +8657,12 @@ function conferirCartao(onde, embed, componentes = []) {
   const respostas = [];
   const canais = new Map();
   let criados = 0, enviados = 0, editados = 0, sistema = null;
+  const apagados = [];
   const fazCanal = (o) => {
     const c = { id: `c${canais.size + 1}`, name: o.name, type: o.type, parent: o.parent, topic: o.topic, over: o.permissionOverwrites,
-      msgs: [],
-      messages: { fetch: async () => ({ find: (f) => c.msgs.find(f) }) },
+      msgs: [], parentId: o.parent, members: new Map(),
+      delete: async () => { canais.delete(c.id); apagados.push(c.name); },
+      messages: { fetch: async () => ({ find: (f) => c.msgs.find(f), values: () => c.msgs.values() }) },
       send: async (corpo) => { enviados++; c.msgs.push({ author: { id: "bot" }, corpo,
         components: corpo.components.map((l) => ({ components: l.components.map((b) => ({ customId: b.custom_id })) })),
         edit: async () => { editados++; } }); } };
@@ -8667,7 +8680,7 @@ function conferirCartao(onde, embed, componentes = []) {
     } },
   };
   const ligacao = { link: "https://discord.gg/suporte" };
-  const fontesSomadas = [];
+  const fontesDoSuporte = [];
   S.ligarSuporte({
     client: { user: { id: "bot" }, fetchInvite: async () => (temGuild ? { guild: { id: "g-sup" } } : null),
       guilds: { cache: new Map([["g-sup", guild]]) } },
@@ -8675,7 +8688,7 @@ function conferirCartao(onde, embed, componentes = []) {
     traduzirEmbed: async (e, idioma) => (!idioma || idioma === "pt" ? e : { ...e, title: `[${idioma}] ${e.title}` }),
     idiomaEscolhido: async () => "", idiomaDoAplicativo: (l) => String(l || "").split("-")[0],
     ChannelType, PermissionFlagsBits,
-    somarFontes: async (g, ids) => { fontesSomadas.push(...ids); return ids.length; },
+    fontesDoSuporte: async (g, ids) => { fontesDoSuporte.push(...ids); return { apagadas: 1, total: 1 }; },
   });
   const clique = (id, locale = "pt-BR") => {
     const i = { user: { id }, locale, customId: "", deferred: false, replied: false,
@@ -8697,8 +8710,31 @@ function conferirCartao(onde, embed, componentes = []) {
   erroEstranho = false;
   verdade("quem confirmei há pouco nem é perguntado de novo", await S.estaNoSuporte("dentro"));
 
-  /* ---- montar o servidor ---- */
+  /* ---- montar o servidor ----
+     Ele chega como o Discord entrega um servidor novo, mais as salas de uma
+     montagem antiga: uma que alguém usou, outra só com o meu texto. */
+  const CT = ChannelType;
+  const catTexto = fazCanal({ name: "Canais de Texto", type: CT.GuildCategory });
+  const catVoz = fazCanal({ name: "Canais de Voz", type: CT.GuildCategory });
+  fazCanal({ name: "geral", type: CT.GuildText, parent: catTexto.id }).msgs.push({ system: true, author: { id: "x" } });
+  fazCanal({ name: "Geral", type: CT.GuildVoice, parent: catVoz.id });
+  const catDoDono = fazCanal({ name: "Text Channels", type: CT.GuildCategory });
+  fazCanal({ name: "sala-do-dono", type: CT.GuildText, parent: catDoDono.id });
+  fazCanal({ name: "❓・help", type: CT.GuildText }).msgs.push({ author: { id: "cliente", bot: false } });
+  fazCanal({ name: "💳・plans-and-payments", type: CT.GuildText }).msgs.push({ author: { id: "bot", bot: true } });
+  criados = 0;
   const feito = await S.montarSuporte(guild);
+  const nomes = () => [...canais.values()].map((c) => c.name);
+  verdade("o #geral vazio do Discord sai", !nomes().includes("geral"));
+  verdade("o canal de voz padrão sai", !nomes().includes("Geral"));
+  verdade("e as categorias padrão, vazias, saem junto",
+    !nomes().includes("Canais de Texto") && !nomes().includes("Canais de Voz"));
+  verdade("sala antiga só com texto meu sai", !nomes().includes("💳・plans-and-payments"));
+  verdade("categoria padrão com canal dentro FICA", nomes().includes("Text Channels") && nomes().includes("sala-do-dono"));
+  verdade("sala antiga onde um cliente escreveu FICA (apagar pergunta de cliente não tem volta)",
+    nomes().includes("❓・help"));
+  verdade("e o dono fica sabendo que ela ficou", feito.some((f) => f.includes("❓・help") && f.includes("conversa")));
+  canais.delete([...canais.values()].find((c) => c.name === "❓・help").id);
   const total = S.ESTRUTURA.reduce((n, b) => n + 1 + b.canais.length, 0);
   ok("a primeira montagem cria todas as categorias e salas", criados, total);
   ok("e posta um texto em cada sala", enviados, S.ESTRUTURA.reduce((n, b) => n + b.canais.length, 0));
@@ -8708,14 +8744,16 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("sala de leitura: ninguém escreve, eu escrevo",
     regras.over.some((o) => o.id === "everyone" && o.deny.includes(PermissionFlagsBits.SendMessages)) &&
     regras.over.some((o) => o.id === "bot" && o.allow.includes(PermissionFlagsBits.SendMessages)));
-  const ajuda = [...canais.values()].find((c) => c.name.endsWith("help"));
-  verdade("sala de ajuda: todo mundo escreve", !ajuda.over?.length);
+  const bugs = [...canais.values()].find((c) => c.name.endsWith("bugs"));
+  verdade("sala de bugs: todo mundo escreve", !bugs.over?.length);
   verdade("a lista do que foi feito vem de volta", feito.length >= total);
   const deLeitura = S.ESTRUTURA.flatMap((b) => b.canais).filter((c) => c.leitura).map((c) => c.nome);
-  ok("as salas de leitura viram fonte (ganham cópia em cada idioma)",
-    fontesSomadas.map((id) => canais.get(id).name).sort(), [...deLeitura].sort());
-  verdade("e a sala de ajuda não (é conversa, não aviso)",
-    !fontesSomadas.some((id) => canais.get(id).name.endsWith("help")));
+  ok("as fontes do suporte são exatamente as salas de leitura",
+    fontesDoSuporte.map((id) => canais.get(id).name).sort(), [...deLeitura].sort());
+  verdade("bugs e sugestões não viram cópia (são conversa)",
+    !fontesDoSuporte.some((id) => /bugs|suggestions/.test(canais.get(id).name)));
+  verdade("dúvida e pagamento não têm mais sala própria: é no chat do idioma",
+    !S.ESTRUTURA.flatMap((b) => b.canais).some((c) => /help|payments/.test(c.nome)));
   verdade("cada sala fica dentro da categoria dela",
     [...canais.values()].filter((c) => c.type === ChannelType.GuildText).every((c) => c.parent));
 
@@ -8728,6 +8766,23 @@ function conferirCartao(onde, embed, componentes = []) {
   temGuild = false; ligacao.link = "https://discord.gg/outro";
   verdade("sem servidor de suporte achável: ninguém é barrado", await S.estaNoSuporte("ninguem"));
   temGuild = true; ligacao.link = "https://discord.gg/suporte";
+
+  /* ---- o nome da cópia na língua de quem lê ---- */
+  ok("em japonês, as regras", S.nomeNoIdioma("📜・rules", "ja"), "📜・ルール");
+  ok("em português, boas-vindas", S.nomeNoIdioma("👋・welcome", "pt"), "👋・boas-vindas");
+  ok("o chat também", S.nomeNoIdioma("chat", "ko"), "💬・채팅");
+  ok("sala que não é do suporte: vale o nome de sempre", S.nomeNoIdioma("anuncios", "ja"), null);
+  ok("língua fora da tabela: vale o nome de sempre", S.nomeNoIdioma("📜・rules", "xx"), null);
+  const { LINGUAS_MENU } = carregar(["LINGUAS_MENU"]);
+  const chaves = ["chat", ...S.ESTRUTURA.flatMap((b) => b.canais).filter((c) => c.chave).map((c) => c.chave)];
+  for (const [cod] of LINGUAS_MENU) {
+    const faltam = chaves.filter((k) => !S.NOMES[cod]?.[k]);
+    ok(`${cod}: toda sala tem nome`, faltam, []);
+    for (const k of chaves) {
+      const n = S.NOMES[cod]?.[k] || "";
+      verdade(`${cod}/${k}: nome aceito pelo Discord`, n.length <= 90 && !/[\s#@:]/.test(n) && n === n.toLowerCase());
+    }
+  }
 
   /* ---- os textos ---- */
   for (const b of S.ESTRUTURA) for (const c of b.canais) {

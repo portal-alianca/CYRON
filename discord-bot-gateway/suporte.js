@@ -97,12 +97,12 @@ export const TEXTOS = {
         "O CYRON é um bot de tradução para Discord: cada pessoa escreve na língua dela e todo mundo lê na sua.",
         "",
         "**Por onde começar:**",
+        "🌐 Escolha o seu idioma. As salas aparecem na sua língua.",
         "📜 Leia as regras.",
         "📖 Veja como usar o bot.",
-        "❓ Tem uma dúvida? Pergunte em ajuda.",
-        "💳 Quer assinar, ou o pagamento deu errado? Fale em planos e pagamentos.",
+        "💬 Tem uma dúvida, quer assinar ou o pagamento deu errado? Escreva no chat do seu idioma.",
         "",
-        "Pode escrever na sua língua. Aqui a gente se entende.",
+        "No chat, cada pessoa escreve na língua dela e a equipe lê traduzido. Aqui a gente se entende.",
       ].join("\n"),
     },
     en: {
@@ -111,12 +111,12 @@ export const TEXTOS = {
         "CYRON is a translation bot for Discord: everyone writes in their own language and everyone reads in theirs.",
         "",
         "**Where to start:**",
+        "🌐 Pick your language. The rooms show up in your language.",
         "📜 Read the rules.",
         "📖 See how to use the bot.",
-        "❓ Got a question? Ask in help.",
-        "💳 Want to subscribe, or had a payment problem? Talk to us in plans-and-payments.",
+        "💬 Got a question, want to subscribe, or had a payment problem? Write in your language's chat.",
         "",
-        "Feel free to write in your own language. We'll understand each other here.",
+        "In the chat, everyone writes in their own language and the team reads it translated. We'll understand each other here.",
       ].join("\n"),
     },
   },
@@ -129,7 +129,7 @@ export const TEXTOS = {
         "**3.** Escreva na língua que quiser. O CYRON traduz.",
         "**4.** Nunca poste token, senha ou chave de API. A equipe **nunca** pede isso.",
         "**5.** A equipe **nunca** chama você no privado para cobrar. Pagamento é só pelo botão do bot. Se alguém pedir dinheiro no privado, é golpe: avise a gente.",
-        "**6.** Dúvida na sala de ajuda, problema de pagamento na sala de planos, defeito na sala de bugs.",
+        "**6.** Dúvida e pagamento no chat do seu idioma, defeito na sala de bugs, ideia na sala de sugestões.",
         "",
         "Quem não cumprir as regras pode ser removido do servidor.",
       ].join("\n"),
@@ -142,7 +142,7 @@ export const TEXTOS = {
         "**3.** Write in any language you like. CYRON translates.",
         "**4.** Never post a token, password or API key. Staff will **never** ask for one.",
         "**5.** Staff will **never** DM you asking for payment. Payment happens only through the bot's button. If someone asks you for money in DMs, it's a scam: let us know.",
-        "**6.** Questions go in help, payment problems in plans-and-payments, defects in bugs.",
+        "**6.** Questions and payments go in your language's chat, defects in bugs, ideas in suggestions.",
         "",
         "Anyone who breaks the rules may be removed from the server.",
       ].join("\n"),
@@ -186,10 +186,6 @@ export const TEXTOS = {
     pt: { title: "📣 Novidades", description: "Aqui saem as novidades do CYRON: recursos novos, correções e avisos importantes. Siga este canal para receber no seu servidor." },
     en: { title: "📣 News", description: "CYRON news lands here: new features, fixes and important notices. Follow this channel to get them in your own server." },
   },
-  ajuda: {
-    pt: { title: "❓ Ajuda", description: "Pergunte aqui, na sua língua. Conte o que tentou fazer e o que aconteceu. Um print ajuda muito.\n\n**Nunca poste token, senha ou chave.**" },
-    en: { title: "❓ Help", description: "Ask here, in your own language. Tell us what you tried to do and what happened. A screenshot helps a lot.\n\n**Never post a token, password or key.**" },
-  },
   pagamento: {
     pt: {
       title: "💳 Planos e pagamentos",
@@ -198,9 +194,9 @@ export const TEXTOS = {
         "🏆 **Aliança** — R$ 79 ou US$ 15 por mês: até 20 idiomas, 10 canais copiados e o triplo de tradução e de áudio.",
         "",
         "🇧🇷 **No Brasil:** no /cyron, clique em 💠 Pagar com Pix. O plano liga sozinho quando o Pix cai.",
-        "🌍 **Fora do Brasil:** escreva aqui qual plano você quer e o nome do seu servidor. A gente combina o pagamento com você.",
+        "🌍 **Fora do Brasil:** escreva no chat do seu idioma qual plano você quer e o nome do seu servidor. A gente combina o pagamento com você.",
         "",
-        "Pagamento é só por aqui ou pelo botão do bot. A equipe nunca cobra no privado.",
+        "Pagamento é só pelo botão do bot ou combinado no chat. A equipe nunca cobra no privado.",
       ].join("\n"),
     },
     en: {
@@ -210,9 +206,9 @@ export const TEXTOS = {
         "🏆 **Alliance** — US$ 15 (R$ 79) per month: up to 20 languages, 10 mirrored channels and triple the translation and audio.",
         "",
         "🇧🇷 **In Brazil:** in /cyron, click 💠 Pagar com Pix. The plan turns on by itself when the Pix lands.",
-        "🌍 **Outside Brazil:** write here which plan you want and your server's name. We'll arrange payment with you.",
+        "🌍 **Outside Brazil:** write in your language's chat which plan you want and your server's name. We'll arrange payment with you.",
         "",
-        "Payment happens only here or through the bot's button. Staff never charges in DMs.",
+        "Payment happens only through the bot's button or arranged in the chat. Staff never charges in DMs.",
       ].join("\n"),
     },
   },
@@ -226,22 +222,78 @@ export const TEXTOS = {
   },
 };
 
-/* leitura: so' eu escrevo (a pessoa le e reage). sistema: e' onde o Discord
-   anuncia quem entrou. */
+/* leitura: so' eu escrevo (a pessoa le e reage) -- e a sala vira FONTE:
+   cada idioma ganha a copia dela, traduzida e com o nome na lingua dele.
+   sistema: e' onde o Discord anuncia quem entrou. chave: qual nome traduzido
+   a copia recebe (ver NOMES).
+
+   Duvida e pagamento nao tem sala propria: sao conversa, e conversa e' no
+   chat do idioma -- la' a pessoa escreve na lingua dela e a equipe le
+   traduzido. Uma sala "help" em ingles era justamente onde o japones nao
+   conseguia pedir ajuda. */
 export const ESTRUTURA = [
   { categoria: "📌 START HERE", canais: [
-    { nome: "👋・welcome", texto: "boas", leitura: true, sistema: true },
-    { nome: "📜・rules", texto: "regras", leitura: true },
-    { nome: "📖・how-to-use", texto: "uso", leitura: true },
-    { nome: "📣・news", texto: "novidades", leitura: true },
+    { nome: "👋・welcome", chave: "welcome", texto: "boas", leitura: true, sistema: true },
+    { nome: "📜・rules", chave: "rules", texto: "regras", leitura: true },
+    { nome: "📖・how-to-use", chave: "howto", texto: "uso", leitura: true },
+    { nome: "💳・plans", chave: "plans", texto: "pagamento", leitura: true },
+    { nome: "📣・news", chave: "news", texto: "novidades", leitura: true },
   ] },
   { categoria: "💬 HELP", canais: [
-    { nome: "❓・help", texto: "ajuda", topico: "Questions in any language · Dúvidas em qualquer língua" },
-    { nome: "💳・plans-and-payments", texto: "pagamento", topico: "Plans, payments and payment problems · Planos e pagamentos" },
     { nome: "💡・suggestions", texto: "sugestoes", topico: "Ideas for CYRON · Ideias para o CYRON" },
     { nome: "🐞・bugs", texto: "bugs", topico: "Report a defect · Conte um defeito" },
   ] },
 ];
+
+/* Salas que existiram numa versao anterior e sairam. So' somem se ninguem
+   conversou nelas: apagar a pergunta de um cliente seria pior que deixar
+   uma sala sobrando. */
+export const SALAS_ANTIGAS = ["❓・help", "💳・plans-and-payments"];
+
+/* O que o Discord cria sozinho em servidor novo. Mesma regra: so' sai vazio. */
+const PADROES_TEXTO = ["geral", "general"];
+const PADROES_VOZ = ["Geral", "General"];
+const PADROES_CATEGORIA = ["Canais de Texto", "Canais de Voz", "Text Channels", "Voice Channels"];
+
+/* O nome da copia na lingua de quem a le. Escrito a mao, e nao pelo
+   tradutor: nome de canal e' curto demais para o tradutor acertar sozinho
+   ("news" virava "notícias" num dia e "novas" no outro), e um nome que muda
+   de uma varredura para outra renomearia a sala sem fim. */
+export const NOMES = {
+  pt: { welcome: "boas-vindas", rules: "regras", howto: "como-usar", plans: "planos", news: "novidades", chat: "chat" },
+  en: { welcome: "welcome", rules: "rules", howto: "how-to-use", plans: "plans", news: "news", chat: "chat" },
+  es: { welcome: "bienvenida", rules: "reglas", howto: "cómo-usar", plans: "planes", news: "novedades", chat: "chat" },
+  ko: { welcome: "환영", rules: "규칙", howto: "사용법", plans: "요금제", news: "소식", chat: "채팅" },
+  ja: { welcome: "ようこそ", rules: "ルール", howto: "使い方", plans: "プラン", news: "お知らせ", chat: "チャット" },
+  "zh-CN": { welcome: "欢迎", rules: "规则", howto: "使用方法", plans: "套餐", news: "新闻", chat: "聊天" },
+  de: { welcome: "willkommen", rules: "regeln", howto: "anleitung", plans: "preise", news: "neuigkeiten", chat: "chat" },
+  fr: { welcome: "bienvenue", rules: "règles", howto: "mode-d-emploi", plans: "offres", news: "actualités", chat: "discussion" },
+  it: { welcome: "benvenuto", rules: "regole", howto: "come-usare", plans: "piani", news: "novità", chat: "chat" },
+  ru: { welcome: "добро-пожаловать", rules: "правила", howto: "как-пользоваться", plans: "тарифы", news: "новости", chat: "чат" },
+  ar: { welcome: "مرحبا", rules: "القواعد", howto: "طريقة-الاستخدام", plans: "الخطط", news: "الأخبار", chat: "الدردشة" },
+  tr: { welcome: "hoş-geldin", rules: "kurallar", howto: "nasıl-kullanılır", plans: "planlar", news: "haberler", chat: "sohbet" },
+  id: { welcome: "selamat-datang", rules: "aturan", howto: "cara-pakai", plans: "paket", news: "berita", chat: "obrolan" },
+  th: { welcome: "ยินดีต้อนรับ", rules: "กฎ", howto: "วิธีใช้", plans: "แพ็กเกจ", news: "ข่าว", chat: "แชท" },
+  vi: { welcome: "chào-mừng", rules: "quy-tắc", howto: "hướng-dẫn", plans: "gói", news: "tin-tức", chat: "trò-chuyện" },
+  pl: { welcome: "witaj", rules: "zasady", howto: "jak-używać", plans: "plany", news: "aktualności", chat: "czat" },
+  nl: { welcome: "welkom", rules: "regels", howto: "handleiding", plans: "abonnementen", news: "nieuws", chat: "chat" },
+  tl: { welcome: "maligayang-pagdating", rules: "mga-patakaran", howto: "paano-gamitin", plans: "mga-plano", news: "balita", chat: "chat" },
+  hi: { welcome: "स्वागत", rules: "नियम", howto: "उपयोग-कैसे-करें", plans: "प्लान", news: "समाचार", chat: "चैट" },
+  uk: { welcome: "вітаємо", rules: "правила", howto: "як-користуватися", plans: "тарифи", news: "новини", chat: "чат" },
+};
+
+/* "👋・welcome" em japones vira "👋・ようこそ". O emoji fica: e' ele que
+   diz, sem ler, que a sala e' a mesma nas vinte linguas. Nula quando a sala
+   nao e' do suporte ou a lingua nao esta' na tabela -- e ai vale o nome de
+   sempre. */
+export function nomeNoIdioma(nomeOriginal, idioma) {
+  const palavras = NOMES[idioma];
+  if (!palavras) return null;
+  if (nomeOriginal === "chat") return `💬・${palavras.chat}`;
+  const sala = ESTRUTURA.flatMap((b) => b.canais).find((c) => c.nome === nomeOriginal && c.chave);
+  if (!sala) return null;
+  return `${nomeOriginal.split("・")[0]}・${palavras[sala.chave]}`;
+}
 
 export const PREFIXO_LER = "sup:ler:";
 
@@ -303,13 +355,50 @@ export async function montarSuporte(guild) {
     }
   }
 
-  /* As salas de leitura viram FONTE: cada idioma escolhido ganha a copia
-     delas, traduzida, e a sala nova ja' nasce com os textos. Quem chega do
-     Japao le as regras em japones na sala dele -- e ve o bot funcionando
-     antes de instalar. */
-  if (d.somarFontes && leitura.length) {
-    const n = await d.somarFontes(guild, leitura).catch(() => 0);
-    if (n) feito.push(`🌐 ${n} ${n === 1 ? "sala passa" : "salas passam"} a ganhar cópia traduzida em cada idioma`);
+  /* As salas de leitura sao AS fontes do suporte -- exatamente elas. Cada
+     idioma escolhido ganha a copia delas, traduzida, e a sala nova ja' nasce
+     com os textos. Qualquer outra fonte (de uma montagem antiga, de um teste)
+     sai, e as copias que ficaram sem origem vao junto. */
+  if (d.fontesDoSuporte && leitura.length) {
+    const r = await d.fontesDoSuporte(guild, leitura).catch(() => null);
+    if (r?.apagadas) feito.push(`🗑️ ${r.apagadas} ${r.apagadas === 1 ? "cópia sem origem apagada" : "cópias sem origem apagadas"}`);
+  }
+
+  for (const f of await limparSobras(guild)) feito.push(f);
+  return feito;
+}
+
+/* Ninguem conversou aqui? Mensagem minha e de sistema nao conta. Na duvida
+   (nao consegui ler), a resposta e' NAO: apagar sem ler e' o erro que nao
+   tem volta. */
+async function semConversa(canal) {
+  const msgs = await canal.messages?.fetch?.({ limit: 50 }).catch(() => null);
+  if (!msgs) return false;
+  return ![...msgs.values()].some((m) => !m.system && !m.author?.bot);
+}
+
+async function limparSobras(guild) {
+  const { ChannelType } = d;
+  const feito = [];
+  const todos = [...guild.channels.cache.values()];
+  const apagar = async (c, porque) => {
+    if (await c.delete(porque).then(() => true).catch(() => false)) feito.push(`🧹 ${c.name} apagado`);
+  };
+  for (const c of todos) {
+    if (c.type === ChannelType.GuildText && (SALAS_ANTIGAS.includes(c.name) || PADROES_TEXTO.includes(c.name))) {
+      if (await semConversa(c)) await apagar(c, "sala que o suporte não usa mais");
+      else feito.push(`⚠️ #${c.name} tem conversa: deixei, apague você se quiser`);
+    }
+    if (c.type === ChannelType.GuildVoice && PADROES_VOZ.includes(c.name) && !(c.members?.size)) {
+      await apagar(c, "canal de voz padrão do Discord, sem uso no suporte");
+    }
+  }
+  /* Categoria padrao so' depois: ela so' sai vazia, e vazia ela fica quando
+     os canais de dentro sairam logo acima. */
+  for (const c of [...guild.channels.cache.values()]) {
+    if (c.type !== ChannelType.GuildCategory || !PADROES_CATEGORIA.includes(c.name)) continue;
+    const dentro = [...guild.channels.cache.values()].filter((x) => x.parentId === c.id);
+    if (!dentro.length) await apagar(c, "categoria padrão vazia");
   }
   return feito;
 }
