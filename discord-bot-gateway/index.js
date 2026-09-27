@@ -3973,6 +3973,11 @@ async function ajustes() {
   } catch {
     /* Banco fora do ar nao pode apagar o que ja' estava valendo. */
     if (cacheAjustes.v) return cacheAjustes.v;
+    /* E sem nada guardado, "nao consegui ler" NAO e' "nao ha' nada". Um
+       vazio devolvido aqui, e guardado por um minuto, fazia o placar da
+       arena achar que nunca tinha sido postado -- e postar outro a cada
+       partida do bot. Quem precisa saber a diferenca olha `falhou`. */
+    return Object.defineProperty({}, "falhou", { value: true });
   }
   cacheAjustes = { v, t: Date.now() };
   return v;
@@ -7907,14 +7912,29 @@ async function desenharArena(guild, servidor) {
      O painel nunca teve esse problema porque guarda msg_config. Mesma
      solucao, e sem migracao: o cyron_ajuste ja e' chave/valor. */
   const chave = `arena_msg:${servidor.id}`;
-  const guardado = (await ajustes())[chave];
+  const lidos = await ajustes();
+  /* Nao sei se ja' ha' placar: espero a proxima volta, em vez de arriscar
+     um segundo. */
+  if (lidos.falhou) return;
+  const guardado = lidos[chave];
   if (guardado) {
-    const antiga = await canal.messages.fetch(guardado).catch(() => null);
+    /* So' "a mensagem nao existe" (10008) autoriza postar outra. Qualquer
+       outro erro -- Discord lento na partida, limite de pedidos -- e'
+       passageiro, e postar por causa dele deixava dois placares na sala. */
+    let sumiu = false;
+    const antiga = await canal.messages.fetch(guardado).catch((e) => {
+      sumiu = e?.code === 10008;
+      return null;
+    });
     if (antiga) {
       await antiga.edit(carga).catch((e) =>
         console.error("arena: nao consegui editar o placar:", e?.message || e));
+      /* Uma vez por partida: recolhe placares que sobraram de antes (o
+         defeito deixou dois em algumas salas). O guardado fica. */
+      if (umaVezPorProcesso(`arena-limpa:${canal.id}`)) await limparPlacaresVelhos(canal, guardado);
       return;
     }
+    if (!sumiu) return;
   }
 
   /* Antes de postar, recolhe o que o defeito anterior deixou na sala. */
@@ -7936,12 +7956,18 @@ async function desenharArena(guild, servidor) {
    So' os MEUS, e so' os que sao placar: o titulo e' a assinatura. Apagar por
    autor sozinho levaria junto qualquer outra coisa que eu tivesse postado
    ali -- a sala e' minha, mas as mensagens nao sao todas. */
-async function limparPlacaresVelhos(canal) {
+/* Os dois titulos que o placar ja' teve. A limpeza procurava so' o antigo,
+   e depois que o placar passou a se chamar "Language Arena" ela nao achava
+   mais nada -- as duplicatas ficavam. */
+const TITULOS_DA_ARENA = ["⚔️ Arena das Línguas", "⚔️ Language Arena"];
+
+async function limparPlacaresVelhos(canal, exceto = null) {
   const recentes = await canal.messages.fetch({ limit: 50 }).catch(() => null);
   if (!recentes) return;
   const meus = [...recentes.values()].filter((m) =>
+    m.id !== exceto &&
     m.author?.id === client.user.id &&
-    String(m.embeds?.[0]?.title || "").startsWith("⚔️ Arena das Línguas"));
+    TITULOS_DA_ARENA.some((t) => String(m.embeds?.[0]?.title || "").startsWith(t)));
   for (const m of meus) await m.delete().catch(() => {});
   if (meus.length) console.log(`arena: recolhi ${meus.length} placar(es) antigo(s)`);
 }
@@ -9768,6 +9794,21 @@ function promessaDesmentida(explicacao, h, agora,
    ninguem diz isso com todas as letras. Erro que eu ainda nao sei explicar
    aparece cru e assumido como tal, em vez de fingir que e' grave. */
 const EXPLICA_ERRO = [
+  {
+    /* O cartao do painel que nao atualizou porque o pedido passou do prazo.
+
+       Aparece em lote logo depois de o bot subir: ele refaz o cartao de todos
+       os servidores de uma vez, e alguns pedidos esperam demais na fila. A
+       varredura seguinte refaz o mesmo cartao -- nao ha' nada a consertar, e
+       uma mensagem crua por servidor ensinava a ignorar o canal de erros. */
+    quando: /config:? nao consegui atualizar o cart[aã]o.{0,120}(aborted due to timeout|TimeoutError|ETIMEDOUT|fetch failed|ECONNRESET|socket hang up)/i,
+    titulo: "Um cartão de painel demorou para atualizar",
+    precisaDeVoce: false,
+    oque: "Pedi para atualizar o cartão do painel de um servidor e a resposta demorou mais que o prazo, " +
+      "então desisti daquela vez. Costuma acontecer logo depois de eu religar, quando refaço os cartões de " +
+      "todos os servidores ao mesmo tempo.\n\nNa próxima volta (até 10 minutos) eu refaço o mesmo cartão.",
+    fazer: "Nada. Só vale olhar se continuar aparecendo horas depois de eu ter religado.",
+  },
   {
     /* ANTES da regra do banco, e por causa dela.
 

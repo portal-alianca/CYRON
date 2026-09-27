@@ -3324,7 +3324,7 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o placar é guardado por id no cyron_ajuste",
     /arena_msg:\$\{servidor\.id\}/.test(fonteArena2));
   verdade("e o id guardado é realmente lido",
-    /const guardado = \(await ajustes\(\)\)\[chave\]/.test(fonteArena2));
+    /const lidos = await ajustes\(\);[\s\S]{0,400}if \(lidos\.falhou\) return;\s*const guardado = lidos\[chave\]/.test(fonteArena2));
   verdade("e usado para buscar a mensagem",
     /canal\.messages\.fetch\(guardado\)/.test(fonteArena2));
   verdade("e gravado depois de postar", /porAjuste\(chave, nova\.id\)/.test(fonteArena2));
@@ -3335,7 +3335,63 @@ function conferirCartao(onde, embed, componentes = []) {
      junto qualquer outra coisa que o bot tenha postado na sala. */
   verdade("a limpeza confere o autor", /m\.author\?\.id === client\.user\.id/.test(fonteArena2));
   verdade("e o título, para não apagar o que não é placar",
-    /startsWith\("⚔️ Arena das Línguas"\)/.test(fonteArena2));
+    /TITULOS_DA_ARENA\.some\(\(t\) => String\(m\.embeds\?\.\[0\]\?\.title \|\| ""\)\.startsWith\(t\)\)/.test(fonteArena2));
+
+  /* ---- placar duplicado a cada partida do bot ---- */
+  {
+    const { placarDaArena, TITULOS_DA_ARENA } = carregar(["placarDaArena", "TITULOS_DA_ARENA"]);
+    verdade("a limpeza conhece o título ATUAL do placar",
+      TITULOS_DA_ARENA.some((t) => placarDaArena([], { rotulo: "x", fim: new Date() }, 0).title.startsWith(t)));
+
+    const salvo = { a: globalThis.ajustes, p: globalThis.porAjuste, e: globalThis.estadoDaArena, c: globalThis.client,
+      u: globalThis.umaVezPorProcesso, f: globalThis.apagarAvisoDeFixado };
+    globalThis.client = { user: { id: "bot" } };
+    globalThis.estadoDaArena = async () => ({ times: [], temporada: { rotulo: "x", fim: new Date() }, servidores: 0 });
+    globalThis.apagarAvisoDeFixado = async () => {};
+    const vistos = new Set();
+    globalThis.umaVezPorProcesso = (k) => (vistos.has(k) ? false : (vistos.add(k), true));
+    let lidos = {};
+    globalThis.ajustes = async () => lidos;
+    globalThis.porAjuste = async () => {};
+    let erroDoFetch = null;
+    const msgs = new Map();
+    const postados = [], apagados = [];
+    const placar = (id) => ({ id, author: { id: "bot" }, embeds: [{ title: "⚔️ Language Arena" }],
+      edit: async () => {}, delete: async () => { apagados.push(id); msgs.delete(id); }, pin: async () => {} });
+    msgs.set("velho", placar("velho")); msgs.set("guardado", placar("guardado"));
+    const { ChannelType: CTa } = await import("discord.js");
+    globalThis.ChannelType = CTa;
+    globalThis.CANAL_ARENA = "⚔️-arena";
+    const canal = { id: "arena", type: CTa.GuildText, name: "⚔️-arena",
+      messages: { fetch: async (q) => {
+        if (typeof q === "string") { if (erroDoFetch) throw erroDoFetch; return msgs.get(q) ?? (() => { throw Object.assign(new Error("Unknown Message"), { code: 10008 }); })(); }
+        return new Map(msgs);
+      } },
+      send: async () => { const m = placar(`novo${postados.length}`); postados.push(m.id); msgs.set(m.id, m); return m; } };
+    const guild = { channels: { cache: { find: (f) => [canal].find(f) } } };
+    const { desenharArena } = carregar(["TITULOS_DA_ARENA", "limparPlacaresVelhos", "desenharArena"]);
+    const servidor = { id: "s1" };
+
+    lidos = Object.defineProperty({}, "falhou", { value: true });
+    await desenharArena(guild, servidor);
+    ok("banco sem resposta na partida: não posta outro placar", postados.length, 0);
+
+    lidos = { "arena_msg:s1": "guardado" };
+    erroDoFetch = Object.assign(new Error("rate limited"), { code: 0 });
+    await desenharArena(guild, servidor);
+    ok("Discord lento na partida: não posta outro placar", postados.length, 0);
+
+    erroDoFetch = null;
+    await desenharArena(guild, servidor);
+    ok("placar achado: edita, e recolhe a duplicata que sobrou", apagados, ["velho"]);
+    verdade("o guardado fica", msgs.has("guardado"));
+
+    msgs.delete("guardado");
+    await desenharArena(guild, servidor);
+    ok("o Discord diz que o placar sumiu: aí sim posta um novo", postados.length, 1);
+    Object.assign(globalThis, { ajustes: salvo.a, porAjuste: salvo.p, estadoDaArena: salvo.e, client: salvo.c,
+      umaVezPorProcesso: salvo.u, apagarAvisoDeFixado: salvo.f });
+  }
 
   /* ---- número não vai para o tradutor ----
 
@@ -9110,6 +9166,15 @@ function conferirCartao(onde, embed, componentes = []) {
     /if \(ehCopia\.has\(canalId\)\) \{/.test(idx) && /if \(modelos\.has\(tipo\) \|\| ehCopia\.has\(canalId\)\) continue;/.test(idx));
   verdade("e o bot repara as origens do suporte ao subir", /await repararFontes\(g\)/.test(idx));
   Object.assign(globalThis, { sb: salvo.sb, sbPost: salvo.sbPost, sbDel: salvo.sbDel, cacheFontes: salvo.cf });
+}
+
+/* ---- cartão do painel que passou do prazo: explicado, não cru ---- */
+{
+  const { explicarErro } = carregar(["EXPLICA_ERRO", "explicarErro"]);
+  /* Do jeito que chega: o console.error parte a linha no primeiro ":". */
+  const e = explicarErro("config", "nao consegui atualizar o cartão de Ks The operation was aborted due to timeout");
+  ok("o timeout do cartão do painel tem explicação", e?.titulo, "Um cartão de painel demorou para atualizar");
+  ok("e não pede nada ao dono", e?.precisaDeVoce, false);
 }
 
 /* ---- o painel do dono pelo privado ---- */
