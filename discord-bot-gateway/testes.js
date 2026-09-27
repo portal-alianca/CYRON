@@ -9164,7 +9164,8 @@ function conferirCartao(onde, embed, componentes = []) {
   const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
   verdade("a varredura ignora cópia cadastrada como origem",
     /if \(ehCopia\.has\(canalId\)\) \{/.test(idx) && /if \(modelos\.has\(tipo\) \|\| ehCopia\.has\(canalId\)\) continue;/.test(idx));
-  verdade("e o bot repara as origens do suporte ao subir", /await repararFontes\(g\)/.test(idx));
+  verdade("e o bot arruma o suporte ao subir (texto novo chega sem o dono apertar nada)",
+    /const feito = await montarSuporte\(g\)/.test(idx));
   Object.assign(globalThis, { sb: salvo.sb, sbPost: salvo.sbPost, sbDel: salvo.sbDel, cacheFontes: salvo.cf });
 }
 
