@@ -117,6 +117,16 @@ const COR_SUPORTE = 0x5865F2;
 /* Cada texto e' um cartao: uma frase de abertura e secoes curtas em campos,
    em vez de um bloco corrido. Numa sala de leitura a pessoa bate o olho e
    acha o que procura -- e campo curto traduz melhor que paragrafo longo. */
+/* O contato oficial para comprar: a conta de suporte, no privado.
+
+   Pagamento combinado num chat publico expunha nome, servidor e dados de
+   pagamento de quem compra para o servidor inteiro. No privado, com a conta
+   OFICIAL, fica entre as duas partes. O golpe que isto abre -- alguem se
+   passar pelo suporte -- e' fechado por duas regras que os textos repetem:
+   so' esta conta vende, e ela nunca chama primeiro. */
+export const CONTATO_OFICIAL = "1553232972608442491";
+const CONTATO = `<@${CONTATO_OFICIAL}> (\`cyron02\`)`;
+
 const RODAPE = {
   pt: "CYRON Support · 🌐 toque no botão para ler na sua língua",
   en: "CYRON Support · 🌐 tap the button to read in your language",
@@ -131,6 +141,7 @@ export const TEXTOS = {
         { name: "1️⃣ Escolha o seu idioma", value: "As salas aparecem na sua língua, só para você." },
         { name: "2️⃣ Leia as regras e o modo de usar", value: "📜 regras · 📖 como usar · 💳 planos" },
         { name: "3️⃣ Precisa de ajuda?", value: "Escreva no **💬 chat** do seu idioma, na sua língua. A equipe lê traduzido e responde." },
+        { name: "💳 Quer assinar?", value: `Chame no privado o contato oficial ${CONTATO}. É o único que vende o CYRON.` },
         { name: "💡 Ideias e 🐞 defeitos", value: "Abra um post no fórum de sugestões ou no de bugs." },
       ],
       footer: { text: RODAPE.pt },
@@ -142,6 +153,7 @@ export const TEXTOS = {
         { name: "1️⃣ Pick your language", value: "The rooms show up in your language, just for you." },
         { name: "2️⃣ Read the rules and how to use it", value: "📜 rules · 📖 how to use · 💳 plans" },
         { name: "3️⃣ Need help?", value: "Write in your language's **💬 chat**, in your own language. The team reads it translated and replies." },
+        { name: "💳 Want to subscribe?", value: `DM the official contact ${CONTATO}. It is the only account that sells CYRON.` },
         { name: "💡 Ideas and 🐞 defects", value: "Open a post in the suggestions or bugs forum." },
       ],
       footer: { text: RODAPE.en },
@@ -156,8 +168,8 @@ export const TEXTOS = {
         { name: "🚫 Sem spam", value: "Sem propaganda de outros servidores ou bots." },
         { name: "🌐 Qualquer língua", value: "Escreva na sua. O CYRON traduz." },
         { name: "🔑 Nada de senha", value: "Nunca poste token, senha ou chave de API. A equipe **nunca** pede isso." },
-        { name: "⚠️ Cuidado com golpe", value: "A equipe **nunca** cobra no privado. Pagamento é só pelo botão do bot. Se alguém pedir dinheiro no privado, avise a gente." },
-        { name: "📍 Cada coisa no seu lugar", value: "Dúvida e pagamento no 💬 chat · ideia no 💡 fórum de sugestões · defeito no 🐞 fórum de bugs." },
+        { name: "⚠️ Cuidado com golpe", value: `Só o contato oficial ${CONTATO} vende o CYRON, e ele **nunca** chama primeiro: quem começa a conversa é você. Se outra conta oferecer plano ou pedir dinheiro, é golpe. Avise a gente.` },
+        { name: "📍 Cada coisa no seu lugar", value: "Dúvida no 💬 chat · compra no privado do contato oficial · ideia no 💡 fórum de sugestões · defeito no 🐞 fórum de bugs." },
       ],
       footer: { text: "Quem não cumprir as regras pode ser removido. · 🌐 toque no botão para ler na sua língua" },
     },
@@ -169,8 +181,8 @@ export const TEXTOS = {
         { name: "🚫 No spam", value: "No advertising other servers or bots." },
         { name: "🌐 Any language", value: "Write in yours. CYRON translates." },
         { name: "🔑 No passwords", value: "Never post a token, password or API key. Staff will **never** ask for one." },
-        { name: "⚠️ Watch out for scams", value: "Staff **never** charges in DMs. Payment happens only through the bot's button. If someone asks you for money in DMs, let us know." },
-        { name: "📍 Everything in its place", value: "Questions and payments in 💬 chat · ideas in the 💡 suggestions forum · defects in the 🐞 bugs forum." },
+        { name: "⚠️ Watch out for scams", value: `Only the official contact ${CONTATO} sells CYRON, and it **never** messages first: you start the conversation. If any other account offers a plan or asks for money, it's a scam. Let us know.` },
+        { name: "📍 Everything in its place", value: "Questions in 💬 chat · purchases in the official contact's DMs · ideas in the 💡 suggestions forum · defects in the 🐞 bugs forum." },
       ],
       footer: { text: "Anyone who breaks the rules may be removed. · 🌐 tap the button to read in your language" },
     },
@@ -212,9 +224,10 @@ export const TEXTOS = {
         { name: "⭐ Pro · R$ 29,90 ou US$ 6 por mês", value: "Até 5 idiomas, 3 canais copiados, 🖼️ imagem e 🎧 áudio." },
         { name: "🏆 Aliança · R$ 79 ou US$ 15 por mês", value: "Até 20 idiomas, 10 canais copiados e o triplo de tradução e de áudio." },
         { name: "🇧🇷 Pagar no Brasil", value: "No /cyron, toque em 💠 Pagar com Pix. O plano liga sozinho quando o Pix cai." },
-        { name: "🌍 Pagar de fora do Brasil", value: "Escreva no 💬 chat do seu idioma qual plano quer e o nome do servidor. A gente combina com você." },
+        { name: "🌍 Pagar de fora do Brasil", value: `Chame no privado o contato oficial ${CONTATO} com o plano e o nome do seu servidor. A gente combina com você, sem expor seus dados no chat.` },
+        { name: "🔒 Segurança", value: `Só ${CONTATO} vende o CYRON, e ele nunca chama primeiro. Não mande dados de pagamento em chat público.` },
       ],
-      footer: { text: "A equipe nunca cobra no privado. · 🌐 toque no botão para ler na sua língua" },
+      footer: { text: "🌐 toque no botão para ler na sua língua" },
     },
     en: {
       title: "💳 Plans",
@@ -224,9 +237,10 @@ export const TEXTOS = {
         { name: "⭐ Pro · US$ 6 (R$ 29.90) per month", value: "Up to 5 languages, 3 mirrored channels, 🖼️ images and 🎧 audio." },
         { name: "🏆 Alliance · US$ 15 (R$ 79) per month", value: "Up to 20 languages, 10 mirrored channels and triple the translation and audio." },
         { name: "🇧🇷 Paying in Brazil", value: "In /cyron, tap 💠 Pagar com Pix. The plan turns on by itself when the Pix lands." },
-        { name: "🌍 Paying from outside Brazil", value: "Write in your language's 💬 chat which plan you want and your server's name. We'll arrange it with you." },
+        { name: "🌍 Paying from outside Brazil", value: `DM the official contact ${CONTATO} with the plan and your server's name. We'll arrange it with you, without exposing your data in the chat.` },
+        { name: "🔒 Safety", value: `Only ${CONTATO} sells CYRON, and it never messages first. Never post payment details in a public chat.` },
       ],
-      footer: { text: "Staff never charges in DMs. · 🌐 tap the button to read in your language" },
+      footer: { text: "🌐 tap the button to read in your language" },
     },
   },
   novidades: {

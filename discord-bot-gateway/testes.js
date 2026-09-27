@@ -8900,6 +8900,21 @@ function conferirCartao(onde, embed, componentes = []) {
   const regrasTexto = [S.TEXTOS.regras.pt.description, ...S.TEXTOS.regras.pt.fields.map((f) => f.value)].join(" ");
   verdade("as regras avisam do golpe no privado", /nunca/i.test(regrasTexto) && /privado/.test(regrasTexto));
 
+  /* ---- comprar: só pelo contato oficial, no privado ---- */
+  {
+    const texto = (t) => [t.description, ...(t.fields || []).map((f) => f.value)].join(" ");
+    const mencao = `<@${S.CONTATO_OFICIAL}>`;
+    for (const k of ["pagamento", "regras", "boas"]) {
+      for (const l of ["pt", "en"]) {
+        verdade(`${k} (${l}) aponta o contato oficial`, texto(S.TEXTOS[k][l]).includes(mencao));
+      }
+    }
+    verdade("planos: fora do Brasil não manda mais para o chat público",
+      !/chat do seu idioma qual plano/.test(texto(S.TEXTOS.pagamento.pt)) && !/chat which plan/.test(texto(S.TEXTOS.pagamento.en)));
+    verdade("regras: o contato oficial nunca chama primeiro (fecha o golpe de quem se passa por ele)",
+      /nunca\*\* chama primeiro/.test(texto(S.TEXTOS.regras.pt)) && /never\*\* messages first/.test(texto(S.TEXTOS.regras.en)));
+  }
+
   /* ---- o 🌐 de cada texto ---- */
   const lerEn = clique("x", "en-US"); lerEn.customId = `${S.PREFIXO_LER}regras`;
   await S.cliqueSuporte(lerEn);
