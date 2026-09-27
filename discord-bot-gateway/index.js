@@ -8955,6 +8955,18 @@ async function fontesDoSuporte(guild, ids) {
   return await apagarOrfas(guild, servidor);
 }
 
+/* A sala de escolher o idioma deste servidor: a guardada na instalacao
+   (discord_convite_idioma), e nao a achada pelo nome -- num servidor que
+   ja' tinha lugar para isso, a porta e' o canal que ja' existia. */
+async function portaDoIdioma(guild) {
+  const servidor = await servidorDoGuild(guild.id);
+  if (!servidor) return null;
+  const linha = (await sb(
+    `discord_convite_idioma?servidor_id=eq.${servidor.id}&tipo=eq.convite&select=canal_id&limit=1`)
+    .catch(() => null))?.[0];
+  return linha?.canal_id && guild.channels.cache.has(linha.canal_id) ? linha.canal_id : null;
+}
+
 /* Apaga as copias traduzidas destas salas de origem; a varredura seguinte
    as refaz, ja' com o texto novo. So' o servidor de suporte chama: la' as
    copias sao de leitura e nao guardam conversa. */
@@ -12082,7 +12094,7 @@ function botaoDeSuporte() {
 /* Aqui, e nao junto do ligarAlianca: SUPORTE so' existe a partir daqui, e
    entregar antes dava erro de variavel ainda nao criada na partida. */
 ligarSuporte({ client, SUPORTE, COR, traduzirEmbed, idiomaEscolhido, idiomaDoAplicativo, ChannelType, PermissionFlagsBits,
-  fontesDoSuporte, refazerCopias, porAjuste });
+  fontesDoSuporte, refazerCopias, porAjuste, portaDoIdioma });
 
 /* O estado da conversa mora no custom_id, e nao numa tabela.
 

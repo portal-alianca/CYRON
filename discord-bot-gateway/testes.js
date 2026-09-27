@@ -8668,8 +8668,10 @@ function conferirCartao(onde, embed, componentes = []) {
       delete: async () => { canais.delete(c.id); apagados.push(c.name); },
       messages: { fetch: async () => ({ find: (f) => c.msgs.find(f), values: () => c.msgs.values() }) },
       send: async (corpo) => { enviados++; const m = { author: { id: "bot", bot: true }, corpo,
-        components: corpo.components.map((l) => ({ components: l.components.map((b) => ({ customId: b.custom_id })) })),
-        edit: async (novo) => { editados++; m.corpo = novo; } }; c.msgs.push(m); } };
+        components: corpo.components.map((l) => ({ components: l.components.map((b) => ({ customId: b.custom_id, url: b.url })) })),
+        edit: async (novo) => { editados++; m.corpo = novo;
+          m.components = novo.components.map((l) => ({ components: l.components.map((b) => ({ customId: b.custom_id, url: b.url })) })); } };
+        c.msgs.push(m); } };
     canais.set(c.id, c); criados++; return c;
   };
   const guild = {
@@ -8691,6 +8693,7 @@ function conferirCartao(onde, embed, componentes = []) {
   let depsDoSuporte;
   const fontesDoSuporte = [];
   const refeitas = [];
+  let portaAtual = "porta-1";
   S.ligarSuporte(depsDoSuporte = {
     client: { user: { id: "bot" }, fetchInvite: async () => (temGuild ? { guild: { id: "g-sup" } } : null),
       guilds: { cache: new Map([["g-sup", guild]]) } },
@@ -8700,6 +8703,7 @@ function conferirCartao(onde, embed, componentes = []) {
     ChannelType, PermissionFlagsBits,
     fontesDoSuporte: async (g, ids) => { fontesDoSuporte.push(...ids); return { apagadas: 1, total: 1 }; },
     refazerCopias: async (g, ids) => { refeitas.push(...ids); return ids.length; },
+    portaDoIdioma: async () => portaAtual,
   });
   const clique = (id, locale = "pt-BR") => {
     const i = { user: { id }, locale, customId: "", deferred: false, replied: false,
@@ -8802,6 +8806,22 @@ function conferirCartao(onde, embed, componentes = []) {
   ok("montar de novo não cria sala nenhuma", criados, c0);
   ok("nem posta texto repetido", enviados, e0);
   ok("texto igual: não mexe (nem edita, nem refaz cópia)", [editados, refeitas.length], [0, 0]);
+
+  /* ---- quem lê a sala universal ainda não escolheu idioma: botão para a porta ---- */
+  const botoesDe = (nome) => [...canais.values()].find((c) => c.name === nome).msgs.find((m) => m.author?.bot).components[0].components;
+  const rules = botoesDe("📜・rules");
+  ok("sala universal: o primeiro botão leva à sala de escolher o idioma",
+    rules[0].url, "https://discord.com/channels/g-sup/porta-1");
+  verdade("e o de traduzir continua ao lado", rules.some((b) => b.customId === `${S.PREFIXO_LER}regras`));
+  portaAtual = "porta-2";
+  const mudouPorta = await S.montarSuporte(guild);
+  ok("a porta mudou de canal: o botão acompanha", botoesDe("📜・rules")[0].url, "https://discord.com/channels/g-sup/porta-2");
+  ok("mas as cópias não são refeitas (elas não levam botão)", refeitas.length, 0);
+  verdade("e o dono fica sabendo", mudouPorta.some((f) => f.includes("escolher o idioma")));
+  editados = 0;
+  await S.montarSuporte(guild);
+  ok("nada mudou: nada é editado", editados, 0);
+  editados = 0;
   const tituloVelho = S.TEXTOS.regras.en.title;
   S.TEXTOS.regras.en.title = "📜 Rules (v2)";
   const mudou = await S.montarSuporte(guild);

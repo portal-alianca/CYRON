@@ -355,10 +355,31 @@ export function nomeNoIdioma(nomeOriginal, idioma) {
 
 export const PREFIXO_LER = "sup:ler:";
 
-function linhaDeLer(chave) {
+/* Embaixo de cada texto: o botao que leva a sala de escolher o idioma, e o
+   que mostra o texto traduzido so' para quem clicou.
+
+   A porta vem primeiro. Quem le a sala universal ainda nao escolheu idioma
+   (quem escolheu le a copia na lingua dele), e a coisa mais util para essa
+   pessoa e' ir escolher -- dai' as salas aparecem traduzidas, e ela nunca
+   mais precisa do botao de traduzir. O botao nao vai para as copias: a
+   copia sai por webhook, sem componentes, e quem a le ja' escolheu. */
+function linhaDeLer(chave, porta) {
   return { type: 1, components: [
+    ...(porta ? [{ type: 2, style: 5, emoji: { name: "🗺️" }, label: "Choose your language · Escolha o idioma", url: porta }] : []),
     { type: 2, style: 2, custom_id: `${PREFIXO_LER}${chave}`, emoji: { name: "🌐" }, label: "My language · Na minha língua" },
   ] };
+}
+
+/* O endereco da sala de escolher o idioma, para o botao de link. */
+async function enderecoDaPorta(guild) {
+  const id = d.portaDoIdioma ? await d.portaDoIdioma(guild).catch(() => null) : null;
+  return id ? `https://discord.com/channels/${guild.id}/${id}` : null;
+}
+
+function botoesIguais(antes, agora) {
+  const chave = (linhas) => JSON.stringify((linhas || []).map((l) =>
+    (l.components || []).map((c) => [c.customId ?? c.custom_id ?? null, c.url ?? null])));
+  return chave(antes) === chave(agora);
 }
 
 function cartao(chave, lingua) {
@@ -367,8 +388,8 @@ function cartao(chave, lingua) {
 
 /* O texto que eu ja' postei e' reconhecido pelo botao dele, e nao pelo
    titulo: o titulo pode mudar numa versao nova, o custom_id nao. */
-async function postarOuEditar(canal, chave) {
-  const corpo = { embeds: [cartao(chave, "en")], components: [linhaDeLer(chave)] };
+async function postarOuEditar(canal, chave, porta = null) {
+  const corpo = { embeds: [cartao(chave, "en")], components: [linhaDeLer(chave, porta)] };
   const recentes = await canal.messages.fetch({ limit: 30 }).catch(() => null);
   const meu = recentes?.find((m) => m.author?.id === d.client.user.id &&
     m.components?.some((l) => l.components?.some((c) => c.customId === `${PREFIXO_LER}${chave}`)));
@@ -377,7 +398,13 @@ async function postarOuEditar(canal, chave) {
     const agora = corpo.embeds[0];
     const igual = JSON.stringify([antes.title, antes.description, (antes.fields || []).map((f) => [f.name, f.value])]) ===
       JSON.stringify([agora.title, agora.description, (agora.fields || []).map((f) => [f.name, f.value])]);
-    if (igual) return "igual";
+    if (igual) {
+      /* So' os botoes mudaram (a porta apareceu, ou mudou de canal): edita,
+         mas as copias ficam -- elas nao levam botao. */
+      if (botoesIguais(meu.components ?? meu.corpo?.components, corpo.components)) return "igual";
+      await meu.edit(corpo);
+      return "botoes";
+    }
     await meu.edit(corpo);
     return "editado";
   }
@@ -391,6 +418,7 @@ export async function montarSuporte(guild) {
   const leitura = [];
   const mudaram = [];
   await guild.channels.fetch();
+  const porta = await enderecoDaPorta(guild);
   const eu = d.client.user.id;
 
   for (const bloco of ESTRUTURA) {
@@ -422,9 +450,10 @@ export async function montarSuporte(guild) {
         });
         feito.push(`#${c.nome}`);
       }
-      const como = await postarOuEditar(canal, c.texto);
+      const como = await postarOuEditar(canal, c.texto, c.leitura ? porta : null);
       if (como === "postado") feito.push(`📝 texto em #${c.nome}`);
       if (como === "editado") { feito.push(`✏️ texto novo em #${c.nome}`); mudaram.push(canal.id); }
+      if (como === "botoes") feito.push(`🗺️ botão de escolher o idioma em #${c.nome}`);
       if (c.sistema && guild.systemChannelId !== canal.id) {
         await guild.setSystemChannel(canal).then(() => feito.push(`👋 entradas anunciadas em #${c.nome}`)).catch(() => {});
       }
