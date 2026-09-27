@@ -128,7 +128,9 @@ export const CONTATO_OFICIAL = "1553232972608442491";
 /* Texto, e nao mencao (<@id>): a copia traduzida sai por webhook, e ali o
    Discord mostrava o numero cru -- "<@1553232972608442491>" -- em vez do
    nome. O nome da conta, em negrito, sobrevive ao tradutor e ao webhook. */
-const CONTATO = "**@cyron02** (CYRON SUPPORT)";
+/* So' o nome da conta: "(CYRON SUPPORT)" ao lado virava "(SUPORTE CYRON)"
+   no tradutor -- nome de marca traduzido. */
+const CONTATO = "**@cyron02**";
 
 export const TEXTOS = {
   boas: {
@@ -147,7 +149,7 @@ export const TEXTOS = {
       title: "👋 Welcome to CYRON Support",
       description: "**CYRON** translates your Discord server: everyone writes in their own language, and everyone reads in theirs.",
       fields: [
-        { name: "1️⃣ Pick your language", value: "The rooms show up in your language, just for you." },
+        { name: "1️⃣ Pick your language", value: "The channels show up in your language, just for you." },
         { name: "2️⃣ Read the rules and how to use it", value: "📜 rules · 📖 how to use · 💳 plans" },
         { name: "3️⃣ Need help?", value: "Write in your language's **💬 chat**, in your own language. The team reads it translated and replies." },
         { name: "💳 Want to subscribe?", value: `DM the official contact ${CONTATO}. It is the only account that sells CYRON.` },
@@ -204,7 +206,7 @@ export const TEXTOS = {
         { name: "2️⃣ Set it up with /cyron", value: "In the panel, mark the channels you want translated and see your plan." },
         { name: "3️⃣ Everyone picks their language", value: "In the 🌐 channel, just once. Done." },
         { name: "💬 Translate a single message", value: "React with the language's flag, or right-click → Apps → Translate." },
-        { name: "⭐ On Pro and Alliance", value: "Each language gets its own rooms and a chat where everyone talks translated, with name and avatar. It also translates 🖼️ images and 🎧 audio." },
+        { name: "⭐ On Pro and Alliance", value: "Each language gets its own channels and a chat where everyone talks translated, with name and avatar. It also translates 🖼️ images and 🎧 audio." },
         { name: "🎁 Free trial", value: "In /cyron, the 🎁 button turns on 7 days of Pro. You need to be in this server." },
       ],
     },
