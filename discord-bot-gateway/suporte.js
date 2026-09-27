@@ -26,12 +26,37 @@ export function ligarSuporte(dependencias) { d = dependencias; }
 let achado = { link: "", guild: null, t: 0 };
 
 export async function guildDoSuporte() {
+  /* Pelo numero primeiro: nao vence e nao depende de rede. O convite fica
+     como segunda via, para quem trocar de servidor so' trocando o link. */
+  const peloNumero = d.SUPORTE.guild ? d.client.guilds.cache.get(d.SUPORTE.guild) : null;
+  if (peloNumero) return peloNumero;
   const link = d.SUPORTE.link;
   if (achado.link === link && achado.guild && Date.now() - achado.t < 60 * 60 * 1000) return achado.guild;
   const convite = await d.client.fetchInvite(link).catch(() => null);
   const guild = convite?.guild?.id ? d.client.guilds.cache.get(convite.guild.id) ?? null : null;
   achado = { link, guild, t: Date.now() };
   return guild;
+}
+
+/* O convite do botao 💬 Suporte vivo.
+
+   Convite vencido e' um botao que leva a "convite invalido" -- justamente
+   para quem queria ajuda ou queria pagar. Se o do ajuste morreu, o proprio
+   bot cria um que nunca vence, na sala de boas-vindas, e grava no lugar.
+   Devolve o link novo, ou null se o de agora ainda vale (ou nao deu). */
+export async function garantirConvite(guild) {
+  const vale = await d.client.fetchInvite(d.SUPORTE.link).then((c) => c?.guild?.id === guild.id).catch(() => false);
+  if (vale) return null;
+  const sala = guild.systemChannel ||
+    guild.channels.cache.find((c) => c.type === d.ChannelType.GuildText && c.name === ESTRUTURA[0].canais[0].nome);
+  if (!sala) return null;
+  const novo = await sala.createInvite({ maxAge: 0, maxUses: 0, unique: false, reason: "convite do suporte venceu" })
+    .catch(() => null);
+  if (!novo?.code) return null;
+  const link = `https://discord.gg/${novo.code}`;
+  d.SUPORTE.link = link;
+  if (d.porAjuste) await d.porAjuste("suporte_link", link).catch(() => {});
+  return link;
 }
 
 /* ---------------- quem esta' no suporte ----------------
@@ -407,6 +432,8 @@ export async function montarSuporte(guild) {
   }
 
   for (const f of await limparSobras(guild)) feito.push(f);
+  const convite = await garantirConvite(guild).catch(() => null);
+  if (convite) feito.push(`🔗 o convite tinha vencido: criei um que nunca vence (${convite})`);
   return feito;
 }
 
