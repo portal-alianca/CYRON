@@ -128,9 +128,14 @@ export const CONTATO_OFICIAL = "1553232972608442491";
 /* Texto, e nao mencao (<@id>): a copia traduzida sai por webhook, e ali o
    Discord mostrava o numero cru -- "<@1553232972608442491>" -- em vez do
    nome. O nome da conta, em negrito, sobrevive ao tradutor e ao webhook. */
-/* So' o nome da conta: "(CYRON SUPPORT)" ao lado virava "(SUPORTE CYRON)"
-   no tradutor -- nome de marca traduzido. */
-const CONTATO = "**@cyron02**";
+/* Link para o perfil, e nao mencao nem texto solto.
+
+   A mencao (<@id>) saia crua na copia por webhook. O texto em negrito saia
+   cinza e nao abria nada -- quem queria comprar nao tinha onde tocar. O
+   link mascarado fica azul, abre o perfil (com o botao de mensagem) em
+   qualquer mensagem, inclusive nas copias, e o tradutor nao mexe em URL. */
+export const LINK_DO_CONTATO = `https://discord.com/users/${CONTATO_OFICIAL}`;
+const CONTATO = `[@cyron02](${LINK_DO_CONTATO})`;
 
 export const TEXTOS = {
   boas: {

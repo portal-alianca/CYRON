@@ -8988,6 +8988,9 @@ function conferirCartao(onde, embed, componentes = []) {
     }
     verdade("planos: fora do Brasil não manda mais para o chat público",
       !/chat do seu idioma qual plano/.test(texto(S.TEXTOS.pagamento.pt)) && !/chat which plan/.test(texto(S.TEXTOS.pagamento.en)));
+    verdade("o contato é um link clicável para o perfil",
+      texto(S.TEXTOS.pagamento.pt).includes(`[@cyron02](${S.LINK_DO_CONTATO})`) &&
+      S.LINK_DO_CONTATO === `https://discord.com/users/${S.CONTATO_OFICIAL}`);
     verdade("o contato vai como texto, e não como menção crua (webhook mostrava o número)",
       !Object.values(S.TEXTOS).some((t) => /<@\d+>/.test(JSON.stringify(t))));
     verdade("nenhum texto do suporte tem rodapé (o rodapé não é traduzido na cópia)",
