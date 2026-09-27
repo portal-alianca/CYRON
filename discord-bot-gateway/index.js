@@ -12117,7 +12117,7 @@ const SITE_DO_CYRON = "https://portal-alianca.github.io/cyron/";
    O convite pode mudar (convite de Discord expira, ou e' refeito), entao o
    ajuste `suporte_link` no banco vale mais que o do codigo: trocar e' gravar
    uma linha, nao publicar o bot. */
-const SUPORTE_PADRAO = "https://discord.gg/tcCdqeAdR";
+const SUPORTE_PADRAO = "https://discord.gg/yDwePceB38";
 /* O servidor de suporte pelo NUMERO dele, e nao so' pelo convite.
 
    Ele era descoberto pelo convite -- e convite vence. Venceu, e o bot
