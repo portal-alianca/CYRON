@@ -22,7 +22,7 @@ import { CATEGORIAS, doCliente } from "./catalogo.js";
 import { ligarAlianca, COMANDOS_DA_ALIANCA, comandoDaAlianca, boasVindasDaAlianca,
   seletorNasBoasVindas, rosasDaAlianca } from "./alianca.js";
 import { ligarSuporte, exigirSuporte, montarSuporte, guildDoSuporte, cliqueSuporte, PREFIXO_LER,
-  nomeNoIdioma, ordemNoSuporte, garantirConvite, repararFontes } from "./suporte.js";
+  nomeNoIdioma, ordemNoSuporte, garantirConvite } from "./suporte.js";
 import { fileURLToPath } from "node:url";
 
 /* A fonte da imagem traduzida vai JUNTO com o bot, e nao e' a da maquina: a
@@ -14763,7 +14763,18 @@ client.once("clientReady", () => {
       const g = await guildDoSuporte().catch(() => null);
       const novo = g && await garantirConvite(g).catch(() => null);
       if (novo) console.log(`suporte: o convite tinha vencido; novo: ${novo}`);
-      if (g) await repararFontes(g).catch((e) => console.error("suporte: não reparei as fontes:", e?.message || e));
+      /* O servidor de suporte se arruma sozinho a cada partida: texto novo
+         publicado chega as salas (e as copias traduzidas sao refeitas) sem
+         esperar o dono apertar Montar suporte -- passo que ficava para tras
+         e deixava a sala com o texto velho. Montar e' idempotente: o que ja'
+         esta' certo nao e' tocado. */
+      if (g) {
+        const feito = await montarSuporte(g).catch((e) => {
+          console.error("suporte: não consegui arrumar o servidor ao subir:", e?.message || e);
+          return null;
+        });
+        if (feito?.length) console.log(`suporte: arrumado ao subir: ${feito.join(" · ").slice(0, 500)}`);
+      }
     });
   /* `true` = agora, sem olhar o relogio: ao subir eu quero a resposta, e o
      relogio ainda esta zerado de qualquer jeito. Dito explicitamente pra
