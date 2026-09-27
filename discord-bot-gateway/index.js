@@ -22,7 +22,7 @@ import { CATEGORIAS, doCliente } from "./catalogo.js";
 import { ligarAlianca, COMANDOS_DA_ALIANCA, comandoDaAlianca, boasVindasDaAlianca,
   seletorNasBoasVindas, rosasDaAlianca } from "./alianca.js";
 import { ligarSuporte, exigirSuporte, montarSuporte, guildDoSuporte, cliqueSuporte, PREFIXO_LER,
-  nomeNoIdioma } from "./suporte.js";
+  nomeNoIdioma, ordemNoSuporte } from "./suporte.js";
 import { fileURLToPath } from "node:url";
 
 /* A fonte da imagem traduzida vai JUNTO com o bot, e nao e' a da maquina: a
@@ -5042,6 +5042,8 @@ async function montarCategorias(guild, servidorId, porIdioma, pago, orcamento, l
   if (!tipos.length) {
     console.log(`idioma: ${guild.name} não tem canal-fonte que gere réplica; só a categoria`);
   }
+  /* No suporte, a ordem das salas e' a do roteiro de quem chega. */
+  if (doSuporte) tipos.sort((a, b) => ordemNoSuporte(a.nomeBase) - ordemNoSuporte(b.nomeBase));
 
   for (const sala of porIdioma.values()) {
     try {
