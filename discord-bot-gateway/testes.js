@@ -8820,6 +8820,17 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("sem servidor de suporte achável: ninguém é barrado", await S.estaNoSuporte("ninguem"));
   temGuild = true; ligacao.link = "https://discord.gg/suporte";
 
+  /* ---- a ordem das cópias segue o roteiro, não a data do cadastro ---- */
+  const ordem = ["📣・news", "📜・rules", "👋・welcome", "anuncios", "💳・plans", "📖・how-to-use"]
+    .sort((x, y) => S.ordemNoSuporte(x) - S.ordemNoSuporte(y));
+  ok("boas-vindas, regras, como usar, planos, novidades; o resto no fim", ordem,
+    ["👋・welcome", "📜・rules", "📖・how-to-use", "💳・plans", "📣・news", "anuncios"]);
+  {
+    const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+    verdade("só o suporte reordena as salas",
+      /if \(doSuporte\) tipos\.sort\(\(a, b\) => ordemNoSuporte\(a\.nomeBase\) - ordemNoSuporte\(b\.nomeBase\)\);/.test(idx));
+  }
+
   /* ---- o nome da cópia na língua de quem lê ---- */
   ok("em japonês, as regras", S.nomeNoIdioma("📜・rules", "ja"), "📜・ルール");
   ok("em português, boas-vindas", S.nomeNoIdioma("👋・welcome", "pt"), "👋・boas-vindas");

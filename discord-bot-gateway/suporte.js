@@ -292,6 +292,15 @@ export const NOMES = {
   uk: { welcome: "вітаємо", rules: "правила", howto: "як-користуватися", plans: "тарифи", news: "новини", chat: "чат" },
 };
 
+/* A ordem das copias no suporte e' a da ESTRUTURA, e nao a ordem em que as
+   fontes foram cadastradas -- senao a sala que nasceu primeiro (news, de uma
+   montagem antiga) ficava no topo, antes das boas-vindas. Sala que nao e'
+   do suporte vai para o fim. */
+export function ordemNoSuporte(nomeOriginal) {
+  const i = ESTRUTURA.flatMap((b) => b.canais).findIndex((c) => c.nome === nomeOriginal);
+  return i < 0 ? 999 : i;
+}
+
 /* "👋・welcome" em japones vira "👋・ようこそ". O emoji fica: e' ele que
    diz, sem ler, que a sala e' a mesma nas vinte linguas. Nula quando a sala
    nao e' do suporte ou a lingua nao esta' na tabela -- e ai vale o nome de
