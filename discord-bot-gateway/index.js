@@ -22,7 +22,7 @@ import { CATEGORIAS, doCliente } from "./catalogo.js";
 import { ligarAlianca, COMANDOS_DA_ALIANCA, comandoDaAlianca, boasVindasDaAlianca,
   seletorNasBoasVindas, rosasDaAlianca } from "./alianca.js";
 import { ligarSuporte, exigirSuporte, montarSuporte, guildDoSuporte, cliqueSuporte, PREFIXO_LER,
-  nomeNoIdioma, ordemNoSuporte } from "./suporte.js";
+  nomeNoIdioma, ordemNoSuporte, garantirConvite } from "./suporte.js";
 import { fileURLToPath } from "node:url";
 
 /* A fonte da imagem traduzida vai JUNTO com o bot, e nao e' a da maquina: a
@@ -4047,6 +4047,7 @@ async function recarregarAjustes() {
   LINK_PAGAMENTO_VIVO = links.alianca || LINK_PAGAMENTO;
   LINK_PRO_VIVO = links.pro;
   SUPORTE.link = linkDeSuporte(a.suporte_link);
+  SUPORTE.guild = /^\d{17,20}$/.test(String(a.suporte_guild || "")) ? String(a.suporte_guild) : SUPORTE_GUILD_PADRAO;
 
   /* Os tradutores de reserva sao lidos aqui, e nao a cada mensagem: enderecos
      mudam de mes em mes, nao de fala em fala. A cada minuto os ajustes voltam
@@ -12049,7 +12050,14 @@ const SITE_DO_CYRON = "https://portal-alianca.github.io/cyron/";
    ajuste `suporte_link` no banco vale mais que o do codigo: trocar e' gravar
    uma linha, nao publicar o bot. */
 const SUPORTE_PADRAO = "https://discord.gg/tcCdqeAdR";
-const SUPORTE = { link: SUPORTE_PADRAO };
+/* O servidor de suporte pelo NUMERO dele, e nao so' pelo convite.
+
+   Ele era descoberto pelo convite -- e convite vence. Venceu, e o bot
+   deixou de reconhecer o proprio servidor de suporte: os nomes traduzidos
+   voltaram a "news-pt", a ordem se desfez, e a porta do teste e do Pix
+   passou a deixar todo mundo entrar. O numero do servidor nao vence. */
+const SUPORTE_GUILD_PADRAO = "1553235773799534594";
+const SUPORTE = { link: SUPORTE_PADRAO, guild: SUPORTE_GUILD_PADRAO };
 
 function linkDeSuporte(valor) {
   const v = String(valor || "").trim();
@@ -12063,7 +12071,7 @@ function botaoDeSuporte() {
 /* Aqui, e nao junto do ligarAlianca: SUPORTE so' existe a partir daqui, e
    entregar antes dava erro de variavel ainda nao criada na partida. */
 ligarSuporte({ client, SUPORTE, COR, traduzirEmbed, idiomaEscolhido, idiomaDoAplicativo, ChannelType, PermissionFlagsBits,
-  fontesDoSuporte, refazerCopias });
+  fontesDoSuporte, refazerCopias, porAjuste });
 
 /* O estado da conversa mora no custom_id, e nao numa tabela.
 
@@ -14683,7 +14691,15 @@ client.once("clientReady", () => {
 
   separarComandos()
     .then(() => garantirComandosGlobais())
-    .then(() => arrumarOndeMoraOAdmin());
+    .then(() => arrumarOndeMoraOAdmin())
+    /* Convite do suporte vencido ao subir: refeito ja', sem esperar o dono
+       apertar Montar suporte. O botao 💬 de todos os servidores aponta
+       para ele. */
+    .then(async () => {
+      const g = await guildDoSuporte().catch(() => null);
+      const novo = g && await garantirConvite(g).catch(() => null);
+      if (novo) console.log(`suporte: o convite tinha vencido; novo: ${novo}`);
+    });
   /* `true` = agora, sem olhar o relogio: ao subir eu quero a resposta, e o
      relogio ainda esta zerado de qualquer jeito. Dito explicitamente pra
      ninguem "limpar" essa chamada achando que a varredura ja cobre. */

@@ -8688,9 +8688,10 @@ function conferirCartao(onde, embed, componentes = []) {
     } },
   };
   const ligacao = { link: "https://discord.gg/suporte" };
+  let depsDoSuporte;
   const fontesDoSuporte = [];
   const refeitas = [];
-  S.ligarSuporte({
+  S.ligarSuporte(depsDoSuporte = {
     client: { user: { id: "bot" }, fetchInvite: async () => (temGuild ? { guild: { id: "g-sup" } } : null),
       guilds: { cache: new Map([["g-sup", guild]]) } },
     SUPORTE: ligacao, COR: 1,
@@ -8819,6 +8820,24 @@ function conferirCartao(onde, embed, componentes = []) {
   temGuild = false; ligacao.link = "https://discord.gg/outro";
   verdade("sem servidor de suporte achável: ninguém é barrado", await S.estaNoSuporte("ninguem"));
   temGuild = true; ligacao.link = "https://discord.gg/suporte";
+
+  /* ---- o convite vence; o servidor de suporte continua reconhecido ---- */
+  ligacao.guild = "g-sup";
+  temGuild = false; ligacao.link = "https://discord.gg/vencido";
+  ok("convite vencido: o suporte é achado pelo número", (await S.guildDoSuporte())?.id, "g-sup");
+  const gravados = [];
+  const convitesCriados = [];
+  guild.systemChannel = { createInvite: async (o) => { convitesCriados.push(o); return { code: "NovoSempre" }; } };
+  S.ligarSuporte({ ...depsDoSuporte, porAjuste: async (k, v) => { gravados.push([k, v]); } });
+  ok("e o bot cria um convite novo", await S.garantirConvite(guild), "https://discord.gg/NovoSempre");
+  ok("que nunca vence", [convitesCriados[0].maxAge, convitesCriados[0].maxUses], [0, 0]);
+  ok("e grava no lugar do vencido", gravados, [["suporte_link", "https://discord.gg/NovoSempre"]]);
+  ok("o botão 💬 passa a apontar para ele", ligacao.link, "https://discord.gg/NovoSempre");
+  temGuild = true; ligacao.link = "https://discord.gg/suporte";
+  convitesCriados.length = 0;
+  ok("convite vivo: não mexe", await S.garantirConvite(guild), null);
+  ok("nem cria outro", convitesCriados.length, 0);
+  delete ligacao.guild;
 
   /* ---- a ordem das cópias segue o roteiro, não a data do cadastro ---- */
   const ordem = ["📣・news", "📜・rules", "👋・welcome", "anuncios", "💳・plans", "📖・how-to-use"]
