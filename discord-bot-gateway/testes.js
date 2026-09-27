@@ -8729,6 +8729,10 @@ function conferirCartao(onde, embed, componentes = []) {
   const catVoz = fazCanal({ name: "Canais de Voz", type: CT.GuildCategory });
   fazCanal({ name: "geral", type: CT.GuildText, parent: catTexto.id }).msgs.push({ system: true, author: { id: "x" } });
   fazCanal({ name: "Geral", type: CT.GuildVoice, parent: catVoz.id });
+  /* A cópia inglesa tem o MESMO nome da sala original, em outra categoria.
+     Ela não pode ser confundida com a original. */
+  const catIngles = fazCanal({ name: "en-english", type: CT.GuildCategory });
+  const copiaIngles = fazCanal({ name: "👋・welcome", type: CT.GuildText, parent: catIngles.id });
   const catDoDono = fazCanal({ name: "Text Channels", type: CT.GuildCategory });
   fazCanal({ name: "sala-do-dono", type: CT.GuildText, parent: catDoDono.id });
   fazCanal({ name: "❓・help", type: CT.GuildText }).msgs.push({ author: { id: "cliente", bot: false } });
@@ -8775,6 +8779,17 @@ function conferirCartao(onde, embed, componentes = []) {
   const deLeitura = S.ESTRUTURA.flatMap((b) => b.canais).filter((c) => c.leitura).map((c) => c.nome);
   ok("as fontes do suporte são exatamente as salas de leitura",
     fontesDoSuporte.map((id) => canais.get(id).name).sort(), [...deLeitura].sort());
+  verdade("a cópia inglesa, de mesmo nome, NÃO vira origem (ela se copiaria de si mesma)",
+    !fontesDoSuporte.includes(copiaIngles.id));
+  const startHere = [...canais.values()].find((c) => c.name === "📌 START HERE");
+  verdade("todas as origens estão na categoria do roteiro", fontesDoSuporte.every((id) => canais.get(id).parentId === startHere.id));
+  ok("e o texto foi para a original, não para a cópia", copiaIngles.msgs.length, 0);
+
+  /* Ao subir, o bot conserta sozinho as origens. */
+  fontesDoSuporte.length = 0;
+  await S.repararFontes(guild);
+  ok("reparar: as origens voltam a ser as originais", fontesDoSuporte.map((id) => canais.get(id).name).sort(), [...deLeitura].sort());
+  verdade("reparar: nunca a cópia", !fontesDoSuporte.includes(copiaIngles.id));
   verdade("bugs e sugestões não viram cópia (são conversa)",
     !fontesDoSuporte.some((id) => /bugs|suggestions/.test(canais.get(id).name)));
   verdade("dúvida e pagamento não têm mais sala própria: é no chat do idioma",
@@ -9041,6 +9056,25 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("canal que o Discord recusou apagar fica registrado", !apagadasDb.some((q) => q.includes("r4")));
   verdade("o cache das cópias é esquecido", !globalThis.cacheReplicas.has("s1"));
   Object.assign(globalThis, { servidorDoGuild: salvo.a, fontesReplica: salvo.b, sb: salvo.c, sbDel: salvo.d, cacheReplicas: salvo.e });
+}
+
+/* ---- cópia nunca é origem ---- */
+{
+  const salvo = { sb: globalThis.sb, sbPost: globalThis.sbPost, sbDel: globalThis.sbDel, cf: globalThis.cacheFontes };
+  const postados = [];
+  globalThis.sb = async (q) => q.startsWith("discord_canal_idioma") ? [{ canal_id: "copia-en" }] : [];
+  globalThis.sbPost = async (t, corpo) => { postados.push(corpo.canal_id); };
+  globalThis.sbDel = async () => {};
+  globalThis.cacheFontes = new Map();
+  globalThis.rotuloDoCanal = globalThis.rotuloDoCanal || ((n) => n);
+  const { definirFontes } = carregar(["rotuloDoCanal", "definirFontes"]);
+  await definirFontes({ channels: { cache: new Map() } }, { id: "s1" }, ["original", "copia-en"]);
+  ok("o menu não deixa cadastrar uma cópia como origem", postados, ["original"]);
+  const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+  verdade("a varredura ignora cópia cadastrada como origem",
+    /if \(ehCopia\.has\(canalId\)\) \{/.test(idx) && /if \(modelos\.has\(tipo\) \|\| ehCopia\.has\(canalId\)\) continue;/.test(idx));
+  verdade("e o bot repara as origens do suporte ao subir", /await repararFontes\(g\)/.test(idx));
+  Object.assign(globalThis, { sb: salvo.sb, sbPost: salvo.sbPost, sbDel: salvo.sbDel, cacheFontes: salvo.cf });
 }
 
 /* ---- o painel do dono pelo privado ---- */

@@ -390,7 +390,12 @@ export async function montarSuporte(guild) {
         for (const f of await garantirForum(guild, categoria, c)) feito.push(f);
         continue;
       }
-      let canal = guild.channels.cache.find((x) => x.type === ChannelType.GuildText && x.name === c.nome);
+      /* Dentro da categoria DELA, e nao no servidor todo: a copia inglesa
+         leva o mesmo nome ("👋・welcome"), e achar a copia no lugar da
+         original fez a copia virar origem de si mesma -- a cada varredura
+         ela ganhava mais um "-en" no nome. */
+      let canal = guild.channels.cache.find((x) =>
+        x.type === ChannelType.GuildText && x.name === c.nome && x.parentId === categoria.id);
       if (!canal) {
         canal = await guild.channels.create({
           name: c.nome, type: ChannelType.GuildText, parent: categoria.id, topic: c.topico,
@@ -435,6 +440,35 @@ export async function montarSuporte(guild) {
   const convite = await garantirConvite(guild).catch(() => null);
   if (convite) feito.push(`🔗 o convite tinha vencido: criei um que nunca vence (${convite})`);
   return feito;
+}
+
+/* As salas de leitura ORIGINAIS: as da categoria do roteiro, com o nome
+   exato. Nula se falta alguma -- ai' quem arruma e' o Montar suporte, e nao
+   um conserto automatico. */
+export function salasDeLeitura(guild) {
+  const { ChannelType } = d;
+  const ids = [];
+  for (const bloco of ESTRUTURA) {
+    const leitura = bloco.canais.filter((c) => c.leitura);
+    if (!leitura.length) continue;
+    const categoria = guild.channels.cache.find((c) => c.type === ChannelType.GuildCategory && c.name === bloco.categoria);
+    if (!categoria) return null;
+    for (const c of leitura) {
+      const canal = guild.channels.cache.find((x) =>
+        x.type === ChannelType.GuildText && x.name === c.nome && x.parentId === categoria.id);
+      if (!canal) return null;
+      ids.push(canal.id);
+    }
+  }
+  return ids;
+}
+
+/* Ao subir: as fontes do suporte voltam a ser as salas originais. Conserta
+   sozinho o estrago de uma copia que virou origem, sem esperar o dono. */
+export async function repararFontes(guild) {
+  const ids = salasDeLeitura(guild);
+  if (!ids?.length || !d.fontesDoSuporte) return null;
+  return await d.fontesDoSuporte(guild, ids);
 }
 
 /* O forum de bugs ou de sugestoes.

@@ -22,7 +22,7 @@ import { CATEGORIAS, doCliente } from "./catalogo.js";
 import { ligarAlianca, COMANDOS_DA_ALIANCA, comandoDaAlianca, boasVindasDaAlianca,
   seletorNasBoasVindas, rosasDaAlianca } from "./alianca.js";
 import { ligarSuporte, exigirSuporte, montarSuporte, guildDoSuporte, cliqueSuporte, PREFIXO_LER,
-  nomeNoIdioma, ordemNoSuporte, garantirConvite } from "./suporte.js";
+  nomeNoIdioma, ordemNoSuporte, garantirConvite, repararFontes } from "./suporte.js";
 import { fileURLToPath } from "node:url";
 
 /* A fonte da imagem traduzida vai JUNTO com o bot, e nao e' a da maquina: a
@@ -4954,10 +4954,10 @@ function umaVezPorProcesso(chave) {
 /* Qual canal original empresta o nome pra cada tipo de replica. Dois canais
    podem alimentar o mesmo tipo (evento vem do event-guide E do hunting-trap):
    quem empresta e' o primeiro cadastrado, por isso a consulta vem ordenada. */
-async function modelosDeNome(guild, servidorId) {
+async function modelosDeNome(guild, servidorId, ehCopia = new Set()) {
   const modelos = new Map();
   for (const [canalId, tipo] of await fontesReplica(servidorId)) {
-    if (modelos.has(tipo)) continue;
+    if (modelos.has(tipo) || ehCopia.has(canalId)) continue;
     const canal = await guild.channels.fetch(canalId).catch(() => null);
     if (canal) modelos.set(tipo, canal.name);
   }
@@ -5024,7 +5024,11 @@ async function montarCategorias(guild, servidorId, porIdioma, pago, orcamento, l
     console.log(`idioma: replica ${r.tipo} de ${r.idioma} sumiu, vai ser refeita`);
   }
   const porChave = new Map(vistos.map((r) => [`${r.idioma}|${r.tipo}`, r.canal_id]));
-  const modelos = await modelosDeNome(guild, servidorId);
+  /* Copia nunca e' origem. Se uma virou (por engano de quem cadastrou, ou
+     por nome igual), ela se copiaria de si mesma e o nome cresceria a cada
+     passada: "welcome-en-en-en-en". Aqui ela simplesmente nao conta. */
+  const ehCopia = new Set(existentes.map((r) => r.canal_id));
+  const modelos = await modelosDeNome(guild, servidorId, ehCopia);
   const prontos = new Set();
 
   /* A lista de replicas DESTE servidor: uma por canal-fonte que gera replica.
@@ -5034,6 +5038,10 @@ async function montarCategorias(guild, servidorId, porIdioma, pago, orcamento, l
   const tipos = [];
   for (const [canalId, tipo] of fontes) {
     if (!fontes.geraReplica?.has(canalId)) continue;
+    if (ehCopia.has(canalId)) {
+      if (umaVezPorProcesso(`copia-fonte:${canalId}`)) console.error(`idioma: ${guild.name} tem uma cópia cadastrada como origem (${canalId}); ignorei`);
+      continue;
+    }
     if (tipos.some((t) => t.tipo === tipo)) continue; // duas fontes, um destino
     /* O canal de origem viaja junto: e' dele que a replica tira quem entra e
        quem fala. Antes so' o rotulo vinha, e por isso a replica de um canal
@@ -8970,6 +8978,9 @@ async function refazerCopias(guild, idsDeOrigem) {
 
 /* O menu manda o conjunto inteiro, entao a gravacao e' a diferenca. */
 async function definirFontes(guild, servidor, ids) {
+  const copias = new Set(((await sb(
+    `discord_canal_idioma?servidor_id=eq.${servidor.id}&select=canal_id`)) || []).map((r) => r.canal_id));
+  ids = ids.filter((id) => !copias.has(id));
   const antigas = await sb(
     `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&select=canal_id`) || [];
   const atuais = new Set(antigas.map((a) => a.canal_id));
@@ -14699,6 +14710,7 @@ client.once("clientReady", () => {
       const g = await guildDoSuporte().catch(() => null);
       const novo = g && await garantirConvite(g).catch(() => null);
       if (novo) console.log(`suporte: o convite tinha vencido; novo: ${novo}`);
+      if (g) await repararFontes(g).catch((e) => console.error("suporte: não reparei as fontes:", e?.message || e));
     });
   /* `true` = agora, sem olhar o relogio: ao subir eu quero a resposta, e o
      relogio ainda esta zerado de qualquer jeito. Dito explicitamente pra
