@@ -8979,7 +8979,7 @@ function conferirCartao(onde, embed, componentes = []) {
   /* ---- comprar: só pelo contato oficial, no privado ---- */
   {
     const texto = (t) => [t.description, ...(t.fields || []).map((f) => f.value)].join(" ");
-    const mencao = `<@${S.CONTATO_OFICIAL}>`;
+    const mencao = "@cyron02";
     for (const k of ["pagamento", "regras", "boas"]) {
       for (const l of ["pt", "en"]) {
         verdade(`${k} (${l}) aponta o contato oficial`, texto(S.TEXTOS[k][l]).includes(mencao));
@@ -8987,6 +8987,10 @@ function conferirCartao(onde, embed, componentes = []) {
     }
     verdade("planos: fora do Brasil não manda mais para o chat público",
       !/chat do seu idioma qual plano/.test(texto(S.TEXTOS.pagamento.pt)) && !/chat which plan/.test(texto(S.TEXTOS.pagamento.en)));
+    verdade("o contato vai como texto, e não como menção crua (webhook mostrava o número)",
+      !Object.values(S.TEXTOS).some((t) => /<@\d+>/.test(JSON.stringify(t))));
+    verdade("nenhum texto do suporte tem rodapé (o rodapé não é traduzido na cópia)",
+      Object.values(S.TEXTOS).every((t) => !t.pt.footer && !t.en.footer));
     verdade("regras: o contato oficial nunca chama primeiro (fecha o golpe de quem se passa por ele)",
       /nunca\*\* chama primeiro/.test(texto(S.TEXTOS.regras.pt)) && /never\*\* messages first/.test(texto(S.TEXTOS.regras.en)));
   }

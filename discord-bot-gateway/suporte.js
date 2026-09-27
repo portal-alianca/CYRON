@@ -125,12 +125,10 @@ const COR_SUPORTE = 0x5865F2;
    passar pelo suporte -- e' fechado por duas regras que os textos repetem:
    so' esta conta vende, e ela nunca chama primeiro. */
 export const CONTATO_OFICIAL = "1553232972608442491";
-const CONTATO = `<@${CONTATO_OFICIAL}> (\`cyron02\`)`;
-
-const RODAPE = {
-  pt: "CYRON Support · 🌐 toque no botão para ler na sua língua",
-  en: "CYRON Support · 🌐 tap the button to read in your language",
-};
+/* Texto, e nao mencao (<@id>): a copia traduzida sai por webhook, e ali o
+   Discord mostrava o numero cru -- "<@1553232972608442491>" -- em vez do
+   nome. O nome da conta, em negrito, sobrevive ao tradutor e ao webhook. */
+const CONTATO = "**@cyron02** (CYRON SUPPORT)";
 
 export const TEXTOS = {
   boas: {
@@ -144,7 +142,6 @@ export const TEXTOS = {
         { name: "💳 Quer assinar?", value: `Chame no privado o contato oficial ${CONTATO}. É o único que vende o CYRON.` },
         { name: "💡 Ideias e 🐞 defeitos", value: "Abra um post no fórum de sugestões ou no de bugs." },
       ],
-      footer: { text: RODAPE.pt },
     },
     en: {
       title: "👋 Welcome to CYRON Support",
@@ -156,7 +153,6 @@ export const TEXTOS = {
         { name: "💳 Want to subscribe?", value: `DM the official contact ${CONTATO}. It is the only account that sells CYRON.` },
         { name: "💡 Ideas and 🐞 defects", value: "Open a post in the suggestions or bugs forum." },
       ],
-      footer: { text: RODAPE.en },
     },
   },
   regras: {
@@ -170,8 +166,8 @@ export const TEXTOS = {
         { name: "🔑 Nada de senha", value: "Nunca poste token, senha ou chave de API. A equipe **nunca** pede isso." },
         { name: "⚠️ Cuidado com golpe", value: `Só o contato oficial ${CONTATO} vende o CYRON, e ele **nunca** chama primeiro: quem começa a conversa é você. Se outra conta oferecer plano ou pedir dinheiro, é golpe. Avise a gente.` },
         { name: "📍 Cada coisa no seu lugar", value: "Dúvida no 💬 chat · compra no privado do contato oficial · ideia no 💡 fórum de sugestões · defeito no 🐞 fórum de bugs." },
+        { name: "🚪 Quem não cumprir", value: "Quem não cumprir as regras pode ser removido do servidor." },
       ],
-      footer: { text: "Quem não cumprir as regras pode ser removido. · 🌐 toque no botão para ler na sua língua" },
     },
     en: {
       title: "📜 Rules",
@@ -183,8 +179,8 @@ export const TEXTOS = {
         { name: "🔑 No passwords", value: "Never post a token, password or API key. Staff will **never** ask for one." },
         { name: "⚠️ Watch out for scams", value: `Only the official contact ${CONTATO} sells CYRON, and it **never** messages first: you start the conversation. If any other account offers a plan or asks for money, it's a scam. Let us know.` },
         { name: "📍 Everything in its place", value: "Questions in 💬 chat · purchases in the official contact's DMs · ideas in the 💡 suggestions forum · defects in the 🐞 bugs forum." },
+        { name: "🚪 Breaking the rules", value: "Anyone who breaks the rules may be removed from the server." },
       ],
-      footer: { text: "Anyone who breaks the rules may be removed. · 🌐 tap the button to read in your language" },
     },
   },
   uso: {
@@ -199,7 +195,6 @@ export const TEXTOS = {
         { name: "⭐ No Pro e na Aliança", value: "Cada idioma ganha salas próprias e um chat onde todos conversam traduzidos, com nome e foto. Também traduz 🖼️ imagem e 🎧 áudio." },
         { name: "🎁 Teste grátis", value: "No /cyron, o botão 🎁 liga 7 dias de Pro. É preciso estar neste servidor." },
       ],
-      footer: { text: RODAPE.pt },
     },
     en: {
       title: "📖 How to use CYRON",
@@ -212,7 +207,6 @@ export const TEXTOS = {
         { name: "⭐ On Pro and Alliance", value: "Each language gets its own rooms and a chat where everyone talks translated, with name and avatar. It also translates 🖼️ images and 🎧 audio." },
         { name: "🎁 Free trial", value: "In /cyron, the 🎁 button turns on 7 days of Pro. You need to be in this server." },
       ],
-      footer: { text: RODAPE.en },
     },
   },
   pagamento: {
@@ -226,8 +220,7 @@ export const TEXTOS = {
         { name: "🇧🇷 Pagar no Brasil", value: "No /cyron, toque em 💠 Pagar com Pix. O plano liga sozinho quando o Pix cai." },
         { name: "🌍 Pagar de fora do Brasil", value: `Chame no privado o contato oficial ${CONTATO} com o plano e o nome do seu servidor. A gente combina com você, sem expor seus dados no chat.` },
         { name: "🔒 Segurança", value: `Só ${CONTATO} vende o CYRON, e ele nunca chama primeiro. Não mande dados de pagamento em chat público.` },
-      ],
-      footer: { text: "🌐 toque no botão para ler na sua língua" },
+      ]
     },
     en: {
       title: "💳 Plans",
@@ -239,13 +232,12 @@ export const TEXTOS = {
         { name: "🇧🇷 Paying in Brazil", value: "In /cyron, tap 💠 Pagar com Pix. The plan turns on by itself when the Pix lands." },
         { name: "🌍 Paying from outside Brazil", value: `DM the official contact ${CONTATO} with the plan and your server's name. We'll arrange it with you, without exposing your data in the chat.` },
         { name: "🔒 Safety", value: `Only ${CONTATO} sells CYRON, and it never messages first. Never post payment details in a public chat.` },
-      ],
-      footer: { text: "🌐 tap the button to read in your language" },
+      ]
     },
   },
   novidades: {
-    pt: { title: "📣 Novidades", description: "Aqui saem as novidades do CYRON: recursos novos, correções e avisos importantes.\n\nToque em **Seguir** para receber no seu servidor.", footer: { text: RODAPE.pt } },
-    en: { title: "📣 News", description: "CYRON news lands here: new features, fixes and important notices.\n\nTap **Follow** to get them in your own server.", footer: { text: RODAPE.en } },
+    pt: { title: "📣 Novidades", description: "Aqui saem as novidades do CYRON: recursos novos, correções e avisos importantes.\n\nToque em **Seguir** para receber no seu servidor." },
+    en: { title: "📣 News", description: "CYRON news lands here: new features, fixes and important notices.\n\nTap **Follow** to get them in your own server." },
   },
   sugestoes: {
     pt: { title: "💡 Sugestões", description: "Tem uma ideia para o CYRON? Abra um post, um por ideia.\n\nReaja com 👍 nas ideias que você também quer: as mais votadas vêm primeiro." },
