@@ -4880,14 +4880,18 @@ async function garantirReplica(guild, servidorId, sala, categoria, def, posicao,
     return;
   }
 
+  const doSuporte = await ehServidorDoSuporte(guild.id);
   const canal = await guild.channels.create({
     name: nome,
     type: ChannelType.GuildText,
     parent: categoria.id,
     position: posicao,
-    /* O de sempre; a varredura seguinte acerta pelo plano e pelo servidor
-       (ver topicoDaReplica). */
-    topic: `${def.tipo} — ${nomeDeIdiomaNoDiscord(sala.idioma)}. O que se escreve aqui aparece traduzido nos outros idiomas.`,
+    /* No suporte, o topico certo ja' ao nascer: la' a sala e' de ler, e o
+       "o que se escreve aqui aparece traduzido" ficava ate' a varredura
+       seguinte. Nos clientes, o de sempre; a varredura acerta pelo plano. */
+    topic: doSuporte
+      ? topicoDaReplica(def.tipo, sala.idioma, true, true)
+      : `${def.tipo} — ${nomeDeIdiomaNoDiscord(sala.idioma)}. O que se escreve aqui aparece traduzido nos outros idiomas.`,
     /* Quem entra e quem fala vem do canal de origem -- ver portasDaReplica.
 
        Tudo de um cargo numa entrada so: dois overwrites com o mesmo id fazem
@@ -4924,7 +4928,7 @@ async function garantirReplica(guild, servidorId, sala, categoria, def, posicao,
      esta se enche. Canal ADOTADO (la' em cima) nao passa por aqui -- ele ja'
      tem historico, e preencher de novo duplicaria tudo. So' no servidor de
      suporte: nos clientes a sala nasce vazia, como sempre nasceu. */
-  if (!await ehServidorDoSuporte(guild.id)) return;
+  if (!doSuporte) return;
   const servidor = await servidorDoGuild(guild.id).catch(() => null);
   preencherReplica(fonte, webhook.url, sala.idioma, servidor ? motorDe(servidor) : MOTOR_AUTO)
     .then((n) => n && console.log(`idioma: #${canal.name} nasceu com ${n} mensagens traduzidas`))

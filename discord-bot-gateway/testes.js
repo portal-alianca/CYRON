@@ -698,8 +698,9 @@ function conferirCartao(onde, embed, componentes = []) {
       /const nomeChat = doSuporte && nomeNoIdioma\("chat", sala\.idioma\) \|\|/.test(idx));
     const garantir = idx.slice(idx.indexOf("async function garantirReplica"), idx.indexOf("const jaTentado"));
     verdade("o histórico traduzido só é posto no servidor de suporte",
-      garantir.indexOf("if (!await ehServidorDoSuporte(guild.id)) return;") > 0 &&
-      garantir.indexOf("if (!await ehServidorDoSuporte(guild.id)) return;") < garantir.indexOf("preencherReplica("));
+      garantir.indexOf("const doSuporte = await ehServidorDoSuporte(guild.id);") > 0 &&
+      garantir.indexOf("if (!doSuporte) return;") > 0 &&
+      garantir.indexOf("if (!doSuporte) return;") < garantir.indexOf("preencherReplica("));
     const { topicoDaReplica } = carregar(["topicoDaReplica"]);
     globalThis.nomeDeIdiomaNoDiscord = globalThis.nomeDeIdiomaNoDiscord || ((i) => i);
     verdade("tópico do cliente pago: o de sempre",
@@ -9121,6 +9122,10 @@ function conferirCartao(onde, embed, componentes = []) {
   const adotado = garantir.slice(0, garantir.indexOf("const canal = await guild.channels.create"));
   verdade("só a sala CRIADA é preenchida", garantir.includes("preencherReplica(fonte, webhook.url, sala.idioma"));
   verdade("a sala adotada não (já tem histórico; duplicaria)", !adotado.includes("preencherReplica"));
+  verdade("no suporte, a cópia nasce com o tópico de sala de ler",
+    /topic: doSuporte\s*\? topicoDaReplica\(def\.tipo, sala\.idioma, true, true\)/.test(garantir));
+  verdade("o texto em inglês não fala de \"rooms\" (o tradutor fazia virar \"quartos\")",
+    !/\brooms?\b/i.test(readFileSync(`${aqui}/suporte.js`, "utf8").split("export const TEXTOS")[1].split("export const ESTRUTURA")[0]));
   verdade("o preenchimento vem depois de a sala estar gravada",
     garantir.indexOf("preencherReplica(") > garantir.indexOf('await sbPost("discord_canal_idioma"', garantir.indexOf("const canal = await")));
   verdade("cartão do suporte que eu posto numa fonte vai para os idiomas, antes do filtro de bot",
