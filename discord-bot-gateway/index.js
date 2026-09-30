@@ -2599,6 +2599,11 @@ async function lerImagem(bytes, visao, buscar = fetch) {
     e.motivo = /quota|volume/i.test(corpo) ? "cota" : "pressa";
     throw e;
   }
+  /* 401/403 nao passa com o tempo: e' chave trocada na Azure e nao salva de
+     novo aqui. "Tente de novo em instantes" mandava gente clicar para sempre. */
+  if (r.status === 401 || r.status === 403) {
+    throw Object.assign(new Error(`leitura de imagem recusou a chave (HTTP ${r.status})`), { motivo: "chave" });
+  }
   if (!r.ok) throw new Error(`leitura de imagem respondeu HTTP ${r.status}`);
   const linhas = linhasDaLeitura(await r.json());
   return { texto: linhas.map((l) => l.texto).join("\n"), linhas };
@@ -2675,6 +2680,11 @@ function falhaDeLeitura(e) {
   }
   if (e?.motivo === "pressa") {
     return { title: "⏳ Muita gente pedindo agora", description: "Tente de novo em um minuto." };
+  }
+  if (e?.motivo === "chave") {
+    console.error("imagem: a Azure recusou a chave de leitura de imagem:", e?.message || e);
+    return { title: "🖼️ Leitura de imagem em manutenção",
+      description: "A leitura de imagens está parada por um ajuste do lado do bot. O dono já foi avisado." };
   }
   console.error("imagem: nao consegui ler a imagem:", e?.message || e);
   return { title: "❌ Não deu", description: "Não consegui ler essa imagem agora. Tente de novo em instantes." };
@@ -2825,6 +2835,9 @@ async function transcrever(bytes, nome, fala, locale, buscar = fetch) {
     e.motivo = /quota|volume|hours/i.test(corpo) ? "cota" : "pressa";
     throw e;
   }
+  if (r.status === 401 || r.status === 403) {
+    throw Object.assign(new Error(`transcricao recusou a chave (HTTP ${r.status})`), { motivo: "chave" });
+  }
   if (!r.ok) throw new Error(`transcricao respondeu HTTP ${r.status}`);
   const j = await r.json();
   const texto = (j?.combinedPhrases || []).map((f) => String(f?.text || "").trim()).filter(Boolean).join("\n");
@@ -2916,6 +2929,11 @@ function falhaDeAudio(e, multiplo = 1) {
   }
   if (e?.motivo === "pressa") {
     return { title: "⏳ Muita gente pedindo agora", description: "Tente de novo em um minuto." };
+  }
+  if (e?.motivo === "chave") {
+    console.error("audio: a Azure recusou a chave de transcricao de audio:", e?.message || e);
+    return { title: "🎧 Transcrição de áudio em manutenção",
+      description: "A transcrição de áudio está parada por um ajuste do lado do bot. O dono já foi avisado." };
   }
   console.error("audio: nao consegui ouvir o audio:", e?.message || e);
   return { title: "❌ Não deu", description: "Não consegui ouvir esse áudio agora. Tente de novo em instantes." };
@@ -9902,6 +9920,26 @@ const EXPLICA_ERRO = [
       "**Ninguém é cobrado:** o plano F0 não tem como gerar fatura — ele só recusa.",
     fazer: "Nada. Volta sozinho no dia 1. Se isso acontecer todo mês, dá para pensar num plano pago " +
       "— mas aí é decisão de custo, não conserto.",
+  },
+  {
+    /* Chave recusada nao volta sozinha: sem esta regra caia na generica, que
+       diz "nada, se for de vez em quando" -- e era toda vez. */
+    quando: /imagem.{0,20}a azure recusou a chave/i,
+    titulo: "A Azure recusou a chave de leitura de imagem",
+    precisaDeVoce: true,
+    oque: "O botão 📝 Traduzir imagem parou para todo mundo: a Azure não aceita mais a chave " +
+      "salva no bot. Quase sempre é chave trocada no portal da Azure e não salva de novo aqui.",
+    fazer: "Pegue a chave nova no portal da Azure (seu recurso de Visão → Chaves e ponto de " +
+      "extremidade) e salve em /admin → 👁️ Leitura de imagem. Salvar faz um teste na hora.",
+  },
+  {
+    quando: /audio.{0,20}a azure recusou a chave/i,
+    titulo: "A Azure recusou a chave de transcrição de áudio",
+    precisaDeVoce: true,
+    oque: "O botão 🎧 parou para todo mundo: a Azure não aceita mais a chave salva no bot. " +
+      "Quase sempre é chave trocada no portal da Azure e não salva de novo aqui.",
+    fazer: "Pegue a chave nova no portal da Azure (seu recurso de Fala → Chaves e ponto de " +
+      "extremidade) e salve em /admin → 🎧 Áudio. Salvar faz um teste na hora.",
   },
   {
     /* O binario do processador de imagem nao carregou nesta maquina. Nao se

@@ -6701,6 +6701,10 @@ function conferirCartao(onde, embed, componentes = []) {
       ok("cota do mês acabou", (await erro(azure(429, { error: { message: "Out of call volume quota" } })))?.motivo, "cota");
       ok("gente demais no mesmo minuto", (await erro(azure(429, { error: { message: "Rate limit exceeded" } })))?.motivo, "pressa");
       verdade("outro erro sobe como erro", !!(await erro(azure(500, {}))));
+      /* Chave trocada na Azure não passa com o tempo: tem nome próprio. */
+      ok("chave recusada (401) tem motivo próprio", (await erro(azure(401, {})))?.motivo, "chave");
+      ok("chave recusada (403) também", (await erro(azure(403, {})))?.motivo, "chave");
+      ok("500 não é chave", (await erro(azure(500, {})))?.motivo, undefined);
     }
 
     /* ---- achar a imagem na mensagem ---- */
@@ -6833,6 +6837,15 @@ function conferirCartao(onde, embed, componentes = []) {
       /* "fetch failed" casaria com a regra do banco e mandaria olhar o Supabase. */
       const falha = explicarErro("imagem", "nao consegui ler a imagem: fetch failed");
       verdade("falha de leitura não é confundida com o banco", /ler uma imagem/.test(String(falha?.titulo)));
+      /* Chave recusada é trabalho do dono, não "de vez em quando". */
+      const chave = explicarErro("imagem", "a Azure recusou a chave de leitura de imagem: leitura de imagem recusou a chave (HTTP 401)");
+      verdade("chave de imagem recusada tem explicação própria", /recusou a chave de leitura/.test(String(chave?.titulo)));
+      ok("e pede o dono", chave?.precisaDeVoce, true);
+      const chaveAudio = explicarErro("audio", "a Azure recusou a chave de transcricao de audio: transcricao recusou a chave (HTTP 401)");
+      verdade("a de áudio também", /transcrição de áudio/.test(String(chaveAudio?.titulo)) && chaveAudio?.precisaDeVoce === true);
+      /* E quem clicou não é mandado tentar de novo à toa. */
+      const aviso = carregar(["falhaDeLeitura"]).falhaDeLeitura({ motivo: "chave", message: "x" });
+      verdade("quem clicou não ouve 'tente de novo'", !/tente de novo/i.test(aviso.description) && /manutenção/.test(aviso.title));
     }
 
     /* ---- a fiação: as funções acima não servem se ninguém chama ---- */
