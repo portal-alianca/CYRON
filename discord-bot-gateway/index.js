@@ -9991,6 +9991,18 @@ const EXPLICA_ERRO = [
       "Leitura de imagem: salvar de novo faz um teste na hora.",
   },
   {
+    /* 162.159.x.x e' o Discord (Cloudflare). Sem esta regra a linha chegava
+       como "erro que nao sei explicar" -- e e' so' a rede, de passagem. */
+    quando: /(Connect Timeout Error|UND_ERR_CONNECT_TIMEOUT).{0,40}162\.159\./i,
+    titulo: "O Discord não atendeu a tempo",
+    precisaDeVoce: false,
+    oque: "Tentei falar com o Discord e a conexão não abriu em 10 segundos. É a rede entre o bot " +
+      "e o Discord engasgando por um instante, e não configuração de ninguém.\n\n" +
+      "A passada seguinte refaz o que ficou para trás — nada se perde.",
+    fazer: "Nada. Só vale olhar se aparecer em sequência por mais de uma hora: aí pode ser o Discord " +
+      "fora do ar, e dá para conferir em discordstatus.com.",
+  },
+  {
     quando: /supabase 5\d\d|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up|network|EAI_AGAIN/i,
     titulo: "O banco de dados piscou",
     precisaDeVoce: false,
