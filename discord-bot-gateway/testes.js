@@ -369,6 +369,14 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("a explicação diz que a chave continua boa", /chave/i.test(timeout.oque));
   verdade("e que a fala sai pelos grátis mesmo assim", /grátis/i.test(timeout.oque));
 
+  /* A linha da portaria, como chegou no #erros. */
+  const discordLento = explicarErro("portaria", "falhei no servidor 1541483527843872919 Connect Timeout Error " +
+    "(attempted addresses: 162.159.137.232:443, 162.159.138.232:443, timeout: 10000ms)");
+  verdade("conexão ao Discord que não abriu tem explicação", /Discord não atendeu/.test(String(discordLento?.titulo)));
+  ok("e não precisa de você", discordLento?.precisaDeVoce, false);
+  verdade("conexão que não abriu para outro lugar não vira Discord",
+    !/Discord/.test(String(explicarErro("x", "Connect Timeout Error (attempted addresses: 10.0.0.1:443)")?.titulo)));
+
   /* ---- e não pode voltar a ser reclassificado como banco ----
 
      A regra do banco reivindica "fetch failed", "ECONNRESET" e afins, e ela
