@@ -4071,6 +4071,7 @@ function conferirCartao(onde, embed, componentes = []) {
     globalThis.tradutorFalhas = { erros: 0, quedas: 0, ultimoErro: "" };
     globalThis.cargoAcimaDeMim = new Map();
     globalThis.motoresDoDono = () => [{ tipo: "deepl", chave: "k" }];
+    globalThis.ultimosGraficos = {};
     const A = carregar(["quandoFoi", "emK", "diaISO", "hojeISO", "ontemISO", "venceEm", "nomeDaFaixa",
       "nomeDoIdioma", "planoDe", "ABAS_DO_ADMIN", "ABA_DO_BOTAO", "abaDoAdmin", "linhasDoAdmin",
       "PRECO_MENSAL", "reais", "situacaoDoPagamento", "faixaPaga", "BARRINHAS", "grafiquinho",
@@ -4340,6 +4341,71 @@ function conferirCartao(onde, embed, componentes = []) {
     await F.falarComOsDonos(agora + 7200e3);
     verdade("vencimento novo com privado fechado: anota e conta para o dono do bot",
       marcas["vence:vence"] === em(1.5) && /privado fechado/.test(avisos.at(-1)));
+  }
+
+  /* ---- o analítico: todos os servidores juntos ---- */
+  {
+    globalThis.nomeDoIdioma = (c) => ({ pt: "🇧🇷 Português", ar: "🇸🇦 Árabe" })[c] || c;
+    const N = carregar(["diaISO", "emK", "variacaoEmTexto", "CORES_DO_GRAFICO", "FUSO_DO_ANALITICO",
+      "agregarAnalitico", "configDoGrafico", "urlDoGrafico", "graficosDoAnalitico", "cartoesDoAnalitico"]);
+    const agora = Date.parse("2026-10-03T15:00:00Z");
+    const dia = (n) => N.diaISO(agora - n * 864e5);
+    const uso = [
+      { dia: dia(0), traducoes: 100, do_cache: 20, caracteres: 5000, servidor_id: "a", motor: "dono-azure" },
+      { dia: dia(1), traducoes: 50, do_cache: 0, caracteres: 2000, servidor_id: "b", motor: "auto" },
+      { dia: dia(1), traducoes: 999, do_cache: 0, caracteres: 0, servidor_id: "b", motor: "sem:tamanho" },
+      { dia: dia(40), traducoes: 75, do_cache: 0, caracteres: 0, servidor_id: "a", motor: "auto" },
+    ];
+    /* 23h UTC = 20h em Brasília. Três linhas da MESMA conversa (original e
+       duas cópias) contam uma vez só. */
+    const falas = [
+      { familia_id: "f1", msg_id: "f1", criado_em: "2026-10-02T23:10:00Z" },
+      { familia_id: "f1", msg_id: "c1", criado_em: "2026-10-02T23:10:01Z" },
+      { familia_id: "f1", msg_id: "c2", criado_em: "2026-10-02T23:10:02Z" },
+      { familia_id: "f2", msg_id: "f2", criado_em: "2026-10-02T23:40:00Z" },
+      { familia_id: "f3", msg_id: "f3", criado_em: "2026-10-02T12:00:00Z" },
+    ];
+    const escolhas = [{ idioma: "pt" }, { idioma: "pt" }, { idioma: "ar" }];
+    const servidores = [{ id: "a", nome: "TOP" }, { id: "b", nome: "Outra" }, { id: "c", nome: "Saiu", saiu_em: "x" }];
+    const A = N.agregarAnalitico({ uso, falas, escolhas, servidores }, agora);
+    ok("30 dias no gráfico, do mais antigo a hoje", [A.dias.length, A.dias[29]], [30, dia(0)]);
+    ok("traduções de 30 dias, sem as que não aconteceram", A.total, 150);
+    ok("o cache à parte", A.cache, 20);
+    ok("os 30 dias de antes, para comparar", A.anteriores, 75);
+    ok("uma conversa com cópias conta uma vez", A.conversas, 3);
+    ok("no horário de Brasília", [A.porHora[20], A.porHora[9]], [2, 1]);
+    ok("o pico é às 20h", A.pico, 20);
+    ok("o pódio por traduções", A.podio, [["TOP", 100], ["Outra", 50]]);
+    ok("quem saiu não conta como ativo", A.ativos, 2);
+    ok("idiomas do mais escolhido ao menos", A.idiomas, [["pt", 2], ["ar", 1]]);
+
+    const G = N.graficosDoAnalitico(A);
+    ok("o gráfico dos dias é empilhado: traduzidas e cache", G.dias.data.datasets.map((d) => d.label),
+      ["Traduzidas", "Do cache (sem custo)"]);
+    verdade("uma escala só (nada de dois eixos)", Object.keys(G.dias.options.scales).join() === "x,y");
+    ok("um traço por hora", G.horas.data.labels.length, 24);
+    verdade("série única sem legenda", G.horas.options.plugins.legend.display === false);
+    ok("o nome do idioma sem a bandeira (a fonte do gráfico não tem emoji)", G.idiomas.data.labels, ["Português", "Árabe"]);
+
+    const pedidos = [];
+    const url = await N.urlDoGrafico(G.dias, 360, async (u, o) => { pedidos.push(JSON.parse(o.body));
+      return { ok: true, json: async () => ({ success: true, url: "https://quickchart.io/chart/render/zf-1" }) }; });
+    ok("o QuickChart devolve um endereço curto", url, "https://quickchart.io/chart/render/zf-1");
+    verdade("desenhado no fundo escuro, em alta resolução",
+      pedidos[0].backgroundColor === "#1a1a19" && pedidos[0].devicePixelRatio === 2);
+    ok("QuickChart fora: sem imagem, sem erro", await N.urlDoGrafico(G.dias, 360, async () => { throw new Error("fora"); }), "");
+
+    const comImagens = N.cartoesDoAnalitico(A, { dias: "https://x/1", horas: "https://x/2", idiomas: "https://x/3" }, agora);
+    ok("três cartões, um por gráfico", comImagens.length, 3);
+    for (const c of comImagens) conferirCartao(`o analítico: ${c.title}`, c);
+    const semImagens = N.cartoesDoAnalitico(A, {}, agora);
+    ok("sem QuickChart, fica o cartão dos números", semImagens.length, 1);
+    conferirCartao("o analítico sem imagens", semImagens[0]);
+    const vazio = N.agregarAnalitico({}, agora);
+    conferirCartao("o analítico sem dado nenhum", N.cartoesDoAnalitico(vazio, {}, agora)[0]);
+    const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+    verdade("o analítico roda de hora em hora", /await publicarAnalitico\(\)\.catch/.test(idx));
+    verdade("e o canal nasce com o painel", /CANAL_DIARIO, CANAL_ANALITICO\]/.test(idx));
   }
 
   /* ---- não buscar a mensagem fixada quando nada mudou ---- */

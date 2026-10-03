@@ -11726,6 +11726,7 @@ const CANAL_PAGAMENTOS = "💳-pagamentos";
 const CANAL_ERROS = "🐛-erros";
 const CANAL_CLIENTES = "📋-clientes";
 const CANAL_DIARIO = "📊-diário";
+const CANAL_ANALITICO = "📈-analitico";
 
 /* Quem pode abrir o painel do dono.
 
@@ -12015,7 +12016,7 @@ async function montarPainelDoDonoAgora() {
   const guild = client.guilds.cache.get(gid);
   if (!guild) return;
 
-  for (const nome of [CANAL_NOVOS, CANAL_PAGAMENTOS, CANAL_ERROS, CANAL_DIARIO]) {
+  for (const nome of [CANAL_NOVOS, CANAL_PAGAMENTOS, CANAL_ERROS, CANAL_DIARIO, CANAL_ANALITICO]) {
     await canalDoPainel(guild, nome, null);
   }
   const sala = await canalDoPainel(guild, CANAL_CLIENTES, null);
@@ -12362,7 +12363,8 @@ async function embedDoCrescimento() {
           ? idiomas.map(([c, n]) => `${nomeDoIdioma(c)} **${n}**`).join(" · ")
           : "_ninguém escolheu ainda_" },
     ],
-    footer: { text: "cada barrinha é um dia, do mais antigo até hoje" },
+    ...(ultimosGraficos.dias ? { image: { url: ultimosGraficos.dias } } : {}),
+    footer: { text: "cada barrinha é um dia, do mais antigo até hoje · gráfico completo em 📈-analitico" },
   };
 }
 
@@ -13330,6 +13332,218 @@ async function cartaoDoDia() {
    vez que eu publico, e uma variavel guardando "ja' mandei hoje" voltaria zerada
    -- o canal ganharia um cartao por deploy. Entao antes de mandar eu olho as
    ultimas mensagens de la' e procuro o cartao com o titulo daquele dia. */
+/* ---------------- o analitico: todos os servidores juntos, em graficos ----------------
+
+   Uma mensagem so', fixada no canal 📈-analitico do painel, redesenhada de
+   hora em hora. O diario conta o dia que acabou; aqui e' a tendencia: trinta
+   dias de traducoes, a hora em que as aliancas conversam e as linguas de quem
+   le.
+
+   Os graficos sao imagens desenhadas pelo QuickChart a partir dos NUMEROS --
+   so' totais, nenhum nome de servidor ou de pessoa sai daqui. Desenhar no
+   proprio bot pediria uma biblioteca de imagem pesada numa maquina de 256 MB.
+   Se o QuickChart estiver fora, o cartao sai com os numeros e sem as imagens.
+
+   Cores: a paleta de referencia no passo escuro, validada para daltonismo
+   (azul e laranja sao o primeiro par), sobre o fundo escuro do Discord. */
+const CORES_DO_GRAFICO = {
+  fundo: "#1a1a19", texto: "#ffffff", texto2: "#c3c2b7", grade: "#33332f",
+  serie1: "#3987e5", serie2: "#d95926",
+};
+const FUSO_DO_ANALITICO = -3;   // horario de Brasilia, sem horario de verao desde 2019
+
+/* PostgREST devolve no maximo mil linhas por pedido; contar so' a primeira
+   pagina mentiria para baixo justamente quando o movimento crescer. */
+async function sbPaginado(rota, max = 20000) {
+  const tudo = [];
+  for (let de = 0; de < max; de += 1000) {
+    const pagina = await sb(`${rota}&limit=1000&offset=${de}`);
+    tudo.push(...(Array.isArray(pagina) ? pagina : []));
+    if (!Array.isArray(pagina) || pagina.length < 1000) break;
+  }
+  return tudo;
+}
+
+/* Os numeros, sem rede: entra o que o banco devolveu, sai o que o cartao
+   desenha. */
+function agregarAnalitico({ uso = [], falas = [], escolhas = [], servidores = [] }, agora = Date.now()) {
+  const dias = Array.from({ length: 30 }, (_, i) => diaISO(agora - (29 - i) * 864e5));
+  const antes = diaISO(agora - 59 * 864e5);
+  const traduzidas = new Map(dias.map((d) => [d, 0]));
+  const doCache = new Map(dias.map((d) => [d, 0]));
+  const porServidor = new Map();
+  let caracteres = 0, anteriores = 0;
+  for (const l of uso) {
+    if (String(l.motor || "").startsWith("sem:")) continue;
+    const t = Number(l.traducoes || 0);
+    if (traduzidas.has(l.dia)) {
+      traduzidas.set(l.dia, traduzidas.get(l.dia) + t);
+      doCache.set(l.dia, doCache.get(l.dia) + Number(l.do_cache || 0));
+      caracteres += Number(l.caracteres || 0);
+      porServidor.set(l.servidor_id, (porServidor.get(l.servidor_id) || 0) + t);
+    } else if (l.dia >= antes) {
+      anteriores += t;
+    }
+  }
+
+  /* Uma conversa e' uma familia: a fala original e as copias dela. Conta-se
+     a familia uma vez, na hora em que ela nasceu. */
+  const nascimento = new Map();
+  for (const f of falas) {
+    const t = Date.parse(f.criado_em);
+    const id = f.familia_id || f.msg_id;
+    if (!id || !t) continue;
+    if (!nascimento.has(id) || t < nascimento.get(id)) nascimento.set(id, t);
+  }
+  const porHora = Array(24).fill(0);
+  for (const t of nascimento.values()) porHora[(new Date(t).getUTCHours() + 24 + FUSO_DO_ANALITICO) % 24]++;
+
+  const conta = new Map();
+  for (const e of escolhas) if (e?.idioma) conta.set(e.idioma, (conta.get(e.idioma) || 0) + 1);
+  const idiomas = [...conta].sort((a, b) => b[1] - a[1]);
+
+  const nomes = new Map(servidores.map((s) => [s.id, String(s.nome || "sem nome").slice(0, 40)]));
+  const total = [...traduzidas.values()].reduce((a, b) => a + b, 0);
+  const cache = [...doCache.values()].reduce((a, b) => a + b, 0);
+  const pico = porHora.indexOf(Math.max(...porHora));
+  return {
+    dias, traduzidas: [...traduzidas.values()], doCache: [...doCache.values()],
+    porHora, idiomas, total, cache, caracteres, anteriores,
+    conversas: nascimento.size, pico: porHora[pico] ? pico : null,
+    ativos: servidores.filter((s) => !s.saiu_em).length,
+    podio: [...porServidor].filter(([, t]) => t > 0).sort((a, b) => b[1] - a[1]).slice(0, 5)
+      .map(([id, t]) => [nomes.get(id) || "sem nome", t]),
+  };
+}
+
+/* Barras finas, pontas arredondadas so' do lado do valor, grade discreta,
+   legenda so' quando ha' mais de uma serie. */
+function configDoGrafico({ titulo, rotulos, series, deitado = false, empilhado = false }) {
+  const C = CORES_DO_GRAFICO;
+  const eixo = (temGrade) => ({ stacked: empilhado, beginAtZero: true,
+    ticks: { color: C.texto2, precision: 0, font: { size: 12 } },
+    grid: { display: temGrade, color: C.grade, drawBorder: false }, border: { display: false } });
+  return {
+    type: "bar",
+    data: {
+      labels: rotulos,
+      datasets: series.map((sr) => ({ label: sr.nome, data: sr.valores, backgroundColor: sr.cor,
+        borderColor: C.fundo, borderWidth: empilhado ? 1 : 0, borderRadius: 4, borderSkipped: "start",
+        maxBarThickness: 26 })),
+    },
+    options: {
+      indexAxis: deitado ? "y" : "x",
+      layout: { padding: { left: 16, right: 20, top: 8, bottom: 8 } },
+      plugins: {
+        title: { display: true, text: titulo, color: C.texto, align: "start", font: { size: 16, weight: "bold" } },
+        legend: { display: series.length > 1, align: "end", labels: { color: C.texto2, boxWidth: 12, boxHeight: 12 } },
+      },
+      scales: { x: eixo(deitado), y: eixo(!deitado) },
+    },
+  };
+}
+
+async function urlDoGrafico(config, altura = 360, buscar = fetch) {
+  try {
+    const r = await buscar("https:" + "//quickchart.io/chart/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chart: config, width: 800, height: altura, devicePixelRatio: 2,
+        backgroundColor: CORES_DO_GRAFICO.fundo, version: "4", format: "png" }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const j = r.ok ? await r.json() : null;
+    return typeof j?.url === "string" ? j.url : "";
+  } catch {
+    return "";
+  }
+}
+
+function graficosDoAnalitico(a) {
+  const dia = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  return {
+    dias: configDoGrafico({
+      titulo: "Traduções por dia — últimos 30 dias", rotulos: a.dias.map(dia), empilhado: true,
+      series: [
+        { nome: "Traduzidas", valores: a.traduzidas, cor: CORES_DO_GRAFICO.serie1 },
+        { nome: "Do cache (sem custo)", valores: a.doCache, cor: CORES_DO_GRAFICO.serie2 },
+      ],
+    }),
+    horas: configDoGrafico({
+      titulo: "Conversas por hora — últimos 7 dias (Brasília)",
+      rotulos: a.porHora.map((_, h) => `${String(h).padStart(2, "0")}h`),
+      series: [{ nome: "Conversas", valores: a.porHora, cor: CORES_DO_GRAFICO.serie1 }],
+    }),
+    idiomas: configDoGrafico({
+      titulo: "Idiomas escolhidos pelos membros", deitado: true,
+      rotulos: a.idiomas.slice(0, 10).map(([c]) => String(nomeDoIdioma(c)).replace(/^[^\p{L}]+/u, "")),
+      series: [{ nome: "Membros", valores: a.idiomas.slice(0, 10).map(([, n]) => n), cor: CORES_DO_GRAFICO.serie1 }],
+    }),
+  };
+}
+
+function cartoesDoAnalitico(a, urls = {}, agora = Date.now()) {
+  const pct = (x, y) => (y ? Math.round((x / y) * 100) : 0);
+  const membros = a.idiomas.reduce((s, [, n]) => s + n, 0);
+  const principal = {
+    color: 0x3987e5,
+    title: "📈 CYRON — todos os servidores",
+    fields: [
+      { name: "Traduções (30 dias)", inline: true,
+        value: `**${a.total}**\n${variacaoEmTexto(a.total, a.anteriores)} vs 30 dias antes` },
+      { name: "Do cache, sem custo", inline: true, value: `**${a.cache}** · ${pct(a.cache, a.total + a.cache)}%` },
+      { name: "Caracteres (30 dias)", inline: true, value: `**${emK(a.caracteres)}**` },
+      { name: "Conversas (7 dias)", inline: true, value: `**${a.conversas}**` },
+      { name: "Horário de pico", inline: true,
+        value: a.pico === null ? "—" : `**${String(a.pico).padStart(2, "0")}h–${String((a.pico + 1) % 24).padStart(2, "0")}h**` },
+      { name: "Servidores · membros", inline: true, value: `**${a.ativos}** · ${membros} com idioma` },
+      { name: "🏆 Quem mais traduziu (30 dias)", value: a.podio.length
+          ? a.podio.map(([n, t], i) => `**${i + 1}.** ${n} — ${t}`).join("\n") : "_ninguém ainda_" },
+    ],
+    ...(urls.dias ? { image: { url: urls.dias } } : {}),
+    footer: { text: "atualiza sozinho de hora em hora · horário de Brasília" },
+    timestamp: new Date(agora).toISOString(),
+  };
+  const extras = [["horas", "🕐 Quando as alianças conversam"], ["idiomas", "🌐 Quem lê em cada língua"]]
+    .filter(([k]) => urls[k])
+    .map(([k, titulo]) => ({ color: 0x3987e5, title: titulo, image: { url: urls[k] } }));
+  return [principal, ...extras];
+}
+
+let ultimosGraficos = {};   // o /admin reaproveita a imagem dos 30 dias
+
+async function publicarAnalitico(agora = Date.now()) {
+  const gid = await guildDoPainel();
+  const guild = gid && client.guilds.cache.get(gid);
+  if (!guild) return;
+  const canal = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === CANAL_ANALITICO);
+  if (!canal) return;
+
+  const [uso, falas, escolhas, servidores] = await Promise.all([
+    sbPaginado(`cyron_uso_diario?dia=gte.${diaISO(agora - 59 * 864e5)}&select=dia,traducoes,do_cache,caracteres,motor,servidor_id`),
+    sbPaginado(`discord_fala_espelhada?criado_em=gte.${new Date(agora - 7 * 864e5).toISOString()}&select=msg_id,familia_id,criado_em`),
+    sbPaginado("discord_idioma_jogador?select=idioma"),
+    sb("cyron_servidor?select=id,nome,saiu_em"),
+  ]);
+  const a = agregarAnalitico({ uso, falas, escolhas, servidores }, agora);
+  const configs = graficosDoAnalitico(a);
+  const urls = {};
+  for (const [k, cfg] of Object.entries(configs)) urls[k] = await urlDoGrafico(cfg, k === "idiomas" ? 420 : 360);
+  ultimosGraficos = urls;
+  const embeds = cartoesDoAnalitico(a, urls, agora);
+
+  const guardado = (await ajustes()).analitico_msg;
+  const velha = guardado ? await canal.messages.fetch(guardado).catch(() => null) : null;
+  if (velha) {
+    await velha.edit({ embeds });
+    return;
+  }
+  const nova = await canal.send({ embeds, allowedMentions: { parse: [] } });
+  await nova.pin("analítico do CYRON").catch(() => {});
+  await apagarAvisoDeFixado(canal, nova.id);
+  await porAjuste("analitico_msg", nova.id);
+}
+
 async function talvezOCartaoDoDia() {
   const gid = await guildDoPainel();
   if (!gid) return;
@@ -16747,6 +16961,7 @@ async function deHoraEmHora() {
   ultimaHora = Date.now();
   await olharAsCotas().catch((e) => console.error("cota: passada falhou:", e?.message || e));
   await talvezOCartaoDoDia().catch((e) => console.error("diário: cartão falhou:", e?.message || e));
+  await publicarAnalitico().catch((e) => console.error("analitico: falhou:", e?.message || e));
 }
 
 /* Morrer não pode ser silencioso.
