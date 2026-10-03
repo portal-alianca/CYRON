@@ -4210,7 +4210,7 @@ function conferirCartao(onde, embed, componentes = []) {
 /* ============ a agenda: repetir, lembrar, avisar ============ */
 {
   const m = carregar(["REPETIR_MIN", "REPETIR_MAX", "LEMBRETES", "MENCOES_MAX", "EVENTO_SOBREVIVE",
-    "repetirDoTexto", "textoDaRepeticao", "sugestoesDeRepetir", "proximaVez", "mencoesDoAviso",
+    "repetirDoTexto", "textoDaRepeticao", "proximaVez", "mencoesDoAviso",
     "cartaoDoEvento", "botoesDoEvento"]);
   globalThis.COR = 0xF5A623;
 
@@ -4232,11 +4232,6 @@ function conferirCartao(onde, embed, componentes = []) {
   ok("mostra 24h", m.textoDaRepeticao(1440), "24h");
   ok("mostra 47h30m", m.textoDaRepeticao(2850), "47h30m");
   ok("mostra 7d", m.textoDaRepeticao(10080), "7d");
-  for (const s of m.sugestoesDeRepetir("")) {
-    verdade(`a sugestão "${s.value}" é aceita pelo próprio parser`, m.repetirDoTexto(s.value) !== null);
-  }
-  verdade("o que se digita aparece primeiro, quando dá para entender",
-    m.sugestoesDeRepetir("47h30m")[0].value === "47h30m");
 
   /* ---- a próxima vez ---- */
   const H = 3600000;
@@ -4276,6 +4271,52 @@ function conferirCartao(onde, embed, componentes = []) {
   conferirCartao("o evento completo", c, m.botoesDoEvento(completo, AG));
   verdade("o botão é de inscrição", m.botoesDoEvento(completo, AG)[0].components[0].custom_id === "evento:vou:7");
   verdade("não há mais o 😴", !m.botoesDoEvento(completo, AG)[0].components.some((b) => b.custom_id.startsWith("evento:nao")));
+}
+
+/* ============ o painel de seletores do /evento ============ */
+{
+  const m = carregar(["EVENTO_MAX", "LEMBRETES", "REPETICOES", "FUSOS", "FUSOS_RAPIDOS", "textoDaRepeticao",
+    "rotuloDaRepeticao", "textoDoFuso", "partesNoFuso", "instanteDe", "horarioInicial", "opcoesDoDia",
+    "nalingua", "painelDoRascunho"]);
+  globalThis.COR = 0xF5A623;
+  globalThis.traduzirEmbed = async (e) => e;
+  globalThis.motorDoGuild = async () => ({ tipo: "auto" });
+  const AGORA = Date.UTC(2026, 9, 2, 9, 8);
+
+  ok("o painel abre na próxima hora cheia depois de uma hora", m.horarioInicial(AGORA), Date.UTC(2026, 9, 2, 11, 0));
+  const t = Date.UTC(2026, 9, 4, 11, 30);
+  ok("dia/hora/minuto no fuso de Brasília", m.partesNoFuso(t, -180), { ano: 2026, mes: 10, dia: 4, hora: 8, min: 30 });
+  ok("e volta para o mesmo instante", m.instanteDe(m.partesNoFuso(t, -180), -180), t);
+  ok("trocar o fuso mantém o RELÓGIO (11:30 continua 11:30)",
+    m.partesNoFuso(m.instanteDe(m.partesNoFuso(t, 0), -180), -180).hora, 11);
+
+  const p = { guildId: "g", titulo: "Armadilha de Caça 1", quando: t, fuso: 0, repetir: 2850, lembrete: 10, cargoId: null };
+  const painel = await m.painelDoRascunho("abc", p, "pt", AGORA);
+  ok("cinco fileiras: dia, hora, minuto, repetir e os botões", painel.components.length, 5);
+  for (const fila of painel.components.slice(0, 4)) {
+    const sel = fila.components[0];
+    verdade(`a lista ${sel.custom_id} tem no máximo 25 opções`, sel.options.length <= 25 && sel.options.length > 0);
+    ok(`e exatamente uma marcada (${sel.custom_id})`, sel.options.filter((o) => o.default).length, 1);
+  }
+  verdade("o dia marcado é o do evento", painel.components[0].components[0].options.find((o) => o.default).value === "2026-10-4");
+  verdade("a hora marcada é 11", painel.components[1].components[0].options.find((o) => o.default).value === "11");
+  verdade("o minuto marcado é 30", painel.components[2].components[0].options.find((o) => o.default).value === "30");
+  verdade("o Urso aparece como 🐻 47h30m", painel.components[3].components[0].options.some((o) => o.default && o.label === "🐻 47h30m"));
+  ok("a última fileira tem 5 botões, o máximo do Discord", painel.components[4].components.length, 5);
+  verdade("cada pessoa vê o horário no próprio relógio", painel.embeds[0].description.includes(`<t:${t / 1000}:F>`));
+  verdade("e o fuso escolhido aparece", painel.embeds[0].description.includes("🌍 **UTC**"));
+
+  const minutoQuebrado = await m.painelDoRascunho("abc", { ...p, quando: t + 14 * 60000 }, "pt", AGORA);
+  verdade("minuto lido de um contador (11:44) entra na lista", minutoQuebrado.components[2].components[0].options.some((o) => o.default && o.value === "44"));
+
+  const longe = await m.painelDoRascunho("abc", { ...p, quando: Date.UTC(2026, 11, 20, 11, 30) }, "pt", AGORA);
+  verdade("data a mais de 25 dias ainda aparece marcada", longe.components[0].components[0].options.some((o) => o.default && o.value === "2026-12-20"));
+
+  const passado = await m.painelDoRascunho("abc", { ...p, quando: AGORA - 60000 }, "pt", AGORA);
+  verdade("horário que passou trava o ✅", passado.components[4].components.find((b) => b.custom_id.startsWith("evsel:criar")).disabled === true);
+
+  for (const f of m.FUSOS_RAPIDOS) verdade(`o fuso rápido ${m.textoDoFuso(f)} também está na lista do comando`, m.FUSOS.includes(f));
+  ok("a lista de fusos cabe no Discord", m.FUSOS.length <= 25, true);
 }
 
 /* ============ o leitor automático: Apps → Criar evento ============ */
@@ -4328,18 +4369,22 @@ function conferirCartao(onde, embed, componentes = []) {
 
 {
   const f = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
-  const ler = f.slice(f.indexOf("async function lerEventoDaMensagem"), f.indexOf("function janelaDaProposta"));
+  const ler = f.slice(f.indexOf("async function lerEventoDaMensagem"), f.indexOf("async function cliqueRascunho"));
   verdade("o leitor reconhece antes de ler a imagem", ler.indexOf("deferReply") < ler.indexOf("lerImagemDaMensagem"));
-  const clique = f.slice(f.indexOf("async function cliqueLeitor"), f.indexOf("async function cliqueEvento"));
+  const clique = f.slice(f.indexOf("async function cliqueRascunho"), f.indexOf("async function cliqueEvento"));
   verdade("o rascunho é só de quem pediu e administra",
     /p\.userId !== inter\.user\.id \|\| !inter\.memberPermissions\?\.has\(PermissionFlagsBits\.ManageGuild\)/.test(clique));
-  verdade("nada é criado sem ✅ ou o formulário", /acao === "criar"/.test(clique) && /acao === "janela"/.test(clique));
-  verdade("o leitor grava pelo mesmo caminho do /evento", /gravarEvento\(/.test(clique));
+  verdade("nada é criado sem ✅", (clique.match(/acao === "criar"/g) || []).length === 2);
+  verdade("o botão 🌍 troca o fuso mantendo o relógio", /acao === "fuso"[^]{0,500}p\.quando = instanteDe\(pt, novo\)/.test(clique));
+  verdade("o ✏️ do leitor abre o painel de seletores, e não um formulário de digitar",
+    /acao === "corrigir"[^]{0,160}painelDoRascunho/.test(clique));
+  const conf = f.slice(f.indexOf("async function confirmarEvento"), f.indexOf("async function criarEvento"));
+  verdade("o painel e o leitor gravam pelo mesmo caminho do /evento", /gravarEvento\(/.test(conf));
   verdade("o menu Apps → Criar evento existe", /type: 3,\s*name: "Criar evento"/.test(f));
   verdade("e é do líder", /name: "Criar evento",[^]{0,200}ManageGuild/.test(f));
   verdade("e não é separado como comando do jogo", /COMANDOS_DE_TODOS = new Set\([^)]*"Criar evento"/.test(f));
-  verdade("os botões e o formulário do leitor têm rota",
-    /customId\.startsWith\("leitor:"\)\)[^]{0,40}cliqueLeitor/.test(f));
+  verdade("os botões, as listas e o formulário do rascunho têm rota",
+    /startsWith\("leitor:"\) \|\| inter\.customId\.startsWith\("evsel:"\)\)\)[^]{0,40}cliqueRascunho/.test(f));
   /* O defeito que este teste prende: o /evento ganhou campos e o Discord
      continuou mostrando os velhos, porque só se criava o que faltava. */
   const glob = f.slice(f.indexOf("async function garantirComandosGlobais"), f.indexOf("async function garantirComandosGlobais") + 1200);
@@ -4743,9 +4788,12 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("e o comando não abre janela nenhuma",
     !/showModal\(janelaValida\(janelaDoEvento/.test(fonteEv2));
 
-  const def = fonteEv2.slice(fonteEv2.indexOf('name: "evento",'), fonteEv2.indexOf('name: "evento",') + 3000);
+  const def = fonteEv2.slice(fonteEv2.indexOf('name: "evento",'), fonteEv2.indexOf('name: "evento",') + 4000);
   verdade("o quando tem autocompletar", /name: "quando"[^]{0,120}autocomplete: true/.test(def));
-  verdade("repetir é uma opção do próprio comando, com sugestões", /name: "repetir"[^]{0,80}autocomplete: true/.test(def));
+  verdade("repetir é uma LISTA, nada para digitar errado", /type: 4, name: "repetir"[^]{0,200}choices: REPETICOES/.test(def));
+  verdade("o fuso também é lista", /type: 4, name: "fuso"[^]{0,200}choices: FUSOS/.test(def));
+  verdade("o quando deixou de ser obrigatório (sem ele abre o painel)", /name: "quando", required: false/.test(def));
+  verdade("as descrições têm tradução para o app de cada líder", /descriptionLocalizations: TRADUCOES_DO_EVENTO\.comando/.test(def));
   verdade("o lembrete também", /name: "lembrete"/.test(def));
   verdade("o GIF vem como arquivo", /type: 11, name: "gif"/.test(def));
   verdade("ou como link", /name: "gif-link"/.test(def));
@@ -4756,8 +4804,7 @@ function conferirCartao(onde, embed, componentes = []) {
      responderia nomes de rally onde o /evento espera "3h". */
   verdade("o autocompletar sabe de qual comando veio",
     /inter\.commandName === "evento"[^]{0,400}sugestoesDeQuando/.test(fonteEv2));
-  verdade("e de qual campo: o repetir tem as sugestões dele",
-    /inter\.commandName === "evento"[^]{0,200}foco\?\.name === "repetir"[^]{0,80}sugestoesDeRepetir/.test(fonteEv2));
+
 }
 
 /* ====== o catálogo do que o bot faz ======
