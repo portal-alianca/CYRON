@@ -7473,6 +7473,139 @@ async function desenharEventos(guild, servidor) {
     }
     await sbDel(`cyron_evento?id=eq.${v.id}`).catch(() => {});
   }
+
+  await agendaComoOrigem(servidor.id, canal).catch(() => {});
+  await desenharNasCopias(guild, servidor, await eventosDoServidor(servidor.id)).catch((e) =>
+    console.error("eventos: as salas de idioma falharam:", e?.message || e));
+}
+
+/* ---------------- o cartao em cada sala de idioma ----------------
+
+   A 📆-agenda vira origem das salas de idioma (📆-agenda-pt, -en...), criadas
+   pela mesma maquina das outras replicas: categoria, cargos e portas iguais.
+   So' que ali nao vai copia por webhook -- copia nao leva botao e nao segue a
+   edicao. Vai o PROPRIO cartao, postado pelo bot, traduzido para a lingua da
+   sala, com o 🔔 funcionando. O sistema e' um so': o mesmo evento, as mesmas
+   inscricoes, o mesmo lembrete; muda a lingua.
+
+   Sem guardar id de copia nenhum: cada sala tem poucas mensagens, e o botao
+   de cada cartao carrega o id do evento. Ler as ultimas 50 diz o que ja' esta
+   la' -- e o que sobrou de evento que acabou e' apagado na mesma passada. */
+const TIPO_AGENDA = "agenda";
+
+const ROTULO_INSCREVER = {
+  pt: "Me inscrever", en: "Subscribe", es: "Inscribirme", fr: "M'inscrire", de: "Anmelden", it: "Iscrivimi",
+  ru: "Записаться", uk: "Записатися", tr: "Kaydol", pl: "Zapisz się", id: "Daftar", vi: "Đăng ký",
+  th: "ลงชื่อ", ja: "参加登録", ko: "참가 신청", "zh-CN": "报名", ar: "اشترك",
+};
+const RODAPE_AGENDA = "🔔 inscreva-se: lembrete no privado e marcação na hora · horário no seu relógio";
+
+/* O id do evento que um cartao meu carrega, ou null. */
+function eventoDoCartao(msg) {
+  for (const fila of msg?.components || []) {
+    for (const b of fila.components || []) {
+      const m = String(b.customId || b.custom_id || "").match(/^evento:(?:vou|idioma|nao):(\d+)$/);
+      if (m) return m[1];
+    }
+  }
+  return null;
+}
+
+async function traduzirPara(texto, idioma, motor) {
+  if (!texto || !/\p{L}/u.test(texto)) return texto;
+  return (await traduzirComCache(String(texto), idioma, motor).catch(() => null)) || texto;
+}
+
+async function cargaNaLingua(ev, presencas, idioma, motor, agora = Date.now()) {
+  const [titulo, detalhes, rodape] = await Promise.all([
+    traduzirPara(ev.titulo, idioma, motor), traduzirPara(ev.detalhes, idioma, motor),
+    traduzirPara(RODAPE_AGENDA, idioma, motor)]);
+  const cartao = cartaoDoEvento({ ...ev, titulo, detalhes }, presencas, agora);
+  cartao.footer = { text: rodape };
+  const base = String(idioma || "").split("-")[0];
+  const rotulo = ROTULO_INSCREVER[idioma] || ROTULO_INSCREVER[base] || ROTULO_INSCREVER.en;
+  /* Na sala da lingua o 🌐 nao faz sentido: o cartao ja' esta' nela. */
+  const botoes = new Date(ev.quando).getTime() > agora
+    ? [{ type: 1, components: [{ type: 2, custom_id: `evento:vou:${ev.id}`, style: 3, emoji: { name: "🔔" }, label: rotulo }] }]
+    : [];
+  return { embeds: [cartao], components: botoes, allowedMentions: { parse: [] } };
+}
+
+/* As salas de idioma da agenda deste servidor: [{ canal, idioma }]. */
+async function salasDaAgenda(guild, servidorId, canalAgenda) {
+  if (!canalAgenda) return [];
+  const tipo = (await fontesReplica(servidorId)).get(canalAgenda.id);
+  if (!tipo) return [];
+  return (await replicasDoIdioma(servidorId)).filter((r) => r.tipo === tipo)
+    .map((r) => ({ canal: guild.channels.cache.get(String(r.canal_id)), idioma: r.idioma }))
+    .filter((x) => x.canal && typeof x.canal.send === "function");
+}
+
+/* A agenda vira origem sozinha em servidor que ja' tem salas por idioma.
+   Uma vez: depois disso a linha existe e a maquina das replicas faz o resto. */
+async function agendaComoOrigem(servidorId, canalAgenda) {
+  if (!canalAgenda) return;
+  const fontes = await fontesReplica(servidorId);
+  if (fontes.has(canalAgenda.id)) return;
+  if (!(await replicasDoIdioma(servidorId)).length) return;
+  await sbPost("discord_fonte_replica", {
+    servidor_id: servidorId, canal_id: canalAgenda.id, tipo: TIPO_AGENDA, gera_replica: true,
+  }).then(() => console.log(`eventos: a agenda virou origem das salas de idioma (${canalAgenda.id})`))
+    .catch((e) => console.error("eventos: nao consegui ligar a agenda as salas de idioma:", e?.message || e));
+  cacheFontes.delete(servidorId);
+}
+
+const ultimaCargaDaCopia = new Map(); // msgId -> json, para nao editar o que nao mudou
+
+/* `reenviar`: { id, content, allowedMentions } -- o evento que comecou agora
+   e' apagado e postado de novo em cada sala, marcando. */
+async function desenharNasCopias(guild, servidor, eventos, reenviar = null, agora = Date.now()) {
+  const salas = await salasDaAgenda(guild, servidor.id, canalDaAgenda(guild));
+  if (!salas.length) return;
+  const motor = motorDe(servidor);
+  const presencas = new Map();
+  for (const ev of eventos) presencas.set(String(ev.id), await presencasDoEvento(ev.id));
+  const vivos = new Set(eventos.map((e) => String(e.id)));
+
+  for (const { canal, idioma } of salas) {
+    try {
+      const recentes = await canal.messages.fetch({ limit: 50 }).catch(() => null);
+      const meus = new Map();
+      for (const m of recentes?.values?.() || []) {
+        if (m.author?.id !== client.user?.id) continue;
+        const id = eventoDoCartao(m);
+        if (!id) continue;
+        if (!vivos.has(id)) { await m.delete().catch(() => {}); continue; }   // evento que acabou
+        if (meus.has(id)) { await m.delete().catch(() => {}); continue; }     // duplicata
+        meus.set(id, m);
+      }
+      for (const ev of eventos) {
+        const id = String(ev.id);
+        const carga = await cargaNaLingua(ev, presencas.get(id), idioma, motor, agora);
+        const velha = meus.get(id);
+        if (reenviar && String(reenviar.id) === id) {
+          if (velha) await velha.delete().catch(() => {});
+          const nova = await canal.send({ ...carga, content: reenviar.content, allowedMentions: reenviar.allowedMentions })
+            .catch((e) => { console.error(`eventos: nao consegui avisar em ${idioma}:`, e?.message || e); return null; });
+          if (nova) ultimaCargaDaCopia.set(nova.id, JSON.stringify(carga));
+          continue;
+        }
+        const json = JSON.stringify(carga);
+        if (velha) {
+          if (ultimaCargaDaCopia.get(velha.id) === json) continue;
+          await velha.edit(carga).then(() => ultimaCargaDaCopia.set(velha.id, json))
+            .catch((e) => console.error(`eventos: nao consegui editar o cartão em ${idioma}:`, e?.message || e));
+        } else {
+          const nova = await canal.send(carga)
+            .catch((e) => { console.error(`eventos: nao consegui postar o cartão em ${idioma}:`, e?.message || e); return null; });
+          if (nova) ultimaCargaDaCopia.set(nova.id, json);
+        }
+      }
+    } catch (e) {
+      console.error(`eventos: a sala de ${idioma} falhou:`, e?.message || e);
+    }
+  }
+  while (ultimaCargaDaCopia.size > 2000) ultimaCargaDaCopia.delete(ultimaCargaDaCopia.keys().next().value);
 }
 
 async function atualizarEventos() {
@@ -8240,6 +8373,13 @@ async function avisarNaHora(guild, servidor, ev, inscritos, marcar, agora = Date
     return null;
   });
   if (nova) await sbPatch(`cyron_evento?id=eq.${ev.id}`, { msg_id: nova.id }).catch(() => {});
+
+  /* As salas de idioma: o mesmo reenvio, com o mesmo chamado. Quem so'
+     enxerga a sala da lingua dele e' marcado la' -- o Discord nao avisa quem
+     nao ve o canal, entao ninguem leva dois sinos. */
+  await desenharNasCopias(guild, servidor, await eventosDoServidor(servidor.id),
+    marcar ? { id: ev.id, content: aviso.content, allowedMentions: aviso.allowedMentions } : null, agora)
+    .catch((e) => console.error("eventos: o aviso nas salas de idioma falhou:", e?.message || e));
 }
 
 async function rodarAgendaDeEventos(agora = Date.now()) {
@@ -9196,7 +9336,7 @@ function botoesDoRecibo() {
 async function montarPainel(guild, servidor, idioma = "") {
   const T = falaFixa(idioma, await motorDoGuild(guild.id).catch(() => MOTOR_AUTO));
   const fontes = await sb(
-    `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&select=canal_id,tipo&order=criado_em.asc`) || [];
+    `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&tipo=neq.${TIPO_AGENDA}&select=canal_id,tipo&order=criado_em.asc`) || [];
   const idiomas = await sb(
     `discord_chat_espelho?servidor_id=eq.${servidor.id}&select=idioma,canal_id`) || [];
   const limite = limitesDo(servidor);
@@ -9691,7 +9831,7 @@ async function comandoDeConfig(msg, servidor) {
   }
 
   const antigas = await sb(
-    `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&select=canal_id`) || [];
+    `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&tipo=neq.${TIPO_AGENDA}&select=canal_id`) || [];
   const atuais = new Set(antigas.map((a) => a.canal_id));
 
   if (removendo) {
@@ -9818,7 +9958,7 @@ async function definirFontes(guild, servidor, ids) {
     `discord_canal_idioma?servidor_id=eq.${servidor.id}&select=canal_id`)) || []).map((r) => r.canal_id));
   ids = ids.filter((id) => !copias.has(id));
   const antigas = await sb(
-    `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&select=canal_id`) || [];
+    `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&tipo=neq.${TIPO_AGENDA}&select=canal_id`) || [];
   const atuais = new Set(antigas.map((a) => a.canal_id));
   const querem = new Set(ids);
 
@@ -10134,7 +10274,7 @@ async function cliquePainel(inter) {
       }
     }
     const atuais = (await sb(
-      `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&select=canal_id`)) || [];
+      `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&tipo=neq.${TIPO_AGENDA}&select=canal_id`)) || [];
     const invisiveis = atuais.map((a) => a.canal_id).filter((id) => !vistos.has(id));
     const ids = [...new Set([...(inter.values || []), ...invisiveis])];
 
@@ -11215,7 +11355,7 @@ async function cartaoDoCliente(guild, servidor) {
 
   const idiomas = await sb(`discord_chat_espelho?servidor_id=eq.${servidor.id}&select=idioma`) || [];
   const fontes = await sb(
-    `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&select=canal_id`) || [];
+    `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&tipo=neq.${TIPO_AGENDA}&select=canal_id`) || [];
   const cliente = client.guilds.cache.get(String(servidor.guild_id));
   const plano = planoDe(servidor);
   const faixa = faixaDe(servidor);

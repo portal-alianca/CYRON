@@ -40,6 +40,8 @@ import { CATEGORIAS, CATEGORIA_DONO, RECURSOS, recursosDa, doCliente, doDono, nu
 import { pagina as paginaDeRecursos, DESTINO as HTML_RECURSOS } from "./fazer-recursos.js";
 globalThis.CATEGORIAS = CATEGORIAS;
 globalThis.RECURSOS = RECURSOS;
+/* A agenda e' origem por conta propria; varias funcoes do painel a deixam de fora. */
+globalThis.TIPO_AGENDA = "agenda";
 globalThis.recursosDa = recursosDa;
 globalThis.doCliente = doCliente;
 
@@ -4414,6 +4416,77 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("a instalação não cria uma segunda sala quando a antiga existe",
     /if \(!canalDaAgenda\(guild\)\) await canalPorNomeOuCria\(guild, CANAL_EVENTOS/.test(f));
   verdade("ninguém mais procura a sala pelo nome cru", !/c\.name === CANAL_EVENTOS\)/.test(f.replace(/function canalDaAgenda[^]*?\n}\n/, "")));
+}
+
+/* ============ o cartão em cada sala de idioma ============ */
+{
+  globalThis.COR = 0xF5A623;
+  globalThis.traduzirComCache = async (t, idioma) => `[${idioma}] ${t}`;
+  globalThis.presencasDoEvento = async () => [{ discord_user_id: "1", vai: true }];
+  globalThis.motorDe = () => ({ tipo: "auto" });
+  globalThis.client = { user: { id: "bot" } };
+  const m = carregar(["EVENTO_SOBREVIVE", "TIPO_AGENDA", "ROTULO_INSCREVER", "RODAPE_AGENDA", "textoDaRepeticao",
+    "cartaoDoEvento", "botoesDoEvento", "eventoDoCartao", "traduzirPara", "cargaNaLingua",
+    "ultimaCargaDaCopia", "desenharNasCopias"]);
+  const AGORA = Date.UTC(2026, 9, 2, 12);
+  const ev = { id: 7, titulo: "Armadilha de Caça 1", detalhes: "Cavalaria", quando: new Date(AGORA + 3600000).toISOString() };
+
+  ok("o cartão diz de qual evento é pelo botão", m.eventoDoCartao({ components: [{ components: [{ customId: "evento:vou:7" }] }] }), "7");
+  ok("mensagem sem botão de evento não é cartão", m.eventoDoCartao({ components: [] }), null);
+
+  const c = await m.cargaNaLingua(ev, [], "ko", { tipo: "auto" }, AGORA);
+  verdade("o título sai na língua da sala", c.embeds[0].title.includes("[ko] Armadilha de Caça 1"));
+  verdade("os detalhes também", c.embeds[0].description.includes("[ko] Cavalaria"));
+  verdade("a hora continua marcação do Discord, sem passar pelo tradutor",
+    c.embeds[0].description.includes(`<t:${(AGORA + 3600000) / 1000}:F>`) && !c.embeds[0].description.includes("[ko] 🕒"));
+  ok("o botão 🔔 vem com o rótulo da língua", c.components[0].components[0].label, "참가 신청");
+  ok("e é o mesmo botão do original (o clique cai no mesmo evento)", c.components[0].components[0].custom_id, "evento:vou:7");
+  ok("na sala da língua não há 🌐", c.components[0].components.length, 1);
+  ok("língua sem rótulo próprio cai no inglês", (await m.cargaNaLingua(ev, [], "xx", {}, AGORA)).components[0].components[0].label, "Subscribe");
+  ok("evento que passou não tem botão", (await m.cargaNaLingua({ ...ev, quando: new Date(AGORA - 1).toISOString() }, [], "en", {}, AGORA)).components.length, 0);
+
+  /* A passada inteira, com salas de mentira. */
+  const sala = (idioma, msgs = []) => {
+    const enviados = [], apagados = [], editados = [];
+    const canal = {
+      id: `c-${idioma}`, send: async (x) => { const n = { id: `n${enviados.length}-${idioma}`, ...x }; enviados.push(x); return n; },
+      messages: { fetch: async () => new Map(msgs.map((mm) => [mm.id, mm])) },
+    };
+    for (const mm of msgs) {
+      mm.delete = async () => apagados.push(mm.id);
+      mm.edit = async (x) => editados.push([mm.id, x]);
+    }
+    return { canal, enviados, apagados, editados };
+  };
+  const velho = { id: "v1", author: { id: "bot" }, components: [{ components: [{ customId: "evento:vou:99" }] }] };
+  const atual = { id: "a1", author: { id: "bot" }, components: [{ components: [{ customId: "evento:vou:7" }] }] };
+  const pt = sala("pt", [velho, atual]);
+  const es = sala("es");
+  globalThis.salasDaAgenda = async () => [{ canal: pt.canal, idioma: "pt" }, { canal: es.canal, idioma: "es" }];
+  globalThis.canalDaAgenda = () => ({ id: "agenda" });
+  await m.desenharNasCopias({}, { id: "s" }, [ev], null, AGORA);
+  ok("o cartão de evento que acabou some da sala", pt.apagados, ["v1"]);
+  ok("o que já existe é editado, não duplicado", [pt.enviados.length, pt.editados.length], [0, 1]);
+  ok("a sala que ainda não tem cartão ganha um", es.enviados.length, 1);
+  const edicoes = pt.editados.length;
+  await m.desenharNasCopias({}, { id: "s" }, [ev], null, AGORA);
+  ok("passada sem mudança não edita de novo", pt.editados.length, edicoes);
+
+  /* Na hora: apaga e reenvia, marcando. */
+  const pt2 = sala("pt", [{ ...atual, id: "a2" }]);
+  globalThis.salasDaAgenda = async () => [{ canal: pt2.canal, idioma: "pt" }];
+  await m.desenharNasCopias({}, { id: "s" }, [ev], { id: 7, content: "🔔 <@1>", allowedMentions: { parse: [], users: ["1"], roles: [] } }, AGORA);
+  ok("na hora o cartão da sala é apagado", pt2.apagados, ["a2"]);
+  verdade("e reenviado marcando os inscritos", pt2.enviados[0]?.content === "🔔 <@1>" &&
+    pt2.enviados[0]?.allowedMentions.users[0] === "1");
+}
+
+{
+  const f = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+  verdade("a agenda vira origem das salas de idioma sozinha", /await agendaComoOrigem\(servidor\.id, canal\)/.test(f));
+  verdade("só em servidor que já tem salas por idioma", /agendaComoOrigem[^]{0,400}replicasDoIdioma\(servidorId\)\)\.length\) return/.test(f));
+  verdade("escolher canais no painel não desliga a agenda", /async function definirFontes[^]{0,600}tipo=neq\.\$\{TIPO_AGENDA\}/.test(f));
+  verdade("o aviso na hora também chega nas salas de idioma", /async function avisarNaHora[^]{0,3000}desenharNasCopias\(/.test(f));
 }
 
 /* ============ a agenda no código: uma vez só, e na ordem certa ============ */
