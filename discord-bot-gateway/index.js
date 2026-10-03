@@ -7587,7 +7587,7 @@ function cronometro(faltam) {
 /* As palavras do cartao. Em portugues aqui; a sala de cada lingua manda as
    suas (cargaNaLingua traduz este objeto uma vez por lingua). */
 const PALAVRAS_DO_CARTAO = {
-  jogo: "Jogo (UTC)", seu: "Seu horário", falta: "Falta", comecou: "Começou!",
+  jogo: "Jogo (UTC)", seu: "Seu horário", falta: "Falta", comecou: "Começou!", comecaEm: "Começa em",
   repete: "Repete a cada", aviso: "Aviso no privado", antes: "min antes",
   inscritos: "Inscritos", marca: "Marca", inscrever: "Me inscrever",
 };
@@ -7724,8 +7724,9 @@ async function presencasDoEvento(id) {
 
    O aviso de inicio e' uma mensagem SEPARADA, embaixo de tudo, com as
    marcacoes. Assim o cartao pode se reorganizar sem apagar o sino de
-   ninguem; o aviso some sozinho duas horas depois. */
-const AVISO_FICA = 2 * 3600000;
+   ninguem; o aviso some sozinho meia hora depois. Duas horas era tempo
+   demais: o "Comecou!" ficava na sala muito depois de o urso acabar. */
+const AVISO_FICA = 30 * 60000;
 
 function emOrdem(msgs) {
   if (msgs.some((m) => !m)) return false;
@@ -7733,6 +7734,15 @@ function emOrdem(msgs) {
     if (BigInt(msgs[i].id) <= BigInt(msgs[i - 1].id)) return false;
   }
   return true;
+}
+
+/* O aviso de "comeca em X min" sai quando o evento comeca: o "Comecou!" toma
+   o lugar dele, em vez de os dois ficarem na sala. */
+async function apagarAvisosDeAntes(canal) {
+  const recentes = await canal.messages.fetch({ limit: 30 }).catch(() => null);
+  for (const m of recentes?.values?.() || []) {
+    if (ehAvisoDeInicio(m) && String(m.embeds?.[0]?.title || "").startsWith("⏰")) await m.delete().catch(() => {});
+  }
 }
 
 function ehAvisoDeInicio(m) {
@@ -7784,10 +7794,14 @@ async function pintarSala(canal, eventos, cargaDe, aoPostar = null, agora = Date
 }
 
 /* O aviso de inicio, na lingua da sala. */
-function avisoDeInicio(ev, aviso, P = PALAVRAS_DO_CARTAO, titulo = ev.titulo) {
+/* `antes`: minutos que faltam. Com ele, e' o aviso de "comeca em 15 min" --
+   mesma mensagem, mesmas marcacoes, outra cor e outra frase. */
+function avisoDeInicio(ev, aviso, P = PALAVRAS_DO_CARTAO, titulo = ev.titulo, antes = 0) {
   return {
     content: aviso.content,
-    embeds: [{ color: COR_COMECOU, title: `🔴 ${nomeLimpo(titulo).slice(0, 240)}`, description: `**${P.comecou}**`,
+    embeds: [{ color: antes ? COR_PERTO : COR_COMECOU,
+      title: `${antes ? "⏰" : "🔴"} ${nomeLimpo(titulo).slice(0, 240)}`,
+      description: antes ? `**${P.comecaEm} ${antes} min**` : `**${P.comecou}**`,
       ...(ev.gif_url ? { thumbnail: { url: String(ev.gif_url) } } : {}) }],
     allowedMentions: aviso.allowedMentions,
   };
@@ -7950,7 +7964,8 @@ async function desenharNasCopias(guild, servidor, eventos, aviso = null, agora =
       if (aviso) {
         const P = await palavrasNaLingua(idioma, motor);
         const titulo = await traduzirPara(nomeLimpo(aviso.ev.titulo), idioma, motor);
-        await canal.send(avisoDeInicio(aviso.ev, aviso.aviso, P, titulo)).catch((e) =>
+        if (!aviso.antes) await apagarAvisosDeAntes(canal);
+        await canal.send(avisoDeInicio(aviso.ev, aviso.aviso, P, titulo, aviso.antes || 0)).catch((e) =>
           console.error(`eventos: nao consegui avisar em ${idioma}:`, e?.message || e));
       }
     } catch (e) {
@@ -8756,6 +8771,23 @@ async function lembrarInscritos(guild, ev, inscritos) {
 
 /* Na hora: apaga o cartao velho e posta de novo, marcando. Se o evento
    repete, o cartao novo ja' mostra a PROXIMA data -- e a inscricao continua. */
+/* O aviso na SALA, na hora do lembrete, e nao so' no privado.
+
+   O lembrete de 15 min ia so' no privado dos inscritos -- e privado fechado
+   e' regra em servidor de jogo. Quem olhava a agenda via o evento so' na
+   hora que comecava. Agora a sala tambem avisa, marcando os inscritos, e esse
+   aviso sai quando o "Comecou!" entra. */
+async function avisarAntes(guild, ev, inscritos, minutos, agora = Date.now()) {
+  const servidor = await servidorDoGuild(guild.id).catch(() => null);
+  const canal = canalDaAgenda(guild);
+  if (!servidor || !canal) return;
+  const aviso = mencoesDoAviso(ev, inscritos);
+  await canal.send(avisoDeInicio(ev, aviso, PALAVRAS_DO_CARTAO, ev.titulo, minutos)).catch((e) =>
+    console.error("eventos: nao consegui avisar antes:", e?.message || e));
+  await desenharNasCopias(guild, servidor, await eventosDoServidor(servidor.id), { ev, aviso, antes: minutos }, agora)
+    .catch((e) => console.error("eventos: o aviso de antes nas salas falhou:", e?.message || e));
+}
+
 async function avisarNaHora(guild, servidor, ev, inscritos, marcar, agora = Date.now()) {
   const canal = canalDaAgenda(guild);
   const aviso = mencoesDoAviso(ev, inscritos);
@@ -8778,6 +8810,7 @@ async function avisarNaHora(guild, servidor, ev, inscritos, marcar, agora = Date
   /* O cartao se reorganiza sozinho (desenharEventos); o sino e' uma mensagem
      propria, embaixo de tudo. */
   if (marcar) {
+    await apagarAvisosDeAntes(canal);
     await canal.send(avisoDeInicio(ev, aviso)).catch((e) =>
       console.error("eventos: nao consegui avisar na hora:", e?.message || e));
   }
@@ -8812,7 +8845,11 @@ async function rodarAgendaDeEventos(agora = Date.now()) {
           await sbPatch(`cyron_evento?id=eq.${ev.id}`, { lembrete_feito: true });
           /* Lembrete que so' daria para mandar depois do inicio nao e'
              lembrete: o aviso da hora ja' cobre. */
-          if (agora < t) await lembrarInscritos(guild, ev, await inscritosDoEvento(ev.id));
+          if (agora < t) {
+            const inscritos = await inscritosDoEvento(ev.id);
+            await lembrarInscritos(guild, ev, inscritos);
+            await avisarAntes(guild, ev, inscritos, Math.max(1, Math.round((t - agora) / 60000)), agora);
+          }
         }
 
         if (agora >= t) {
