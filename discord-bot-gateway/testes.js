@@ -4646,7 +4646,7 @@ function conferirCartao(onde, embed, componentes = []) {
     globalThis.menuIdioma = () => [{ type: 1, components: [{ type: 3, custom_id: "escolher-idioma",
       options: [{ label: "Português", value: "pt" }] }] }];
     globalThis.LINGUAS_MENU = globalThis.LINGUAS_MENU || [["pt", "Português", "🇧🇷", "Português"], ["en", "Inglês", "🇬🇧", "English"]];
-    const Q = carregar(["diaISO", "LEMBRAR_A_CADA_DIAS", "LEMBRETES_POR_DIA", "quemTemIdioma", "nomeSeguro",
+    const Q = carregar(["diaISO", "LEMBRAR_A_CADA_DIAS", "LEMBRETES_POR_DIA", "quemTemIdioma", "MENCOES_NO_QUADRO", "textoDeQuemFalta",
       "cartaoDosIdiomas", "botaoDoLembrete", "quemLembrarHoje"]);
     const cargos = [{ idioma: "pt", role_id: "r-pt" }, { idioma: "en", role_id: "r-en" }];
     const m = (id, roles = [], bot = false) => ({ id, bot, cargos: new Set(roles) });
@@ -4658,18 +4658,18 @@ function conferirCartao(onde, embed, componentes = []) {
     ok("sem idioma: quem não tem cargo nem escolheu no bot (bots fora)", sem, ["leo", "max"]);
     const quadro = Q.cartaoDosIdiomas(porIdioma, sem);
     conferirCartao("o quadro de idiomas", quadro, Q.botaoDoLembrete(false));
-    verdade("sem nome conhecido, cai na menção", /<@leo> · <@max>/.test(quadro.description) && !quadro.fields);
-    const comNomes = Q.cartaoDosIdiomas(porIdioma, sem, false, new Map([["leo", "Leo*Rei_"], ["max", "Max"]]));
-    verdade("com nome, o quadro escreve o NOME (menção em cartão vira número para quem não tem a pessoa carregada)",
-      /\*\*Leo\\\*Rei\\_\*\* · \*\*Max\*\*/.test(comNomes.description) && !/<@/.test(comNomes.description));
+    const texto = Q.textoDeQuemFalta(sem);
+    verdade("quem falta vai no TEXTO da mensagem, com @ de verdade (igual à agenda)",
+      /Still without a language — 2\*\*\n<@leo> <@max>/.test(texto) && !/<@/.test(quadro.description));
     verdade("todo em inglês", /Pick your language/.test(quadro.title) && !/Escolha|Sem idioma/.test(JSON.stringify(quadro)));
     verdade("uma linha por língua: bandeira, barra e número", /🇧🇷 `██████████` \*\*2\*\*\n🇬🇧 `█████░░░░░` \*\*1\*\*/.test(quadro.description));
     verdade("o menu de escolher vai junto do quadro",
       Q.botaoDoLembrete(false).some((l) => l.components.some((c) => c.custom_id === "escolher-idioma")));
     const muitos = Array.from({ length: 300 }, (_, i) => `u${i}`);
     conferirCartao("o quadro com 300 sem idioma", Q.cartaoDosIdiomas(porIdioma, muitos));
-    verdade("e diz quantos ficaram de fora da lista", /and 260 more/.test(Q.cartaoDosIdiomas(porIdioma, muitos).description));
-    verdade("todo mundo com idioma: comemora", /Everyone has picked/.test(Q.cartaoDosIdiomas(porIdioma, []).description));
+    verdade("e diz quantos ficaram de fora da lista", /and 260 more/.test(Q.textoDeQuemFalta(muitos)));
+    verdade("o texto cabe numa mensagem", Q.textoDeQuemFalta(muitos).length <= 2000);
+    verdade("todo mundo com idioma: comemora", /Everyone has picked/.test(Q.textoDeQuemFalta([])));
 
     let r = Q.quemLembrarHoje(["leo", "max"], {}, "2026-10-03");
     ok("primeiro dia: marca os dois", r.hojeVao, ["leo", "max"]);
@@ -4684,7 +4684,7 @@ function conferirCartao(onde, embed, componentes = []) {
     const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
     verdade("o lembrete notifica só quem está na lista do dia", /allowedMentions: \{ users: hojeVao \}/.test(idx));
     verdade("e leva o menu de escolher junto", /components: menuIdioma\(\),\s*allowedMentions: \{ users: hojeVao \}/.test(idx));
-    verdade("o quadro não notifica ninguém", /canal\.send\(\{ \.\.\.carga, allowedMentions: \{ parse: \[\] \} \}\)/.test(idx));
+    verdade("o quadro marca quem falta, notificando quando é postado", /allowedMentions: \{ users: sem\.slice\(0, MENCOES_NO_QUADRO\) \}/.test(idx));
     verdade("o lembrete de ontem é apagado", /if \(antes\.msg\) await/.test(idx));
     const S = carregar(["salaDoQuadro", "lerGuardado"]);
     const canal = (id, publico = true) => ({ id, send: () => {}, permissionsFor: () => ({ has: () => publico }) });
