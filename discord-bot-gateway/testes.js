@@ -4407,6 +4407,18 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("comando já publicado e diferente é ATUALIZADO", /!publicado\.equals\(def\)[^]{0,40}publicado\.edit\(def\)/.test(glob));
 }
 
+/* ============ o nome da agenda na língua da sala ============ */
+{
+  const m = carregar(["TIPO_AGENDA", "AGENDA_NA_LINGUA", "nomeDaReplica", "nomeDaSala"]);
+  globalThis.nomeNoIdioma = () => null;
+  ok("inglês", m.nomeDaSala("📆-agenda", "agenda", "en", false), "📆-schedule-en");
+  ok("alemão", m.nomeDaSala("📆-agenda", "agenda", "de", false), "📆-termine-de");
+  ok("coreano", m.nomeDaSala("📆-agenda", "agenda", "ko", false), "📆-일정-ko");
+  ok("chinês", m.nomeDaSala("📆-agenda", "agenda", "zh-CN", false), "📆-日程-zh-cn");
+  ok("língua sem tradução fica agenda", m.nomeDaSala("📆-agenda", "agenda", "xx", false), "📆-agenda-xx");
+  ok("as outras salas não mudam", m.nomeDaSala("🎯-event-guide📢", "evento", "en", false), "🎯-event-guide📢-en");
+}
+
 /* ============ a sala virou agenda ============ */
 {
   globalThis.ChannelType = globalThis.ChannelType || { GuildText: 0 };
