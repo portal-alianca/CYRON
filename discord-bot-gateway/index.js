@@ -6216,7 +6216,8 @@ async function instalarServidor(guild) {
      ninguem -- e o placar e' o convite. Se a tabela do jogo ainda nao estiver
      no banco, o desenho falha sozinho e sobra um canal com uma frase; o bot
      continua traduzindo, que e' o que ele veio fazer. */
-  await canalPorNomeOuCria(guild, CANAL_EVENTOS,
+  /* A sala antiga, se existir, e' renomeada -- nao nasce outra ao lado. */
+  if (!canalDaAgenda(guild)) await canalPorNomeOuCria(guild, CANAL_EVENTOS,
     "Eventos com hora. O horário aparece no fuso de cada um. / " +
     "Events with a time. Everyone sees it in their own clock.")
     .catch((e) => console.error("instalar: nao consegui criar os eventos:", e?.message || e));
@@ -7097,7 +7098,35 @@ function sugestoesDeQuando(digitado, agora = Date.now(), fusoMin = 0) {
    O que sobra pra mim e' o pedaco que o Discord nao faz: entender o que o
    lider digitou, mostrar o cartao, e contar quem vai. */
 
-const CANAL_EVENTOS = "📅-eventos";
+/* "Agenda", e nao "eventos": servidor de jogo quase sempre ja' tem um canal de
+   eventos do proprio jogo (o "event-guide" da [TOP]), e dois "eventos" lado a
+   lado confundem quem chega. "Agenda" se le igual em portugues, espanhol,
+   italiano, frances e alemao. */
+/* 📆 e nao 🗓️: o 🗓️ carrega um seletor invisivel (U+FE0F) que o Discord pode
+   tirar do nome. Ai' o nome gravado nunca bateria com o procurado, e cada
+   volta renomearia -- ou criaria -- a sala de novo. */
+const CANAL_EVENTOS = "📆-agenda";
+/* Nomes que esta sala ja' teve. O nome veio de mim, entao achar um deles e'
+   achar a MINHA sala: ela e' renomeada no lugar, com cartoes e inscricoes, em
+   vez de nascer uma segunda ao lado. */
+const CANAIS_EVENTOS_ANTIGOS = ["📅-eventos"];
+
+/* A sala da agenda deste servidor -- e, se ela ainda tiver um nome antigo,
+   ja' devolve renomeada. */
+const renomeandoAgenda = new Set();
+function canalDaAgenda(guild) {
+  const texto = (c) => c.type === ChannelType.GuildText;
+  const atual = guild.channels.cache.find((c) => texto(c) && c.name === CANAL_EVENTOS);
+  if (atual) return atual;
+  const velho = guild.channels.cache.find((c) => texto(c) && CANAIS_EVENTOS_ANTIGOS.includes(c.name));
+  if (velho && !renomeandoAgenda.has(velho.id)) {
+    renomeandoAgenda.add(velho.id);
+    velho.setName(CANAL_EVENTOS, "CYRON: a sala de eventos virou agenda")
+      .then(() => console.log(`eventos: #${CANAIS_EVENTOS_ANTIGOS[0]} virou #${CANAL_EVENTOS} em ${guild.name}`))
+      .catch((e) => console.error("eventos: nao consegui renomear a sala:", e?.message || e));
+  }
+  return velho || null;
+}
 
 /* Quanto tempo um evento fica de pe' depois de acontecer.
 
@@ -7404,8 +7433,7 @@ async function presencasDoEvento(id) {
    tambem APAGA, senao a sala vira mural de coisa que ja passou e a proxima
    chamada se perde no meio. */
 async function desenharEventos(guild, servidor) {
-  const canal = guild.channels.cache.find(
-    (c) => c.type === ChannelType.GuildText && c.name === CANAL_EVENTOS);
+  const canal = canalDaAgenda(guild);
   if (!canal) return;
 
   const eventos = await eventosDoServidor(servidor.id);
@@ -7674,7 +7702,7 @@ async function confirmarEvento(inter, p, idioma) {
   const cargoMudo = cargo && !cargo.mentionable &&
     !inter.guild.members.me?.permissions?.has(PermissionFlagsBits.MentionEveryone);
   const [feito, mudar, mudo] = await nalingua(idioma, inter.guildId,
-    existente ? "Evento atualizado na sala de eventos." : "Evento criado na sala de eventos.",
+    existente ? "Evento atualizado na 📆 agenda." : "Evento criado na 📆 agenda.",
     "Para mudar, use /evento de novo com o mesmo nome.",
     cargoMudo ? "Esse cargo não está como mencionável, e eu não tenho permissão de marcar todos. " +
       "Ligue \"Permitir que qualquer um mencione este cargo\" nas configurações do cargo." : "");
@@ -8046,8 +8074,7 @@ async function cliqueEvento(inter) {
     await inter.deferUpdate();
     if (acao === "apagar") {
       if (ev.msg_id) {
-        const canal = inter.guild.channels.cache.find(
-          (c) => c.type === ChannelType.GuildText && c.name === CANAL_EVENTOS);
+        const canal = canalDaAgenda(inter.guild);
         const m = canal && await canal.messages.fetch(ev.msg_id).catch(() => null);
         if (m) await m.delete().catch(() => {});
       }
@@ -8138,7 +8165,7 @@ async function lembrarInscritos(guild, ev, inscritos) {
   const s = Math.floor(new Date(ev.quando).getTime() / 1000);
   const motor = await motorDoGuild(guild.id).catch(() => undefined);
   const frases = new Map();
-  const canal = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === CANAL_EVENTOS);
+  const canal = canalDaAgenda(guild);
   const link = linkDaMensagem(guild.id, canal?.id, ev.msg_id);
   let foram = 0;
 
@@ -8180,7 +8207,7 @@ async function lembrarInscritos(guild, ev, inscritos) {
 /* Na hora: apaga o cartao velho e posta de novo, marcando. Se o evento
    repete, o cartao novo ja' mostra a PROXIMA data -- e a inscricao continua. */
 async function avisarNaHora(guild, servidor, ev, inscritos, marcar, agora = Date.now()) {
-  const canal = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === CANAL_EVENTOS);
+  const canal = canalDaAgenda(guild);
   const aviso = mencoesDoAviso(ev, inscritos);
 
   let proximo = ev;
