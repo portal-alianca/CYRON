@@ -10497,31 +10497,35 @@ function quemTemIdioma(membros, cargos, escolhidos) {
   return { porIdioma: [...porIdioma].sort((a, b) => b[1] - a[1]), sem };
 }
 
+/* Em ingles, e so' em ingles: o quadro e' UMA mensagem para gente de vinte
+   linguas, e duas linguas lado a lado dobravam o tamanho sem servir a mais
+   ninguem. Os nomes das linguas vao na propria lingua, e o resto e' numero. */
 function cartaoDosIdiomas(porIdioma, sem, desligado = false) {
-  const linhas = porIdioma.map(([c, n]) => `${nomeNaPropriaLingua(c)} — **${n}**`);
+  const total = porIdioma.reduce((a, [, n]) => a + n, 0);
   const MOSTRAR = 40;
   const faltam = sem.length
     ? sem.slice(0, MOSTRAR).map((id) => `<@${id}>`).join(" ") +
-      (sem.length > MOSTRAR ? ` _+${sem.length - MOSTRAR}_` : "")
-    : "✅ Todo mundo já escolheu! · Everyone picked one!";
+      (sem.length > MOSTRAR ? `\n_and ${sem.length - MOSTRAR} more_` : "")
+    : "✅ Everyone has picked a language!";
   return {
     color: sem.length ? 0xC9A227 : 0x2E8B7A,
-    title: "🌐 Quem já escolheu o idioma · Who picked a language",
-    description: [
-      linhas.length ? linhas.join("\n") : "_ninguém ainda · nobody yet_",
-      "",
-      `❓ **Sem idioma · No language: ${sem.length}**`,
-      faltam,
-    ].join("\n").slice(0, 4000),
-    footer: { text: "Escolha o seu no menu acima · Pick yours in the menu above" +
-      (desligado ? " · 🔕 lembrete diário desligado" : " · 🔔 lembrete diário ligado") },
+    title: "🌐 Pick your language",
+    description: "Choose your language in the menu below and the whole server arrives **translated for you** — " +
+      "announcements, chat, events, everything.",
+    fields: [
+      ...porIdioma.slice(0, 18).map(([c, n]) => ({ name: nomeNaPropriaLingua(c), value: `**${n}** ${n === 1 ? "member" : "members"}`, inline: true })),
+      { name: `❓ Still without a language — ${sem.length}`, value: faltam.slice(0, 1024) },
+    ],
+    footer: { text: `${total} with a language · ${sem.length} without · updates every 10 min · daily reminder ${desligado ? "off" : "on"}` },
   };
 }
 
+/* O menu de escolher vai junto do quadro: quem se ve na lista de quem falta
+   resolve ali mesmo, sem procurar onde. */
 function botaoDoLembrete(desligado) {
-  return [{ type: 1, components: [{ type: 2, custom_id: "cyron:lembrete", style: 2,
+  return [...menuIdioma(), { type: 1, components: [{ type: 2, custom_id: "cyron:lembrete", style: 2,
     emoji: { name: desligado ? "🔔" : "🔕" },
-    label: desligado ? "Ligar lembrete diário (admins)" : "Desligar lembrete diário (admins)" }] }];
+    label: desligado ? "Turn daily reminder on (admins)" : "Turn daily reminder off (admins)" }] }];
 }
 
 /* Quem marcar hoje: so' quem nao foi marcado nos ultimos 3 dias, e no maximo
@@ -10544,7 +10548,11 @@ function salaDoQuadro(guild, portas) {
     .filter((p) => p.canal?.send);
   const todos = guild.roles?.everyone;
   const publica = (c) => !todos || c.permissionsFor?.(todos)?.has?.(PermissionFlagsBits.ViewChannel) !== false;
-  return (vivas.find((p) => p.tipo === "portao") ||
+  /* A sala de idioma de verdade primeiro (no TOP, a 🌐-idioma-language); sem
+     ela, o portao; e so' entao um convite que todo mundo ve. */
+  const deIdioma = (c) => /idioma|language|lingua|idiom|sprache|langue/i.test(String(c?.name || ""));
+  return (vivas.find((p) => p.tipo === "convite" && deIdioma(p.canal) && publica(p.canal)) ||
+    vivas.find((p) => p.tipo === "portao") ||
     vivas.find((p) => p.tipo === "convite" && publica(p.canal)) ||
     vivas.find((p) => p.tipo === "convite"))?.canal || null;
 }
@@ -10622,8 +10630,8 @@ async function quadroDeIdiomas(guild, servidor, { forcar = false, agora = Date.n
   if (hojeVao.length) {
     msg = await canal.send({
       content: `👋 ${hojeVao.map((id) => `<@${id}>`).join(" ")}\n` +
-        "Escolham o idioma de vocês no menu aqui em cima 👆 para ler o servidor traduzido.\n" +
-        "_Pick your language in the menu above 👆 to read this server in your language._",
+        "**Pick your language below** to read this server in your own language. 🌐",
+      components: menuIdioma(),
       allowedMentions: { users: hojeVao },
     }).catch(() => null);
   }
