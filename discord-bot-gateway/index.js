@@ -12434,7 +12434,8 @@ function linhasDoAdmin(aba = "resumo", servidores = []) {
   const fileiras = {
     resumo: [[botao("resumo", "🔄", "Atualizar"), convite]],
     dinheiro: [[botao("dinheiro", "🔄", "Atualizar"), botao("codigos", "🎟️", "Gerar códigos", 1)]],
-    crescimento: [[botao("crescimento", "🔄", "Atualizar"), botao("uso", "🏆", "Quem usa mais")]],
+    crescimento: [[botao("crescimento", "🔄", "Atualizar"), botao("uso", "🏆", "Quem usa mais"),
+      botao("diario", "📊", "Ver o diário agora")]],
     saude: [[botao("saude", "🔄", "Atualizar"), botao("erros", "🐛", "Erros um a um")]],
     servidores: [[botao("servidores", "🔄", "Atualizar"), botao("busca", "🔎", "Procurar por nome ou id", 1)]],
     ferramentas: [
@@ -12857,6 +12858,11 @@ async function cliqueAdmin(inter) {
       content: "📋 Pronto. Este servidor virou o seu painel: criei os canais de acontecimento e um canal por cliente.",
       embeds: [await embedDoResumo()], components: linhasDoAdmin(),
     });
+  }
+  /* O diario de ontem na hora, so' para quem pediu: ver como ele esta' sem
+     esperar o de amanha, e sem postar outro no canal. */
+  if (acao === "diario") {
+    return inter.followUp({ flags: 64, embeds: [await cartaoDoDia()] });
   }
   if (acao === "remontar") await montarPainelDoDono();
   /* O menu de abas manda a aba escolhida; cada botao manda o nome dele. */

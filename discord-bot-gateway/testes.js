@@ -4124,6 +4124,11 @@ function conferirCartao(onde, embed, componentes = []) {
       verdade(`o botão admin:${id} continua em alguma aba`, todosOsIds.has(`admin:${id}`));
     }
     ok("Erros fica na aba Saúde", A.abaDoAdmin("erros"), "saude");
+    verdade("Crescimento tem o botão de ver o diário agora",
+      A.linhasDoAdmin("crescimento").flatMap((l) => l.components).some((c) => c.custom_id === "admin:diario"));
+    verdade("e ele mostra o cartão do dia só para quem pediu",
+      /if \(acao === "diario"\) \{\s*return inter\.followUp\(\{ flags: 64, embeds: \[await cartaoDoDia\(\)\] \}\);/
+        .test(semComentarios(readFileSync(`${aqui}/index.js`, "utf8"))));
     ok("Quem usa mais fica em Crescimento", A.abaDoAdmin("uso"), "crescimento");
     ok("botão desconhecido cai na visão geral", A.abaDoAdmin("qualquer"), "resumo");
 
