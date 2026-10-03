@@ -6161,6 +6161,22 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("não edito a cópia quando a descrição é a mesma",
     /descricao === embed\.description/.test(corrigir));
 
+  /* Tirar o link do GIF editando a mensagem tira o GIF das outras salas. */
+  const { imagemSaiuDaFala } = carregar(["figurinhaDe", "imagemSaiuDaFala"]);
+  const fala = (content, extra = {}) => ({ id: "m1", content, stickers: { first: () => undefined }, ...extra });
+  const primeira = [{ msgId: "m1" }];
+  ok("link do GIF apagado: a imagem sai", imagemSaiuDaFala(fala("oi"), primeira, true), true);
+  ok("link ainda lá: a imagem fica",
+    imagemSaiuDaFala(fala("oi https://klipy.com/gifs/x"), primeira, true), false);
+  ok("cartão sem imagem: nada a tirar", imagemSaiuDaFala(fala("oi"), primeira, false), false);
+  ok("fala emendada embaixo não mexe na imagem de cima",
+    imagemSaiuDaFala(fala("oi"), [{ msgId: "m0" }, { msgId: "m1" }], true), false);
+  ok("figurinha não está no texto: fica",
+    imagemSaiuDaFala(fala("oi", { stickers: { first: () => ({ name: "k", format: 1, url: "u" }) } }), primeira, true), false);
+  verdade("a correção edita a cópia quando a imagem sai",
+    /descricao === embed\.description && !tirarImagem/.test(corrigir)
+    && /delete novoEmbed\.image/.test(corrigir));
+
   /* O crachá vem dos dois lados: da memória e do banco. Se um dos dois
      esquecer de pôr, apagar uma cópia volta a apagar a fala da pessoa. */
   verdade("a memória marca de que sala veio a original",

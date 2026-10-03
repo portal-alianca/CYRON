@@ -2266,6 +2266,19 @@ async function apagarNasOutrasSalas(msgId, canalId, guildId) {
   }
 }
 
+/* A imagem do cartao saiu junto com o link?
+
+   A imagem do cartao vem do link (GIF do klipy, tenor...) e mora no CARTAO,
+   nao no texto. Quem edita a mensagem e tira o link estava tirando o GIF, e
+   do outro lado ele ficava -- a correcao so' trocava o texto. So' vale para a
+   primeira fala do cartao (e' dela a imagem) e nunca para figurinha, que nao
+   esta' no texto. */
+function imagemSaiuDaFala(msg, falas, temImagem) {
+  if (!temImagem || falas?.[0]?.msgId !== msg.id) return false;
+  if (figurinhaDe(msg)) return false;
+  return !/https?:/i.test(String(msg.content || ""));
+}
+
 /* A correcao atravessa: retraduz e troca so' o pedaco daquela fala.
 
    Custa o mesmo que a fala custou quando foi escrita -- uma traducao por
@@ -2322,13 +2335,16 @@ async function corrigirNasOutrasSalas(msg) {
     if (!embed) continue;
 
     const descricao = remontarCartao(embed.description, atualizadas);
+    const tirarImagem = imagemSaiuDaFala(msg, falas, !!embed.image?.url);
     /* Correcao que nao mudou nada naquela lingua nao vira edicao: o tradutor
        devolve a mesma frase com frequencia (trocar "vc" por "voce" some na
        traducao), e um "editado" sem mudanca nenhuma so' faz quem le voltar
        para conferir o que mudou. */
-    if (descricao === embed.description) { guardarFalas(copiaId, atualizadas); continue; }
+    if (descricao === embed.description && !tirarImagem) { guardarFalas(copiaId, atualizadas); continue; }
+    const novoEmbed = { ...embed.toJSON(), description: descricao };
+    if (tirarImagem) delete novoEmbed.image;
     await clienteDoWebhook(url).editMessage(copiaId, {
-      embeds: [{ ...embed.toJSON(), description: descricao }],
+      embeds: [novoEmbed],
     }).catch((e) => console.error("espelho: nao consegui corrigir a copia:", e?.message || e));
     guardarFalas(copiaId, atualizadas);
   }
