@@ -4161,7 +4161,7 @@ function conferirCartao(onde, embed, componentes = []) {
   const s = Math.floor((AGORA + 3 * 3600000) / 1000);
   verdade("a hora vai como marcação do Discord, no fuso de quem lê",
     cartao.description.includes(`<t:${s}:F>`));
-  verdade("e o cronômetro exato, sem o arredondamento do Discord", cartao.description.includes("⏳ **−3h 00m**"));
+  verdade("e o cronômetro exato, sem o arredondamento do Discord", cartao.description.includes("⏳ **3h 00m**"));
   verdade("nenhuma hora é escrita por mim, em fuso nenhum",
     !/\b\d{1,2}:\d{2}\b/.test(cartao.description));
   verdade("o título do líder aparece como ele escreveu", cartao.title.includes("Urso · Bear Trap"));

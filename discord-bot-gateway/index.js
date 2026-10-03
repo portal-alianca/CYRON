@@ -7382,7 +7382,7 @@ function cartaoDoEvento(ev, presencas = [], agora = Date.now()) {
 
   /* O <t:R> anda sozinho na tela de quem le: "em 2 horas", "em 5 minutos".
      E' o cronometro do cartao, e nao custa uma edicao sequer. */
-  const partes = [`🕒 <t:${s}:F>`, passou ? "🔴" : `⏳ **−${cronometro(new Date(ev.quando).getTime() - agora)}**`];
+  const partes = [`🕒 <t:${s}:F>`, passou ? "🔴" : `⏳ **${cronometro(new Date(ev.quando).getTime() - agora)}**`];
   const extras = [];
   if (Number(ev.repetir_min) > 0) extras.push(`🔁 ${textoDaRepeticao(ev.repetir_min)}`);
   if (Number(ev.lembrete_min) > 0) extras.push(`⏰ −${ev.lembrete_min}m ✉️`);
