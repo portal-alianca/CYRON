@@ -306,7 +306,7 @@ html[lang="en"] [data-en]{display:revert}
     <label class="busca">
       <span aria-hidden="true">🔎</span>
       <input type="search" id="busca" autocomplete="off"
-        data-pt-ph="Procurar: bandeira, evento, arena…" data-en-ph="Search: flag, event, arena…">
+        data-pt-ph="Procurar: bandeira, evento, imagem…" data-en-ph="Search: flag, event, image…">
     </label>
     <div class="chips" role="group">
 ${chip("", `<span data-pt>Tudo</span><span data-en>All</span>`, "cat")}

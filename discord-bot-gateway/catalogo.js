@@ -380,18 +380,6 @@ export const RECURSOS = [
 
   /* ------------------------------ viver ----------------------------- */
   {
-    chave: "arena",
-    categoria: "viver",
-    plano: "gratis",
-    nome: { pt: "Arena das Línguas", en: "Language Arena" },
-    como: { pt: "/arena", en: "/arena" },
-    oque: {
-      pt: "Cada língua do servidor é um time, e traduzir é o que dá força a ele. Placar fixado, ataques entre times, e um handicap que deixa o time de três pessoas capaz de derrubar o de trinta.",
-      en: "Every language in the server is a team, and translating is what makes it stronger. A pinned scoreboard, attacks between teams, and a handicap that lets a team of three take down a team of thirty.",
-    },
-    prova: "placarDaArena",
-  },
-  {
     chave: "eventos",
     categoria: "viver",
     plano: "gratis",

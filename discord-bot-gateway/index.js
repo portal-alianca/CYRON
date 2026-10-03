@@ -6382,18 +6382,6 @@ async function instalarServidor(guild) {
     "Events with a time. Everyone sees it in their own clock.")
     .catch((e) => console.error("instalar: nao consegui criar os eventos:", e?.message || e));
 
-  await canalPorNomeOuCria(guild, CANAL_ARENA,
-    "Lute pela bandeira que você escolheu. Time pequeno bate mais forte.")
-    .then(async (canal) => {
-      console.log(`instalar: arena em #${canal.name}`);
-      /* O placar vai JUNTO com o canal.
-         Criar a sala e deixar para desenhar depois foi o defeito: os botoes
-         moram dentro do placar, entao sem ele nao ha' o que clicar, e o jogo
-         inteiro fica atras de uma porta que nao existe. */
-      await desenharArena(guild, servidor);
-    })
-    .catch((e) => console.error("instalar: nao consegui criar a arena:", e?.message || e));
-
   cacheServidor.delete(guild.id); // a proxima mensagem ja enxerga o servidor novo
   return servidor;
 }
@@ -6726,13 +6714,6 @@ function componentesDoPainel(servidor, fontes, limite, orfas, opcoes, aba = "res
      botões, e cinco é o teto do Discord -- passar disso não dá erro bonito,
      o painel inteiro deixa de ser postado. Foi assim que ele parou de
      atualizar uma vez. */
-  if (aba === "agenda") {
-    linhas.push({ type: 1, components: [
-      { type: 2, custom_id: "cyron:anunciar", style: 2, emoji: { name: "📣" },
-        label: "Anunciar a Arena no servidor" },
-    ] });
-  }
-
   /* A visao geral e' o fixado. O botao 🌐 de antes saiu: escolher qualquer
      aba no menu ja' abre o painel na lingua de quem escolheu, so' para ela. */
   if (aba === "resumo") {
@@ -10763,38 +10744,7 @@ async function cliquePainel(inter) {
      Vai para a sala-fonte que o dono já apontou -- e não para a ⚔️-arena, que
      existe para ter UM cartão e onde ninguém ainda passa. Anúncio precisa
      nascer onde as pessoas já estão. */
-  if (acao === "anunciar") {
-    await inter.deferReply({ flags: 64 });
-
-    const fonte = (await sb(
-      `discord_fonte_replica?servidor_id=eq.${servidor.id}&select=canal_id&limit=1`).catch(() => null))?.[0];
-    const canal = fonte?.canal_id ? await inter.guild.channels.fetch(fonte.canal_id).catch(() => null) : null;
-    if (typeof canal?.send !== "function") {
-      return inter.editReply({
-        content: "Não tenho um canal para anunciar. Marque um canal no menu do painel e o botão passa a funcionar.",
-      });
-    }
-
-    const posta = await canal.send({
-      embeds: [await anuncioTraduzido("en")],
-      components: menuDoAnuncio(),
-      allowedMentions: { parse: [] },
-    }).catch((e) => {
-      console.error("anuncio: nao consegui publicar:", e?.message || e);
-      return null;
-    });
-    if (!posta) {
-      return inter.editReply({ content: "Não consegui publicar ali — falta permissão de escrever nesse canal." });
-    }
-
-    /* Fixar é o que faz um anúncio continuar existindo depois de vinte
-       mensagens de conversa. E o rastro do "fixou uma mensagem" sai, como
-       nos outros quatro lugares onde eu fixo. */
-    await posta.pin("anúncio da arena").catch(() => {});
-    await apagarAvisoDeFixado(canal, posta.id);
-
-    return inter.editReply({ content: `📣 Anunciado em <#${canal.id}> — e fixado.` });
-  }
+  if (acao === "anunciar") return inter.reply({ flags: 64, content: ARENA_ENCERRADA });
 
   /* showModal so' vale em interacao ainda nao respondida -- por isso vem
      antes do deferUpdate, e nao junto das outras acoes la' embaixo. */
@@ -14278,6 +14228,46 @@ async function atualizarCartoes() {
    ela aparece. O conserto e' o mesmo padrao do cartao de config aqui em cima:
    quem mantem de pe e' a varredura, nao o evento. Assim tambem se conserta
    sozinho se alguem apagar o placar. */
+/* A Arena das Linguas foi encerrada (outubro de 2026).
+
+   Em um mes, nove pessoas jogaram -- quase todas uma ou duas vezes -- e
+   ninguem voltou: a sala ficava longe de onde a conversa acontece, e o ouro
+   nao servia para nada. Uma sala morta no servidor do cliente e' propaganda
+   contra o bot. O motor do jogo fica no codigo e a tabela no banco, se um dia
+   ela voltar de outro jeito.
+
+   Uma vez por servidor (marca arena_fim no cyron_ajuste): o canal ⚔️-arena
+   sai se so' tem mensagem minha. Se alguem conversou la', o canal fica --
+   e' da comunidade agora -- e so' o placar sai. */
+const ARENA_ENCERRADA = "⚔️ A Arena das Línguas foi encerrada. / The Language Arena has been retired.";
+
+async function aposentarArenas() {
+  const marcas = await ajustes();
+  if (marcas.falhou) return;
+  for (const [, guild] of client.guilds.cache) {
+    try {
+      const servidor = await servidorDoGuild(guild.id);
+      if (!servidor || marcas[`arena_fim:${servidor.id}`]) continue;
+      const canal = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === CANAL_ARENA);
+      if (canal) {
+        const recentes = await canal.messages.fetch({ limit: 50 }).catch(() => null);
+        if (!recentes) continue;   // sem ler a sala nao decido nada: tento na proxima volta
+        if ([...recentes.values()].some((m) => !m.author?.bot)) {
+          await limparPlacaresVelhos(canal);
+          console.log(`arena: ${guild.name} conversou na sala, ela fica; tirei so' o placar`);
+        } else {
+          await canal.delete("a Arena das Línguas foi encerrada")
+            .then(() => console.log(`arena: sala apagada em ${guild.name}`))
+            .catch((e) => console.log(`arena: nao consegui apagar a sala em ${guild.name}:`, e?.message || e));
+        }
+      }
+      await porAjuste(`arena_fim:${servidor.id}`, new Date().toISOString());
+    } catch (e) {
+      console.log("arena: nao consegui aposentar em", guild.name, e?.message || e);
+    }
+  }
+}
+
 async function atualizarArenas() {
   for (const [, guild] of client.guilds.cache) {
     try {
@@ -14949,7 +14939,6 @@ function paginaDoMembro(souAdmin) {
     "",
     "**Comandos:**",
     "`/mylanguage` — trocar de língua, quantas vezes quiser.",
-    "`/arena` — o placar mundial das línguas. Você luta pela sua bandeira.",
     "`/help` — esta tela.",
   ];
   if (souAdmin) {
@@ -15633,7 +15622,7 @@ async function comandoDeInteracao(inter) {
      mesmo estado: mexer aqui atualiza o fixado tambem. */
   if (nome === "help") return comandoAjuda(inter);
   if (nome === "admin") return comandoAdmin(inter);
-  if (nome === "arena") return comandoArena(inter);
+  if (nome === "arena") return inter.reply({ flags: 64, content: ARENA_ENCERRADA });
   if (nome === "evento") {
     if (!inter.guildId) {
       return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
@@ -15769,8 +15758,8 @@ client.on("interactionCreate", async (inter) => {
         (inter.customId.startsWith("leitor:") || inter.customId.startsWith("evsel:"))) {
       return await cliqueRascunho(inter);
     }
-    if (inter.isMessageComponent() && inter.customId.startsWith("arena:")) {
-      return await cliqueArena(inter);
+    if (inter.isMessageComponent() && (inter.customId.startsWith("arena:") || inter.customId === "traduzir-fixo:arena")) {
+      return await inter.reply({ flags: 64, content: ARENA_ENCERRADA });
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("admin:")) {
       return await cliqueAdmin(inter);
@@ -17381,14 +17370,6 @@ const GLOBAIS_DO_CYRON = [
     dmPermission: false,
   },
   {
-    /* De todo mundo, como o /help: o placar fixado e' bilingue por ser uma
-       mensagem so', e este comando e' a saida para quem nao le nenhuma das
-       duas linguas. */
-    name: "arena",
-    description: "Ver a Arena das Línguas na sua língua / See the Language Arena in your language",
-    dmPermission: false,
-  },
-  {
     /* Sem defaultMemberPermissions: quem manda aqui nao e' cargo de servidor,
        e' ser dono do aplicativo. Administrador de um servidor qualquer nao
        pode ver os numeros de todos os outros. A checagem e' no clique. */
@@ -17454,10 +17435,17 @@ async function adminNoSuporte(def, gidDoPainel) {
   console.log(`comandos: /admin também em ${guild.name} (só administradores o veem)`);
 }
 
+/* Comandos que existiram e sairam: sem isto, o Discord continuaria
+   mostrando o /arena para sempre, porque publicar so' acrescenta. */
+const COMANDOS_APOSENTADOS = new Set(["arena"]);
+
 async function garantirComandosGlobais() {
   if (!umaVezPorProcesso("comandos-globais")) return;
   try {
     const globais = await client.application.commands.fetch();
+    for (const velho of [...globais.values()].filter((c) => COMANDOS_APOSENTADOS.has(c.name))) {
+      await velho.delete().then(() => console.log(`comandos: /${velho.name} removido`)).catch(() => {});
+    }
     for (const def of GLOBAIS_DO_CYRON) {
       if (def.name === "admin") continue;   // quem cuida dele e' arrumarOndeMoraOAdmin
       /* Ja publicado nao queria dizer atualizado. So' se criava o que faltava,
@@ -17499,7 +17487,7 @@ async function umaPassada() {
   await sincronizarSalas().catch((e) => console.error("espelho: sincronia falhou:", e?.message || e));
   await garantirConvites().catch((e) => console.error("portaria: passada falhou:", e?.message || e));
   await atualizarCartoes().catch((e) => console.error("config: cartões falharam:", e?.message || e));
-  await atualizarArenas().catch((e) => console.error("arena: passada falhou:", e?.message || e));
+  await aposentarArenas().catch((e) => console.log("arena: aposentar falhou:", e?.message || e));
   await atualizarEventos().catch((e) => console.error("eventos: passada falhou:", e?.message || e));
   await montarPainelDoDono().catch((e) => console.error("painel: montagem falhou:", e?.message || e));
   await rodarComandosAgendados().catch((e) => console.error("agendado: passada falhou:", e?.message || e));

@@ -2762,7 +2762,8 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o menu de canais mora na aba Tradução", porAba("traducao").includes("cyron:fontes") && !porAba("resumo").includes("cyron:fontes"));
   verdade("apagar cópias sem origem fica na visão geral", porAba("resumo").includes("cyron:limpar"));
   verdade("Pix e código ficam na aba Plano", porAba("plano").includes("cyron:pix") && porAba("plano").includes("cyron:codigo"));
-  verdade("anunciar a arena fica na Agenda", porAba("agenda").includes("cyron:anunciar"));
+  verdade("a Arena saiu: nenhuma aba oferece anunciar a Arena",
+    ["resumo", "traducao", "uso", "agenda", "plano"].every((a) => !porAba(a).includes("cyron:anunciar")));
   const { abaDaMensagem } = carregar(["ABAS_DO_PAINEL", "abaDaMensagem"]);
   ok("a aba da mensagem é a opção marcada", abaDaMensagem({ components: porAba && [
     { components: [{ custom_id: "cyron:aba", options: [{ value: "resumo" }, { value: "uso", default: true }] }] }] }), "uso");
@@ -3283,23 +3284,19 @@ function conferirCartao(onde, embed, componentes = []) {
      desenha tem que ser algo que roda sozinho. */
   const fonteDoBot = readFileSync(`${aqui}/index.js`, "utf8");
   const chamadas = [...fonteDoBot.matchAll(/desenharArena\s*\(/g)].length;
-  verdade("desenharArena é chamado de mais de um lugar", chamadas >= 3); // definição + cliques + upkeep
-  /* Ancorado no começo da linha, e não em qualquer lugar do texto: a primeira
-     versão deste teste procurava a chamada solta, e uma linha COMENTADA
-     continuava passando -- provei comentando-a e vendo os testes verdes.
-     Guarda que aceita código morto é pior que guarda nenhum, porque dá
-     confiança. */
-  verdade("a varredura desenha a arena sozinha",
-    /^\s*await atualizarArenas\(\)/m.test(fonteDoBot));
-  verdade("e a instalação já deixa o placar de pé",
-    /instalar: arena em[\s\S]{0,400}desenharArena/.test(fonteDoBot));
-  /* Se atualizarArenas sair de umaPassada, o placar volta a depender de
-     clique -- e a sala volta a nascer vazia, em silêncio. */
+  /* A Arena foi encerrada: a varredura aposenta a sala em vez de desenhar,
+     a instalação não cria mais, e quem clicar num botão velho ouve isso. */
   const passada = fonteDoBot.slice(
     fonteDoBot.indexOf("async function umaPassada"),
     fonteDoBot.indexOf("async function deHoraEmHora"));
-  verdade("atualizarArenas está dentro da varredura, e viva",
-    /^\s*await atualizarArenas\(\)/m.test(passada));
+  verdade("a varredura aposenta a arena, e não desenha mais",
+    /^\s*await aposentarArenas\(\)/m.test(passada) && !/^\s*await atualizarArenas\(\)/m.test(passada));
+  verdade("a instalação não cria mais a sala", !/canalPorNomeOuCria\(guild, CANAL_ARENA/.test(fonteDoBot));
+  verdade("o /arena some do Discord", /const COMANDOS_APOSENTADOS = new Set\(\["arena"\]\)/.test(fonteDoBot) &&
+    !/name: "arena",/.test(fonteDoBot));
+  verdade("botão velho da arena responde que ela acabou, em vez de falhar",
+    /customId\.startsWith\("arena:"\)[^)]*\)\) \{\s*return await inter\.reply\(\{ flags: 64, content: ARENA_ENCERRADA \}\)/.test(fonteDoBot));
+
 
   /* ---- o que o bot lê tem que ser o que a função devolve ----
 
@@ -4612,6 +4609,35 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("trocar de aba edita a própria visão (antes do deferReply)",
       ficha.indexOf('acao === "aba"') > 0 && ficha.indexOf('acao === "aba"') < ficha.indexOf("await inter.deferReply"));
     verdade("e só o dono chega aqui", /async function cliqueDaFicha[\s\S]{0,120}ehDono\(inter\.user\.id\)/.test(idx));
+  }
+
+  /* ---- aposentar a Arena ---- */
+  {
+    const marcas = {};
+    const apagadas = [], limpas = [];
+    globalThis.ajustes = async () => ({ ...marcas });
+    globalThis.porAjuste = async (k, v) => { marcas[k] = v; };
+    globalThis.ChannelType = { GuildText: 0 };
+    globalThis.CANAL_ARENA = "⚔️-arena";
+    globalThis.limparPlacaresVelhos = async (c) => { limpas.push(c.id); };
+    const sala = (id, autores) => ({ id, type: 0, name: "⚔️-arena",
+      messages: { fetch: async () => new Map(autores.map((bot, i) => [String(i), { author: { bot } }])) },
+      delete: async () => { apagadas.push(id); } });
+    const colecao = (itens) => { const m = new Map(itens); m.find = (f) => [...m.values()].find(f); return m; };
+    const guild = (id, canal) => [id, { id, name: id, channels: { cache: colecao(canal ? [[canal.id, canal]] : []) } }];
+    globalThis.client = { guilds: { cache: new Map([
+      guild("g-so-bot", sala("c1", [true, true])),
+      guild("g-gente", sala("c2", [true, false])),
+      guild("g-sem", null),
+    ]) } };
+    globalThis.servidorDoGuild = async (g) => ({ id: `s-${g}` });
+    const { aposentarArenas } = carregar(["aposentarArenas"]);
+    await aposentarArenas();
+    ok("sala só com o placar: apagada", apagadas, ["c1"]);
+    ok("sala onde gente conversou: fica, só o placar sai", limpas, ["c2"]);
+    ok("cada servidor marcado uma vez", Object.keys(marcas).sort(), ["arena_fim:s-g-gente", "arena_fim:s-g-sem", "arena_fim:s-g-so-bot"]);
+    await aposentarArenas();
+    ok("na volta seguinte não mexe em nada", [apagadas.length, limpas.length], [1, 1]);
   }
 
   /* ---- não buscar a mensagem fixada quando nada mudou ---- */
