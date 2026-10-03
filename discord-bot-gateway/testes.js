@@ -2561,6 +2561,10 @@ function conferirCartao(onde, embed, componentes = []) {
     pro: { idiomas: 5, fontes: 3 }, alianca: { idiomas: 20, fontes: 10 } };
   globalThis.faixaDe = () => "gratis";
   globalThis.canalDaAgenda = () => ({ id: "c-agenda" });
+  globalThis.estatisticasDoServidor = async () => ({
+    campos: [{ name: "💬 Conversas (14 dias)", value: "**3**", inline: true }],
+    imagem: "https://quickchart.io/chart/render/zf-1",
+    extras: [{ title: "🕐 Quando o servidor conversa", image: { url: "https://quickchart.io/chart/render/zf-2" } }] });
   globalThis.eventosDoServidor = async () => [
     { id: 1, titulo: "Armadilha do Urso 1", quando: new Date(Date.now() + 3600e3).toISOString(), repetir_min: 2850 },
     { id: 2, titulo: "Velho", quando: new Date(Date.now() - 3600e3).toISOString() }];
@@ -2621,6 +2625,11 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("e não o que já passou", !/Velho/.test(agenda.value));
   const uso14 = (await montarPainel(guild, servidor, "", "uso")).embed.fields.find((f) => /14 dias/.test(f.name));
   verdade("a aba Uso tem o gráfico de 14 dias", /[▁▂▃▄▅▆▇█]{14}/.test(String(uso14?.value)));
+  const abaUso = await montarPainel(guild, servidor, "", "uso");
+  verdade("a aba Uso traz o gráfico de 30 dias como imagem", abaUso.embed.image?.url === "https://quickchart.io/chart/render/zf-1");
+  verdade("e os gráficos extras ao lado", abaUso.extras.length === 1);
+  verdade("as estatísticas entram na aba Uso", abaUso.embed.fields.some((f) => /Conversas/.test(f.name)));
+  verdade("e só nela", !(await montarPainel(guild, servidor, "", "resumo")).extras.length);
   verdade("cada campo mora numa aba só: o motor não aparece na visão geral",
     !(await montarPainel(guild, servidor, "")).embed.fields.some((f) => /Motor de tradução/.test(f.name)));
 
@@ -4485,6 +4494,40 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("os botões do cartão chegam", /customId\.startsWith\("erro:"\)\) \{\s*return await cliqueDoErro\(inter\)/.test(idx));
     verdade("e só o dono mexe", /async function cliqueDoErro[\s\S]{0,120}ehDono\(inter\.user\.id\)/.test(idx));
     verdade("a revisão roda de hora em hora", /await revisarErros\(\)\.catch/.test(idx));
+  }
+
+  /* ---- as estatísticas de um servidor ---- */
+  {
+    const S = carregar(["diaISO", "agregarDoServidor", "LINGUAS_MENU", "idiomaNoGrafico"]);
+    const agora = Date.parse("2026-10-03T15:00:00Z");
+    const salas = [{ canal_id: "c-pt", idioma: "pt" }, { canal_id: "c-en", idioma: "en" }];
+    const falas = [
+      { familia_id: "f1", msg_id: "f1", canal_id: "c-pt", criado_em: "2026-10-02T21:00:00Z", autor_id: "ana" },
+      { familia_id: "f1", msg_id: "x1", canal_id: "c-en", criado_em: "2026-10-02T21:00:01Z" },
+      { familia_id: "f2", msg_id: "f2", canal_id: "c-en", criado_em: "2026-10-02T21:30:00Z", autor_id: "bob" },
+      { familia_id: "f2", msg_id: "x2", canal_id: "c-pt", criado_em: "2026-10-02T21:30:01Z" },
+      { familia_id: "f3", msg_id: "f3", canal_id: "c-pt", criado_em: "2026-10-02T10:00:00Z", autor_id: "ana" },
+    ];
+    const uso = [{ dia: S.diaISO(agora), traducoes: 9, do_cache: 3, motor: "auto" },
+      { dia: S.diaISO(agora), traducoes: 50, do_cache: 0, motor: "sem:tamanho" }];
+    const A = S.agregarDoServidor({ uso, falas, salas }, agora);
+    ok("conversas contam a original, não as cópias", A.conversas, 3);
+    ok("a língua de quem escreveu é a da sala da original", A.escrevem, [["pt", 2], ["en", 1]]);
+    ok("o pico em UTC", A.pico, 21);
+    ok("quem mais conversa", A.autores, [["ana", 2], ["bob", 1]]);
+    ok("hoje no gráfico, sem o que não foi traduzido", [A.traduzidas[29], A.doCache[29]], [9, 3]);
+    ok("sem autor gravado ainda: lista vazia, sem erro",
+      S.agregarDoServidor({ falas: falas.map(({ autor_id, ...f }) => f), salas }, agora).autores, []);
+    ok("nome da língua em português para quem lê português", S.idiomaNoGrafico("ar", "pt"), "Árabe");
+    ok("árabe pelo código para os outros (a fonte desmonta a escrita)", S.idiomaNoGrafico("ar", "en"), "AR");
+    ok("o próprio nome para os outros", S.idiomaNoGrafico("de", "en"), "Deutsch");
+
+    const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+    verdade("a fala original grava quem escreveu",
+      /lembrarFala\(familia, msg\.channel\.id, msg\.id, familiaId, servidorId, msg\.author\?\.id\)/.test(idx));
+    verdade("mas só depois de o banco confirmar a coluna (senão a linha inteira seria recusada)",
+      /\.\.\.\(autorId && colunaDoAutor \? \{ autor_id: String\(autorId\) \} : \{\}\)/.test(idx));
+    verdade("as abas mandam os gráficos extras", (idx.match(/embeds: \[embed, \.\.\.extras\]/g) || []).length >= 2);
   }
 
   /* ---- não buscar a mensagem fixada quando nada mudou ---- */

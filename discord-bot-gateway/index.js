@@ -1869,7 +1869,21 @@ function corDaPessoa(id) {
 const ondeMoraAFala = new Map(); // id de qualquer copia -> Map(canal -> id da copia de la')
 const MAX_FALAS_LEMBRADAS = 6000;
 
-function lembrarFala(familia, canalId, msgId, familiaId, servidorId) {
+/* O autor so' e' gravado depois de o banco confirmar que a coluna existe
+   (migracao 007). Mandar a coluna antes disso faria o banco recusar a linha
+   INTEIRA -- e a familia, que sustenta o cabecalho de resposta, se perderia
+   por causa de uma estatistica. */
+let colunaDoAutor = null;   // null = ainda nao sei; true/false depois da pergunta
+
+function conferirColunaDoAutor() {
+  if (colunaDoAutor !== null) return;
+  colunaDoAutor = false;
+  sb("discord_fala_espelhada?select=autor_id&limit=1")
+    .then(() => { colunaDoAutor = true; })
+    .catch(() => { setTimeout(() => { colunaDoAutor = null; }, 60 * 60 * 1000); });
+}
+
+function lembrarFala(familia, canalId, msgId, familiaId, servidorId, autorId = null) {
   if (!canalId || !msgId) return;
   /* De que SALA veio a mensagem humana desta familia.
 
@@ -1890,8 +1904,10 @@ function lembrarFala(familia, canalId, msgId, familiaId, servidorId) {
   if (familiaId) {
     /* Sem await: a conversa nao pode esperar o banco pra continuar, e perder
        uma linha aqui custa um cabecalho mudo, nao uma fala. */
+    conferirColunaDoAutor();
     sbPost("discord_fala_espelhada",
-      { msg_id: msgId, familia_id: familiaId, canal_id: canalId, servidor_id: servidorId || null })
+      { msg_id: msgId, familia_id: familiaId, canal_id: canalId, servidor_id: servidorId || null,
+        ...(autorId && colunaDoAutor ? { autor_id: String(autorId) } : {}) })
       .catch(() => { /* o cabecalho fica mudo; a fala chegou, que e' o que importa */ });
   }
   /* Map do JavaScript percorre na ordem em que se inseriu, entao a primeira
@@ -3665,7 +3681,7 @@ async function espelharMensagem(msg, lista, origem, texto, motor = MOTOR_AUTO, s
      familia por sala. */
   const familia = (podeEmendar && anterior.familia) || ondeMoraAFala.get(msg.id) || new Map();
   const familiaId = (podeEmendar && anterior.familiaId) || msg.id;
-  lembrarFala(familia, msg.channel.id, msg.id, familiaId, servidorId);
+  lembrarFala(familia, msg.channel.id, msg.id, familiaId, servidorId, msg.author?.id);
 
   /* Traduz ANTES de sair enviando, e uma vez por idioma.
 
@@ -10100,6 +10116,8 @@ async function montarPainel(guild, servidor, idioma = "", aba = "resumo") {
     ].filter(Boolean).join("\n") + "\n_" + await T("Use o menu para ver cada parte.") + "_",
   });
 
+  let imagemDaAba = "";
+  let extras = [];
   if (aba === "uso") {
     const DIAS = 14;
     const dias = Array.from({ length: DIAS }, (_, i) => diaISO(Date.now() - (DIAS - 1 - i) * 864e5));
@@ -10116,6 +10134,15 @@ async function montarPainel(guild, servidor, idioma = "", aba = "resumo") {
       value: "```\n" + grafiquinho(serie) + "\n```" +
         await T("Esta semana **{0}** traduções · a anterior {1} · {2}", estaSemana, antes, variacaoEmTexto(estaSemana, antes)),
     });
+    const est = await estatisticasDoServidor(guild, servidor, T, idioma).catch((e) => {
+      console.log("estatisticas: falharam:", e?.message || e);
+      return null;
+    });
+    if (est) {
+      for (const c of est.campos) campos.push({ _aba: "uso", ...c });
+      imagemDaAba = est.imagem;
+      extras = est.extras;
+    }
   }
 
   if (aba === "agenda") {
@@ -10184,6 +10211,7 @@ async function montarPainel(guild, servidor, idioma = "", aba = "resumo") {
     color: corDoPainel(noTeto, fila.length > 0 || inalcancaveis.length > 0 || !!cargoRuim),
     /* Problemas primeiro, sempre -- e na visao geral, que e' onde se olha. */
     fields: [...(aba === "resumo" ? problemas : []), ...daAba],
+    ...(imagemDaAba ? { image: { url: imagemDaAba } } : {}),
     /* Dois moldes inteiros, e não "Plano {0}" com o nome dentro.
 
        Eu tinha posto o nome do plano como marcador, tratando-o como marca. A
@@ -10199,7 +10227,7 @@ async function montarPainel(guild, servidor, idioma = "", aba = "resumo") {
     },
   };
 
-  return { embed, componentes: componentesDoPainel(servidor, vivas, limite, orfas, elegiveis, aba) };
+  return { embed, extras, componentes: componentesDoPainel(servidor, vivas, limite, orfas, elegiveis, aba) };
 }
 
 async function cartaoDeConfig(guild, servidor) {
@@ -10439,8 +10467,8 @@ async function refrescarPainel(inter, servidor) {
   /* Continua na aba em que a pessoa estava: apertar um botao da aba Traducao
      e cair de volta na visao geral faria o botao parecer nao ter feito nada. */
   const aba = noFixado ? "resumo" : abaDaMensagem(inter.message);
-  const { embed, componentes } = await montarPainel(inter.guild, servidor, idioma, aba);
-  await inter.editReply({ embeds: [embed], components: componentes }).catch(() => {});
+  const { embed, extras = [], componentes } = await montarPainel(inter.guild, servidor, idioma, aba);
+  await inter.editReply({ embeds: [embed, ...extras], components: componentes }).catch(() => {});
   /* Se o clique veio da copia efemera do /cyron, o fixado ficou pra tras. */
   if (!noFixado) {
     await cartaoDeConfig(inter.guild, servidor).catch(() => {});
@@ -10723,8 +10751,8 @@ async function cliquePainel(inter) {
     if (noFixado) await inter.deferReply({ flags: 64 });
     else await inter.deferUpdate();
     const meu = (await idiomaEscolhido(inter.user.id)) || idiomaDoAplicativo(inter.locale);
-    const { embed, componentes } = await montarPainel(inter.guild, servidor, meu, aba);
-    return inter.editReply({ embeds: [embed], components: componentes });
+    const { embed, extras = [], componentes } = await montarPainel(inter.guild, servidor, meu, aba);
+    return inter.editReply({ embeds: [embed, ...extras], components: componentes });
   }
 
   /* Anunciar a arena: mesmo caminho do recibo, mesmo canal.
@@ -13762,6 +13790,124 @@ function cartoesDoAnalitico(a, urls = {}, agora = Date.now()) {
 }
 
 let ultimosGraficos = {};   // o /admin reaproveita a imagem dos 30 dias
+
+/* ---------------- as estatisticas de UM servidor, para os admins dele ----------------
+
+   O mesmo analitico do dono, recortado no servidor: trinta dias de traducoes,
+   a hora em que conversam (em UTC, o relogio do jogo), em que lingua cada um
+   escreve, quantos leem cada lingua e quem mais conversa entre linguas.
+
+   As falas ficam guardadas 14 dias (regra de privacidade de sempre), entao
+   tudo o que depende delas olha as ultimas duas semanas. */
+function agregarDoServidor({ uso = [], falas = [], salas = [] }, agora = Date.now()) {
+  const dias = Array.from({ length: 30 }, (_, i) => diaISO(agora - (29 - i) * 864e5));
+  const traduzidas = new Map(dias.map((d) => [d, 0]));
+  const doCache = new Map(dias.map((d) => [d, 0]));
+  for (const l of uso) {
+    if (String(l.motor || "").startsWith("sem:") || !traduzidas.has(l.dia)) continue;
+    traduzidas.set(l.dia, traduzidas.get(l.dia) + Number(l.traducoes || 0));
+    doCache.set(l.dia, doCache.get(l.dia) + Number(l.do_cache || 0));
+  }
+  const idiomaDaSala = new Map(salas.map((s) => [s.canal_id, s.idioma]));
+  /* A original de cada familia: a linha mais antiga dela. */
+  const original = new Map();
+  for (const f of falas) {
+    const id = f.familia_id || f.msg_id;
+    const t = Date.parse(f.criado_em);
+    if (!id || !t) continue;
+    const ja = original.get(id);
+    if (!ja || t < ja.t) original.set(id, { t, canal: f.canal_id, autor: ja?.autor || f.autor_id || null });
+    else if (!ja.autor && f.autor_id) ja.autor = f.autor_id;
+  }
+  const porHora = Array(24).fill(0);
+  const escrevem = new Map();
+  const autores = new Map();
+  for (const o of original.values()) {
+    porHora[new Date(o.t).getUTCHours()]++;
+    const idioma = idiomaDaSala.get(o.canal);
+    if (idioma) escrevem.set(idioma, (escrevem.get(idioma) || 0) + 1);
+    if (o.autor) autores.set(o.autor, (autores.get(o.autor) || 0) + 1);
+  }
+  const pico = porHora.indexOf(Math.max(...porHora));
+  return {
+    dias, traduzidas: [...traduzidas.values()], doCache: [...doCache.values()], porHora,
+    conversas: original.size, pico: porHora[pico] ? pico : null,
+    escrevem: [...escrevem].sort((a, b) => b[1] - a[1]),
+    autores: [...autores].sort((a, b) => b[1] - a[1]).slice(0, 5),
+  };
+}
+
+/* Nome de lingua para dentro do grafico: a fonte do QuickChart nao tem emoji
+   e desmonta escrita da direita para a esquerda, entao vai o nome em
+   portugues para quem le portugues e o proprio nome para o resto -- menos as
+   linguas de escrita arabe, que vao pelo codigo. */
+function idiomaNoGrafico(cod, quemLe = "") {
+  const l = LINGUAS_MENU.find(([c]) => c === cod);
+  if (!l) return String(cod).toUpperCase();
+  if (!quemLe || quemLe === "pt") return l[1];
+  return ["ar", "fa", "ur", "he"].includes(cod) ? String(cod).toUpperCase() : l[3];
+}
+
+const graficosDoServidor = new Map();   // servidorId|idioma -> { t, urls }
+
+async function estatisticasDoServidor(guild, servidor, T, idioma = "", agora = Date.now()) {
+  const desde14 = new Date(agora - 14 * 864e5).toISOString();
+  const [uso, falas, salas] = await Promise.all([
+    sb(`cyron_uso_diario?servidor_id=eq.${servidor.id}&dia=gte.${diaISO(agora - 29 * 864e5)}&select=dia,traducoes,do_cache,motor`)
+      .catch(() => []),
+    sbPaginado(`discord_fala_espelhada?servidor_id=eq.${servidor.id}&criado_em=gte.${desde14}` +
+      `&select=msg_id,familia_id,canal_id,criado_em${colunaDoAutor ? ",autor_id" : ""}`).catch(() => []),
+    sb(`discord_chat_espelho?servidor_id=eq.${servidor.id}&select=idioma,canal_id,role_id`).catch(() => []),
+  ]);
+  const a = agregarDoServidor({ uso, falas, salas }, agora);
+  const leitores = leitoresPorIdioma(guild, salas || []);
+
+  /* As imagens valem dez minutos: quem abre a aba duas vezes seguidas nao
+     paga tres desenhos de novo. */
+  const chave = `${servidor.id}|${idioma}`;
+  let urls = graficosDoServidor.get(chave)?.t > agora - 10 * 60 * 1000 ? graficosDoServidor.get(chave).urls : null;
+  if (!urls) {
+    const dia = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+    const C = CORES_DO_GRAFICO;
+    const configs = {
+      dias: configDoGrafico({ titulo: await T("Traduções por dia — últimos 30 dias"), rotulos: a.dias.map(dia), empilhado: true,
+        series: [
+          { nome: await T("Traduzidas"), valores: a.traduzidas, cor: C.serie1 },
+          { nome: await T("Do cache (sem custo)"), valores: a.doCache, cor: C.serie2 },
+        ] }),
+      horas: configDoGrafico({ titulo: await T("Conversas por hora — últimos 14 dias (UTC)"),
+        rotulos: a.porHora.map((_, h) => `${String(h).padStart(2, "0")}h`),
+        series: [{ nome: "x", valores: a.porHora, cor: C.serie1 }] }),
+      ...(leitores.length ? { leem: configDoGrafico({ titulo: await T("Quantos leem cada língua"), deitado: true,
+        rotulos: leitores.slice(0, 10).map((l) => idiomaNoGrafico(l.idioma, idioma)),
+        series: [{ nome: "x", valores: leitores.slice(0, 10).map((l) => l.quantos), cor: C.serie1 }] }) } : {}),
+    };
+    urls = {};
+    for (const [k, cfg] of Object.entries(configs)) urls[k] = await urlDoGrafico(cfg, k === "leem" ? 420 : 360);
+    graficosDoServidor.set(chave, { t: agora, urls });
+    while (graficosDoServidor.size > 200) graficosDoServidor.delete(graficosDoServidor.keys().next().value);
+  }
+
+  const medalha = (i) => ["🥇", "🥈", "🥉", "4.", "5."][i];
+  const campos = [
+    { name: await T("💬 Conversas (14 dias)"), inline: true, value: `**${a.conversas}**` },
+    { name: await T("🕐 Horário de pico (UTC)"), inline: true,
+      value: a.pico === null ? "—" : `**${String(a.pico).padStart(2, "0")}h–${String((a.pico + 1) % 24).padStart(2, "0")}h**` },
+    { name: await T("✍️ Em que língua escrevem (14 dias)"),
+      value: a.escrevem.length
+        ? a.escrevem.slice(0, 8).map(([c, n]) => `${nomeNaPropriaLingua(c)} **${n}**`).join(" · ")
+        : "_" + await T("ninguém conversou nas salas ainda") + "_" },
+    ...(colunaDoAutor ? [{ name: await T("🏆 Quem mais conversa entre línguas (14 dias)"),
+      value: a.autores.length
+        ? a.autores.map(([id, n], i) => `${medalha(i)} <@${id}> — ${n}`).join("\n")
+        : "_" + await T("começa a contar a partir de agora") + "_" }] : []),
+  ];
+  const extras = [
+    urls.horas && { color: COR, title: await T("🕐 Quando o servidor conversa"), image: { url: urls.horas } },
+    urls.leem && { color: COR, title: await T("🌐 Quem lê cada língua"), image: { url: urls.leem } },
+  ].filter(Boolean);
+  return { campos, imagem: urls.dias || "", extras };
+}
 
 async function publicarAnalitico(agora = Date.now()) {
   const gid = await guildDoPainel();
