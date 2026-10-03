@@ -3332,6 +3332,44 @@ async function desenharTraducao(bytes, paragrafos, traducoes, sharp, fontfile = 
   return { imagem: await img.composite(camadas).jpeg({ quality: 86 }).toBuffer(), desenhados, pulados, legenda };
 }
 
+/* O GIF do link, buscado por mim quando a previa do Discord nao vem.
+
+   O espelho dependia de o Discord desdobrar o link. Com klipy isso falha:
+   a pagina declara video (og:video) e a previa chega tarde ou nunca, e o
+   link atravessava cru, como texto azul. Aqui o bot le a propria pagina e
+   pega o og:image -- o .gif se houver.
+
+   So' de sites de GIF conhecidos (lista fechada): buscar qualquer link
+   colado no chat seria o bot visitando paginas que ninguem pediu. */
+const SITES_DE_GIF = new RegExp(
+  "^https?://(?:www\\.)?(?:klipy\\.com|tenor\\.com|giphy\\.com|media\\d*\\.giphy\\.com|static\\d*\\.klipy\\.com|media\\.tenor\\.com)/", "i");
+// url -> imagem; vazio quando a pagina nao tinha nenhuma
+const gifsDosLinks = new Map();
+
+async function gifDoLink(texto, buscar = fetch) {
+  const url = (String(texto || "").match(new RegExp("https?://[^\\s<>]+", "g")) || [])
+    .map((u) => u.replace(/[)\].,!?]+$/, "")).find((u) => SITES_DE_GIF.test(u));
+  if (!url) return "";
+  if (/\.(gif|webp|png|jpe?g)(\?|#|$)/i.test(url)) return url;   // ja' e' a imagem
+  if (gifsDosLinks.has(url)) return gifsDosLinks.get(url);
+  let achado = "";
+  try {
+    const r = await buscar(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)" },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (r.ok) {
+      const html = (await r.text()).slice(0, 200000);
+      const imagens = [...html.matchAll(/<meta[^>]+(?:property|name)=[\x22\x27](?:og:image(?::secure_url)?|twitter:image)[\x22\x27][^>]*content=[\x22\x27]([^\x22\x27]+)[\x22\x27]/gi)]
+        .map((m) => m[1].replace(/&amp;/g, "&")).filter((u) => /^https:/i.test(u));
+      achado = imagens.find((u) => /\.gif(\?|#|$)/i.test(u)) || imagens[0] || "";
+    }
+  } catch { /* site fora do ar: o link continua indo como texto */ }
+  gifsDosLinks.set(url, achado);
+  while (gifsDosLinks.size > 500) gifsDosLinks.delete(gifsDosLinks.keys().next().value);
+  return achado;
+}
+
 function midiaDeLink(msg) {
   for (const e of (msg?.embeds || [])) {
     const candidatas = [e?.image?.url, e?.thumbnail?.url]
@@ -3354,7 +3392,7 @@ function midiaDeLink(msg) {
    NAO traduz nada: o texto ja' atravessou. So' acrescenta a imagem, e so' em
    cartao que ainda nao tem uma (figurinha e' imagem e manda mais). */
 async function ilustrarNasOutrasSalas(msg) {
-  const midia = midiaDeLink(msg);
+  const midia = midiaDeLink(msg) || await gifDoLink(msg.content).catch(() => "");
   if (!midia) return;
   /* Video tem player proprio embaixo do cartao, e o player ja' traz esta
      mesma miniatura. Sem esta linha a segunda passada penduraria a foto de
@@ -3411,7 +3449,7 @@ async function espelharMensagem(msg, lista, origem, texto, motor = MOTOR_AUTO, s
   /* A previa que o Discord ja' resolveu do link, se ja' chegou. Quando ainda
      nao chegou -- o caso comum, porque ele resolve depois de mandar --, quem
      pendura a imagem e' ilustrarNasOutrasSalas(), na segunda passada. */
-  const midiaLink = midiaDeLink(msg);
+  const midiaLink = midiaDeLink(msg) || await gifDoLink(msg.content).catch(() => "");
   /* Apelido do servidor antes do nome global: e' assim que a pessoa aparece
      pros outros aqui dentro. */
   const nome = (msg.member?.displayName || msg.author.username || "alguem").slice(0, 80);
