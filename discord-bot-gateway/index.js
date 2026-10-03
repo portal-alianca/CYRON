@@ -7356,13 +7356,33 @@ function fusoDoTexto(bruto) {
    pessoal aqui, de graca, porque <t:unix:F> o Discord desenha no relogio de
    quem le. Metade do trabalho de traduzir um evento e' o fuso, e essa metade
    nao custa nada. */
+/* O cronometro do cartao: "1d 10h 09m", exato.
+
+   O <t:R> do Discord arredonda -- 37 horas viram "em 2 dias", e quem compara
+   com o relogio do jogo acha que o bot errou. Aqui a conta e' minha e o
+   cartao e' reescrito de minuto em minuto nas ultimas 48 horas. Antes disso
+   o cartao so' muda de dez em dez minutos, entao os minutos saem da conta:
+   "3d 4h" nao mente por estar dez minutos atrasado. */
+const CRONOMETRO_FINO = 48 * 3600000;
+
+function cronometro(faltam) {
+  if (!(faltam > 0)) return "0m";
+  const min = Math.floor(faltam / 60000);
+  const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
+  const z = (n) => String(n).padStart(2, "0");
+  if (faltam >= CRONOMETRO_FINO) return `${d}d ${h}h`;
+  if (d) return `${d}d ${h}h ${z(m)}m`;
+  if (h) return `${h}h ${z(m)}m`;
+  return `${m}m`;
+}
+
 function cartaoDoEvento(ev, presencas = [], agora = Date.now()) {
   const s = Math.floor(new Date(ev.quando).getTime() / 1000);
   const passou = new Date(ev.quando).getTime() <= agora;
 
   /* O <t:R> anda sozinho na tela de quem le: "em 2 horas", "em 5 minutos".
      E' o cronometro do cartao, e nao custa uma edicao sequer. */
-  const partes = [`🕒 <t:${s}:F>`, `⏳ <t:${s}:R>`];
+  const partes = [`🕒 <t:${s}:F>`, passou ? "🔴" : `⏳ **−${cronometro(new Date(ev.quando).getTime() - agora)}**`];
   const extras = [];
   if (Number(ev.repetir_min) > 0) extras.push(`🔁 ${textoDaRepeticao(ev.repetir_min)}`);
   if (Number(ev.lembrete_min) > 0) extras.push(`⏰ −${ev.lembrete_min}m ✉️`);
@@ -7446,7 +7466,11 @@ async function desenharEventos(guild, servidor) {
     if (ev.msg_id) {
       const antiga = await canal.messages.fetch(ev.msg_id).catch(() => null);
       if (antiga) {
-        await antiga.edit(carga).catch((e) =>
+        /* Com o cronometro, esta passada roda de minuto em minuto: so' edita
+           o que mudou de verdade. */
+        const json = JSON.stringify(carga);
+        if (ultimaCargaDaCopia.get(antiga.id) === json) continue;
+        await antiga.edit(carga).then(() => ultimaCargaDaCopia.set(antiga.id, json)).catch((e) =>
           console.error("eventos: nao consegui editar o cartão:", e?.message || e));
         continue;
       }
@@ -7511,9 +7535,20 @@ function eventoDoCartao(msg) {
   return null;
 }
 
+/* Na memoria tambem: o cartao e' redesenhado de minuto em minuto, e o titulo
+   nao muda -- ir ao cache do banco a cada minuto, em cada lingua, seria
+   trabalho jogado fora. */
+const traducoesDaAgenda = new Map();
 async function traduzirPara(texto, idioma, motor) {
   if (!texto || !/\p{L}/u.test(texto)) return texto;
-  return (await traduzirComCache(String(texto), idioma, motor).catch(() => null)) || texto;
+  const chave = `${motor?.tipo || ""}|${idioma}|${texto}`;
+  if (traducoesDaAgenda.has(chave)) return traducoesDaAgenda.get(chave);
+  const t = await traduzirComCache(String(texto), idioma, motor).catch(() => null);
+  if (t) {
+    traducoesDaAgenda.set(chave, t);
+    if (traducoesDaAgenda.size > 1000) traducoesDaAgenda.delete(traducoesDaAgenda.keys().next().value);
+  }
+  return t || texto;
 }
 
 async function cargaNaLingua(ev, presencas, idioma, motor, agora = Date.now()) {
@@ -7545,6 +7580,9 @@ async function salasDaAgenda(guild, servidorId, canalAgenda) {
    Uma vez: depois disso a linha existe e a maquina das replicas faz o resto. */
 async function agendaComoOrigem(servidorId, canalAgenda) {
   if (!canalAgenda) return;
+  /* O servidor de suporte tem as salas dele contadas a dedo (montarSuporte):
+     agenda por idioma la' seria sala sobrando no roteiro de quem chega. */
+  if (canalAgenda.guild?.id && await ehServidorDoSuporte(canalAgenda.guild.id).catch(() => false)) return;
   const fontes = await fontesReplica(servidorId);
   if (fontes.has(canalAgenda.id)) return;
   if (!(await replicasDoIdioma(servidorId)).length) return;
@@ -7713,11 +7751,54 @@ async function nalingua(idioma, guildId, ...frases) {
 
 /* As opcoes que viraram LISTA. Escolher numa lista nao tem "nao entendi". */
 const REPETICOES = [0, 720, 1440, 2850, 2880, 10080];
-const FUSOS = [0, -180, -240, -300, -360, -420, -480, -600, -120, -60, 60, 120, 180, 210, 240,
-  300, 330, 360, 420, 480, 540, 570, 600, 660, 720];
-/* O botao 🌍 do painel gira so' pelos mais usados; o resto vem pelo campo
-   "fuso" do comando. */
-const FUSOS_RAPIDOS = [0, -180, -300, 60, 180, 480, 540];
+/* TODOS os fusos do mundo, com bandeiras de onde se usa -- para quem nao sabe
+   o proprio numero achar pelo pais. Sao 38: mais que as 25 opcoes de uma lista
+   do Discord, por isso o comando usa autocompletar (digita "br", "-3",
+   "japan") e o painel abre duas listas, oeste e leste. */
+const TODOS_FUSOS = [
+  [-720, "🌊 Baker"], [-660, "🇦🇸 Samoa (US)"], [-600, "🇺🇸 Hawaii"], [-570, "🇵🇫 Marquesas"],
+  [-540, "🇺🇸 Alaska"], [-480, "🇺🇸 🇨🇦 Pacific · Los Angeles"], [-420, "🇺🇸 🇲🇽 Mountain · Denver"],
+  [-360, "🇲🇽 🇺🇸 🇬🇹 Central · Mexico"], [-300, "🇺🇸 🇨🇴 🇵🇪 Eastern · New York · Bogotá"],
+  [-240, "🇻🇪 🇧🇴 🇩🇴 🇨🇱 Caracas · Santiago"], [-210, "🇨🇦 Newfoundland"],
+  [-180, "🇧🇷 🇦🇷 🇺🇾 Brasília · Buenos Aires"], [-120, "🇧🇷 Noronha"], [-60, "🇵🇹 🇨🇻 Azores · Cabo Verde"],
+  [0, "🎮 🇬🇧 🇵🇹 🇮🇸 London · Lisboa"], [60, "🇫🇷 🇩🇪 🇪🇸 🇮🇹 🇳🇬 Paris · Berlin · Madrid"],
+  [120, "🇪🇬 🇿🇦 🇺🇦 🇬🇷 Cairo · Kyiv · Athens"], [180, "🇷🇺 🇹🇷 🇸🇦 Moscow · Istanbul · Riyadh"],
+  [210, "🇮🇷 Tehran"], [240, "🇦🇪 🇦🇿 🇬🇪 Dubai · Baku"], [270, "🇦🇫 Kabul"],
+  [300, "🇵🇰 🇺🇿 Karachi · Tashkent"], [330, "🇮🇳 🇱🇰 India"], [345, "🇳🇵 Nepal"],
+  [360, "🇧🇩 🇰🇿 Dhaka · Almaty"], [390, "🇲🇲 Myanmar"], [420, "🇹🇭 🇻🇳 🇮🇩 Bangkok · Hanoi · Jakarta"],
+  [480, "🇨🇳 🇸🇬 🇵🇭 🇲🇾 🇹🇼 Beijing · Manila"], [525, "🇦🇺 Eucla"], [540, "🇯🇵 🇰🇷 Tokyo · Seoul"],
+  [570, "🇦🇺 Adelaide · Darwin"], [600, "🇦🇺 Sydney · Brisbane"], [630, "🇦🇺 Lord Howe"],
+  [660, "🇸🇧 🇳🇨 Solomon"], [720, "🇳🇿 🇫🇯 Auckland · Fiji"], [765, "🇳🇿 Chatham"],
+  [780, "🇹🇴 🇼🇸 Tonga · Samoa"], [840, "🇰🇮 Kiribati"],
+];
+const MINUTOS_DOS_FUSOS = new Set(TODOS_FUSOS.map(([m]) => m));
+
+function rotuloDoFuso(min) {
+  const achado = TODOS_FUSOS.find(([m]) => m === min);
+  return `${textoDoFuso(min)}${achado ? ` · ${achado[1]}` : ""}`.slice(0, 100);
+}
+
+/* O autocompletar do fuso: o que se digita filtra pelo numero ou pelo lugar. */
+function sugestoesDeFuso(digitado) {
+  const t = String(digitado || "").trim().toLowerCase().replace(/\s+/g, "");
+  const lido = t ? fusoDoTexto(t.replace(/^(?:utc|gmt)/, "")) : null;
+  const todas = TODOS_FUSOS.map(([m]) => ({ name: rotuloDoFuso(m), value: String(m) }));
+  if (!t) return todas.filter((o) => [0, -180, -300, 60, 180, 330, 480, 540].includes(Number(o.value))).slice(0, 25);
+  const fora = todas.filter((o) => (lido !== null && Number(o.value) === lido) ||
+    o.name.toLowerCase().replace(/\s+/g, "").includes(t));
+  /* O numero exato primeiro: "-3" e' Brasilia, e nao o -3:30 da Terra Nova. */
+  fora.sort((a, b) => (Number(b.value) === lido) - (Number(a.value) === lido));
+  return (fora.length ? fora : todas).slice(0, 25);
+}
+
+/* O valor do campo: os minutos que a lista mandou, ou o que a pessoa
+   digitou sem escolher ("-3", "+5:30"). null quando nao da' para entender. */
+function fusoDoCampo(bruto) {
+  const t = String(bruto ?? "").trim();
+  if (!t) return null;
+  if (/^-?\d+$/.test(t) && MINUTOS_DOS_FUSOS.has(Number(t))) return Number(t);
+  return fusoDoTexto(t.replace(/^(?:utc|gmt)/i, ""));
+}
 
 function rotuloDaRepeticao(min) {
   if (!min) return "🔂 —";
@@ -7770,6 +7851,22 @@ function opcoesDoDia(p, idioma, agora = Date.now()) {
 }
 
 async function painelDoRascunho(token, p, idioma, agora = Date.now()) {
+  if (p.escolhendoFuso) {
+    const [pergunta] = await nalingua(idioma, p.guildId,
+      "Escolha o fuso da hora do evento. O horário que você escolheu continua o mesmo, só muda o fuso dele. O jogo usa UTC.");
+    const lista = (lado) => TODOS_FUSOS.filter(([m]) => (lado === "oeste" ? m <= 0 : m > 0))
+      .map(([m]) => ({ label: rotuloDoFuso(m).slice(0, 100), value: String(m), default: m === p.fuso }));
+    return {
+      content: "",
+      embeds: [{ color: COR, title: `🌍 ${textoDoFuso(p.fuso)}`, description: pergunta }],
+      components: [
+        { type: 1, components: [{ type: 3, custom_id: `evsel:oeste:${token}`, placeholder: "🌎 UTC−12 … UTC±0", options: lista("oeste") }] },
+        { type: 1, components: [{ type: 3, custom_id: `evsel:leste:${token}`, placeholder: "🌏 UTC+1 … UTC+14", options: lista("leste") }] },
+        { type: 1, components: [{ type: 2, custom_id: `evsel:voltar:${token}`, style: 2, emoji: { name: "↩️" } }] },
+      ],
+      allowedMentions: { parse: [] },
+    };
+  }
   const pt = partesNoFuso(p.quando, p.fuso);
   const z = (n) => String(n).padStart(2, "0");
   const s = Math.floor(p.quando / 1000);
@@ -7876,7 +7973,7 @@ async function criarEvento(inter) {
   const titulo = inter.options.getString("o-que").trim();
   const bruto = (inter.options.getString("quando") || "").trim();
   const detalhes = (inter.options.getString("detalhes") || "").trim();
-  const fusoEscolhido = inter.options.getInteger("fuso");
+  const fusoEscolhido = fusoDoCampo(inter.options.getString("fuso"));
   const repetir = inter.options.getInteger("repetir") ?? 0;
   const lembrete = inter.options.getInteger("lembrete") ?? 0;
   /* O @everyone tambem aparece na lista de cargos. Marcar o servidor inteiro
@@ -8168,13 +8265,20 @@ async function cliqueRascunho(inter) {
     const ciclo = [0, ...LEMBRETES];
     p.lembrete = ciclo[(ciclo.indexOf(p.lembrete) + 1) % ciclo.length];
   } else if (acao === "fuso") {
+    /* O 🌍 abre as duas listas com todos os fusos no lugar do painel. */
+    p.escolhendoFuso = true;
+  } else if (acao === "voltar") {
+    p.escolhendoFuso = false;
+  } else if ((acao === "oeste" || acao === "leste") && valor !== undefined) {
     /* Trocar o fuso mantem o RELOGIO: quem escolheu 11:30 e lembrou que era
        UTC quer 11:30 UTC, e nao o mesmo instante escrito de outro jeito. */
-    const i = FUSOS_RAPIDOS.indexOf(p.fuso);
-    const novo = FUSOS_RAPIDOS[(i + 1) % FUSOS_RAPIDOS.length];
-    p.quando = instanteDe(pt, novo);
-    p.fuso = novo;
-    await porAjuste(`fuso:${inter.user.id}`, String(novo)).catch(() => {});
+    const novo = Number(valor);
+    if (MINUTOS_DOS_FUSOS.has(novo)) {
+      p.quando = instanteDe(pt, novo);
+      p.fuso = novo;
+      await porAjuste(`fuso:${inter.user.id}`, String(novo)).catch(() => {});
+    }
+    p.escolhendoFuso = false;
   } else if (acao === "nomejanela") {
     const nome = String(inter.fields.getTextInputValue("nome") || "").trim();
     if (nome) p.titulo = nome.slice(0, 100);
@@ -8415,6 +8519,18 @@ async function rodarAgendaDeEventos(agora = Date.now()) {
       } catch (e) {
         console.error(`eventos: a agenda falhou no evento ${ev.id}:`, e?.message || e);
       }
+    }
+
+    /* O cronometro anda: os servidores com evento nas proximas 48 horas tem
+       os cartoes reescritos agora (o que nao mudou nao e' editado). */
+    const breve = await sb(`cyron_evento?quando=gte.${new Date(agora - 60000).toISOString()}` +
+      `&quando=lte.${new Date(agora + CRONOMETRO_FINO).toISOString()}&select=guild_id&limit=500`).catch(() => null) || [];
+    for (const gid of new Set(breve.map((e) => String(e.guild_id)))) {
+      const guild = client.guilds.cache.get(gid);
+      if (!guild) continue;
+      const servidor = await servidorDoGuild(gid).catch(() => null);
+      if (servidor) await desenharEventos(guild, servidor).catch((e) =>
+        console.error("eventos: o cronômetro falhou em", guild.name, e?.message || e));
     }
   } finally {
     agendaRodando = false;
@@ -13946,6 +14062,8 @@ client.on("interactionCreate", async (inter) => {
          qualquer pedido. Com o /evento pedindo sugestão de horário, ele
          receberia nomes de rally onde esperava "3h". */
       if (inter.commandName === "evento") {
+        const foco = inter.options.getFocused(true);
+        if (foco?.name === "fuso") return inter.respond(sugestoesDeFuso(String(foco.value || "")));
         const fuso = Number((await ajustes())[`fuso:${inter.user.id}`]) || 0;
         return inter.respond(
           sugestoesDeQuando(String(inter.options.getFocused() || ""), Date.now(), fuso));
@@ -15438,10 +15556,10 @@ const GLOBAIS_DO_CYRON = [
       { type: 3, name: "quando", required: false, autocomplete: true,
         description: "Opcional: 3h · 20:30 · 04/10 11:30. Vazio: escolha no painel",
         descriptionLocalizations: TRADUCOES_DO_EVENTO.quando },
-      { type: 4, name: "fuso", required: false,
+      { type: 3, name: "fuso", required: false,
         description: "Fuso da hora (padrão: UTC, o relógio do jogo)",
         descriptionLocalizations: TRADUCOES_DO_EVENTO.fuso,
-        choices: FUSOS.map((f) => ({ name: textoDoFuso(f) + (f === 0 ? " 🎮" : f === -180 ? " 🇧🇷" : ""), value: f })) },
+            autocomplete: true, max_length: 12 },
       { type: 4, name: "repetir", required: false,
         description: "Repetir o evento?",
         descriptionLocalizations: TRADUCOES_DO_EVENTO.repetir,
