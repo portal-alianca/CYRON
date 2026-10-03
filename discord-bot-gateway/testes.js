@@ -4646,7 +4646,7 @@ function conferirCartao(onde, embed, componentes = []) {
     globalThis.menuIdioma = () => [{ type: 1, components: [{ type: 3, custom_id: "escolher-idioma",
       options: [{ label: "Português", value: "pt" }] }] }];
     globalThis.LINGUAS_MENU = globalThis.LINGUAS_MENU || [["pt", "Português", "🇧🇷", "Português"], ["en", "Inglês", "🇬🇧", "English"]];
-    const Q = carregar(["diaISO", "LEMBRAR_A_CADA_DIAS", "LEMBRETES_POR_DIA", "quemTemIdioma",
+    const Q = carregar(["diaISO", "LEMBRAR_A_CADA_DIAS", "LEMBRETES_POR_DIA", "quemTemIdioma", "nomeSeguro",
       "cartaoDosIdiomas", "botaoDoLembrete", "quemLembrarHoje"]);
     const cargos = [{ idioma: "pt", role_id: "r-pt" }, { idioma: "en", role_id: "r-en" }];
     const m = (id, roles = [], bot = false) => ({ id, bot, cargos: new Set(roles) });
@@ -4658,8 +4658,10 @@ function conferirCartao(onde, embed, componentes = []) {
     ok("sem idioma: quem não tem cargo nem escolheu no bot (bots fora)", sem, ["leo", "max"]);
     const quadro = Q.cartaoDosIdiomas(porIdioma, sem);
     conferirCartao("o quadro de idiomas", quadro, Q.botaoDoLembrete(false));
-    verdade("o quadro marca quem falta, na descrição (em campo a menção vira número cru)",
-      /<@leo> <@max>/.test(quadro.description) && !quadro.fields);
+    verdade("sem nome conhecido, cai na menção", /<@leo> · <@max>/.test(quadro.description) && !quadro.fields);
+    const comNomes = Q.cartaoDosIdiomas(porIdioma, sem, false, new Map([["leo", "Leo*Rei_"], ["max", "Max"]]));
+    verdade("com nome, o quadro escreve o NOME (menção em cartão vira número para quem não tem a pessoa carregada)",
+      /\*\*Leo\\\*Rei\\_\*\* · \*\*Max\*\*/.test(comNomes.description) && !/<@/.test(comNomes.description));
     verdade("todo em inglês", /Pick your language/.test(quadro.title) && !/Escolha|Sem idioma/.test(JSON.stringify(quadro)));
     verdade("uma linha por língua: bandeira, barra e número", /🇧🇷 `██████████` \*\*2\*\*\n🇬🇧 `█████░░░░░` \*\*1\*\*/.test(quadro.description));
     verdade("o menu de escolher vai junto do quadro",
