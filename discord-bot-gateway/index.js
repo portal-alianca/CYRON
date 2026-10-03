@@ -11824,55 +11824,309 @@ async function comandoAdmin(inter) {
   return inter.editReply({ embeds: [await embedDoResumo()], components: linhasDoAdmin() });
 }
 
-function linhasDoAdmin() {
-  return [{ type: 1, components: [
-    { type: 2, custom_id: "admin:resumo", style: 2, emoji: { name: "📊" }, label: "Resumo" },
-    { type: 2, custom_id: "admin:uso", style: 2, emoji: { name: "🏆" }, label: "Quem usa mais" },
-    { type: 2, custom_id: "admin:erros", style: 2, emoji: { name: "🐛" }, label: "Erros" },
-    { type: 2, custom_id: "admin:codigos", style: 1, emoji: { name: "🎟️" }, label: "Gerar códigos" },
-    { type: 2, custom_id: "admin:remontar", style: 2, emoji: { name: "🔄" }, label: "Remontar painel" },
-  ] }, { type: 1, components: [
-    { type: 2, custom_id: "admin:saude", style: 2, emoji: { name: "🩺" }, label: "Saúde" },
-    { type: 2, custom_id: "admin:busca", style: 2, emoji: { name: "🔎" }, label: "Procurar" },
-    { type: 2, custom_id: "admin:ajustes", style: 1, emoji: { name: "⚙️" }, label: "Ajustes" },
-    { type: 2, style: 5, emoji: { name: "➕" }, label: "Link para instalar o CYRON", url: linkDeConvite() },
-    { type: 2, custom_id: "admin:suporte", style: 2, emoji: { name: "🏗️" }, label: "Montar suporte" },
-  /* Fileira propria porque cinco e' o teto do Discord por fileira, e a de
-     cima ja' estava cheia. Estourar isso nao avisa bonito: a mensagem
-     inteira e' recusada, e o painel some. */
-  ] }, { type: 1, components: [
-    { type: 2, custom_id: "admin:chaves", style: 1, emoji: { name: "🔑" }, label: "Chaves de tradução" },
-    { type: 2, custom_id: "admin:visao", style: 1, emoji: { name: "👁️" }, label: "Leitura de imagem" },
-    { type: 2, custom_id: "admin:fala", style: 1, emoji: { name: "🎧" }, label: "Áudio" },
-    { type: 2, custom_id: "admin:comandos", style: 2, emoji: { name: "🧪" }, label: "Meus comandos" },
-    { type: 2, custom_id: "admin:novocomando", style: 4, emoji: { name: "➕" }, label: "Novo comando" },
-  ] }];
+/* As abas do /admin.
+
+   Eram quinze botoes em tres fileiras, todos com o mesmo peso: o que se olha
+   todo dia ao lado do que se usa uma vez por mes. Agora a primeira fileira e'
+   um menu de abas, e cada aba traz so' os botoes dela. Os ids dos botoes sao
+   os mesmos de antes: os formularios e quem os atende nao mudaram. */
+const ABAS_DO_ADMIN = [
+  { valor: "resumo", emoji: "📊", nome: "Visão geral", sobre: "o essencial e o que pede atenção" },
+  { valor: "dinheiro", emoji: "💰", nome: "Dinheiro", sobre: "quem paga, quanto entra, quem vence" },
+  { valor: "crescimento", emoji: "📈", nome: "Crescimento", sobre: "servidores e traduções em 14 dias" },
+  { valor: "saude", emoji: "🩺", nome: "Saúde e erros", sobre: "relógio, tradutor, cotas e erros" },
+  { valor: "servidores", emoji: "🔎", nome: "Servidores", sobre: "escolher um servidor e agir nele" },
+  { valor: "ferramentas", emoji: "🧰", nome: "Ferramentas", sobre: "chaves, ajustes, códigos, suporte" },
+];
+
+/* O botao que mostra uma tela de dentro de uma aba continua naquela aba. */
+const ABA_DO_BOTAO = { uso: "crescimento", erros: "saude", remontar: "ferramentas" };
+
+function abaDoAdmin(acao) {
+  if (ABA_DO_BOTAO[acao]) return ABA_DO_BOTAO[acao];
+  return ABAS_DO_ADMIN.some((a) => a.valor === acao) ? acao : "resumo";
+}
+
+function linhasDoAdmin(aba = "resumo", servidores = []) {
+  const menu = { type: 1, components: [{
+    type: 3, custom_id: "admin:aba", placeholder: "Escolha uma aba",
+    options: ABAS_DO_ADMIN.map((a) => ({ value: a.valor, label: a.nome, description: a.sobre,
+      emoji: { name: a.emoji }, default: a.valor === aba })),
+  }] };
+  const botao = (id, emoji, label, style = 2) =>
+    ({ type: 2, custom_id: `admin:${id}`, style, emoji: { name: emoji }, label });
+  const convite = { type: 2, style: 5, emoji: { name: "➕" }, label: "Link para instalar", url: linkDeConvite() };
+  const fileiras = {
+    resumo: [[botao("resumo", "🔄", "Atualizar"), convite]],
+    dinheiro: [[botao("dinheiro", "🔄", "Atualizar"), botao("codigos", "🎟️", "Gerar códigos", 1)]],
+    crescimento: [[botao("crescimento", "🔄", "Atualizar"), botao("uso", "🏆", "Quem usa mais")]],
+    saude: [[botao("saude", "🔄", "Atualizar"), botao("erros", "🐛", "Erros um a um")]],
+    servidores: [[botao("servidores", "🔄", "Atualizar"), botao("busca", "🔎", "Procurar por nome ou id", 1)]],
+    ferramentas: [
+      [botao("chaves", "🔑", "Chaves de tradução", 1), botao("visao", "👁️", "Leitura de imagem", 1),
+        botao("fala", "🎧", "Áudio", 1), botao("ajustes", "⚙️", "Ajustes", 1), botao("codigos", "🎟️", "Gerar códigos")],
+      [botao("comandos", "🧪", "Meus comandos"), botao("novocomando", "➕", "Novo comando", 4),
+        botao("suporte", "🏗️", "Montar suporte"), botao("remontar", "🔄", "Remontar painel"), convite],
+    ],
+  }[aba] || [];
+  /* A lista de servidores e' um menu, e nao texto: escolher abre a ficha com
+     os botoes de agir. Vinte e cinco e' o teto do Discord por menu; os
+     primeiros sao os que mais usam, que sao os que mais pedem atencao. */
+  const escolha = aba === "servidores" && servidores.length ? [{ type: 1, components: [{
+    type: 3, custom_id: "admin:ficha", placeholder: "Abrir a ficha de um servidor",
+    options: servidores.slice(0, 25).map((s) => ({
+      value: String(s.id), label: String(s.nome || "sem nome").slice(0, 100),
+      ...(s.linha ? { description: String(s.linha).slice(0, 100) } : {}),
+    })),
+  }] }] : [];
+  return [menu, ...escolha, ...fileiras.map((c) => ({ type: 1, components: c }))];
+}
+
+/* A tela inteira de uma aba: o cartao e os botoes dela. */
+async function telaDoAdmin(acao) {
+  const aba = abaDoAdmin(acao);
+  if (aba === "servidores") {
+    const { embed, servidores } = await embedDosServidores();
+    return { embeds: [embed], components: linhasDoAdmin(aba, servidores) };
+  }
+  const montar = { dinheiro: embedDoDinheiro, crescimento: embedDoCrescimento, saude: embedDeSaude,
+    uso: embedDeUso, erros: embedDeErros, ferramentas: embedDasFerramentas }[acao]
+    || { crescimento: embedDoCrescimento, saude: embedDeSaude, ferramentas: embedDasFerramentas }[aba]
+    || embedDoResumo;
+  return { embeds: [await montar()], components: linhasDoAdmin(aba) };
+}
+
+/* Quanto cada faixa custa por mes, em reais. O mesmo que PRECOS diz por
+   extenso, em numero, para somar. */
+const PRECO_MENSAL = { pro: 29.9, alianca: 79 };
+
+function reais(v) {
+  return "R$ " + (Number(v) || 0).toFixed(2).replace(".", ",");
+}
+
+/* Em que pe' esta' o pagamento de um servidor.
+
+   Separa o que planoDe junta: para o bot, liberado na mao, teste e pago sao
+   todos pago. Para quem olha o dinheiro, so' um deles paga. */
+function situacaoDoPagamento(s) {
+  if (s?.saiu_em) return "saiu";
+  if (venceEm(s?.pago_ate)) return "pago";
+  if (s?.plano === "pago") return "liberado";
+  if (venceEm(s?.teste_ate)) return "teste";
+  return "gratis";
+}
+
+function faixaPaga(s) {
+  return s?.nivel === "pro" ? "pro" : "alianca";
 }
 
 async function embedDoResumo() {
-  const todos = await sb("cyron_servidor?select=id,nome,plano,pago_ate,teste_ate,saiu_em") || [];
+  const todos = await sb("cyron_servidor?select=id,nome,plano,nivel,pago_ate,teste_ate,saiu_em") || [];
   const dentro = todos.filter((s) => !s.saiu_em);
-  const pagos = dentro.filter((s) => s.plano === "pago" || venceEm(s.pago_ate));
-  const hoje = await sb(
-    `cyron_uso_diario?dia=eq.${hojeISO()}&select=caracteres,traducoes,do_cache`) || [];
-  const soma = hoje.reduce((a, l) => ({
+  const pagando = dentro.filter((s) => situacaoDoPagamento(s) === "pago");
+  const liberados = dentro.filter((s) => situacaoDoPagamento(s) === "liberado").length;
+  const receita = pagando.reduce((a, s) => a + PRECO_MENSAL[faixaPaga(s)], 0);
+
+  const uso = await sb(`cyron_uso_diario?dia=gte.${ontemISO()}&select=dia,caracteres,traducoes,do_cache`) || [];
+  const somar = (dia) => uso.filter((l) => l.dia === dia).reduce((a, l) => ({
     c: a.c + Number(l.caracteres || 0), t: a.t + Number(l.traducoes || 0), k: a.k + Number(l.do_cache || 0),
   }), { c: 0, t: 0, k: 0 });
+  const hoje = somar(hojeISO());
+  const ontem = somar(ontemISO());
   const codigos = await sb("cyron_codigo?usado_em=is.null&select=codigo") || [];
+
+  /* O que pede atencao vem com o caminho: cada linha diz em que aba olhar. */
+  const semana = Date.now() + 7 * 864e5;
+  const vencendo = pagando.filter((s) => venceEm(s.pago_ate) <= semana).length;
+  const sairam = todos.filter((s) => s.saiu_em && Date.parse(s.saiu_em) >= Date.now() - 7 * 864e5).length;
+  const atencao = [
+    vencendo && `⏰ **${vencendo}** pagamento(s) vencem em 7 dias — aba 💰`,
+    errosRecentes.length && `🐛 **${errosRecentes.length}** erro(s) guardados — aba 🩺`,
+    tradutorFalhas.quedas && `🌐 o tradutor caiu no grátis **${tradutorFalhas.quedas}**x — aba 🩺`,
+    cargoAcimaDeMim.size && `🔒 **${cargoAcimaDeMim.size}** servidor(es) com cargo acima do meu`,
+    sairam && `👋 **${sairam}** servidor(es) saíram nesta semana — aba 📈`,
+  ].filter(Boolean);
 
   return {
     color: 0x2E8B7A,
-    title: "📊 CYRON — resumo",
+    title: "📊 CYRON — visão geral",
     fields: [
       { name: "Servidores", value: `**${dentro.length}** ativos\n${todos.length - dentro.length} saíram`, inline: true },
-      { name: "Pagantes", value: `**${pagos.length}**${BETA || venceEm(BETA_ATE) ? "\n_beta: todos com limites do pago_" : ""}`, inline: true },
+      { name: "Pagando", value: `**${pagando.length}** · ${reais(receita)}/mês` +
+          (liberados ? `\n+${liberados} liberados na mão` : "") +
+          (BETA || venceEm(BETA_ATE) ? "\n_beta: todos com limites do pago_" : ""), inline: true },
       { name: "Códigos livres", value: String(codigos.length), inline: true },
-      { name: "Traduzido hoje", value: soma.t
-          ? `**${soma.t}** traduções · ${(soma.c / 1000).toFixed(1)}k caracteres\n${soma.k} vieram do cache`
-          : "_nada ainda_" },
-      { name: "Erros guardados", value: errosRecentes.length ? `${errosRecentes.length} — veja em 🐛` : "_nenhum_", inline: true },
+      { name: "Traduzido hoje", value: hoje.t
+          ? `**${hoje.t}** traduções · ${emK(hoje.c)} caracteres · ${variacaoEmTexto(hoje.t, ontem.t)} vs ontem\n` +
+            `${hoje.k} vieram do cache`
+          : `_nada ainda_ · ontem foram ${ontem.t}` },
+      { name: "🔔 Pede atenção", value: atencao.length ? atencao.join("\n") : "✅ nada — tudo em ordem" },
     ],
-    footer: { text: "os contadores zeram quando eu reinicio" },
+    footer: { text: "troque de aba no menu de cima" },
+  };
+}
+
+/* Um grafico de barrinhas que cabe numa linha de texto.
+
+   Embed nao desenha grafico, e uma imagem gerada custaria um servico a mais.
+   Oito alturas bastam para ver a tendencia, que e' a pergunta. */
+const BARRINHAS = "▁▂▃▄▅▆▇█";
+
+function grafiquinho(valores) {
+  const max = Math.max(0, ...valores);
+  return valores.map((v) => BARRINHAS[max ? Math.round((Math.max(0, v) / max) * 7) : 0]).join("");
+}
+
+function variacaoEmTexto(agora, antes) {
+  if (!antes) return agora ? "novo" : "igual";
+  const p = Math.round(((agora - antes) / antes) * 100);
+  if (!p) return "igual";
+  return `${p > 0 ? "▲" : "▼"} ${Math.abs(p)}%`;
+}
+
+async function embedDoDinheiro() {
+  const agora = Date.now();
+  const todos = await sb("cyron_servidor?select=id,nome,plano,nivel,pago_ate,teste_ate,saiu_em") || [];
+  const por = { pago: [], liberado: [], teste: [], gratis: [], saiu: [] };
+  for (const s of todos) por[situacaoDoPagamento(s)].push(s);
+  const receita = por.pago.reduce((a, s) => a + PRECO_MENSAL[faixaPaga(s)], 0);
+  const quantos = (f) => por.pago.filter((s) => faixaPaga(s) === f).length;
+
+  const semana = agora + 7 * 864e5;
+  const vencendo = [...por.pago, ...por.teste]
+    .map((s) => ({ s, ate: venceEm(s.pago_ate) || venceEm(s.teste_ate) }))
+    .filter((x) => x.ate && x.ate <= semana)
+    .sort((a, b) => a.ate - b.ate);
+  /* Quem pagou e deixou vencer no ultimo mes: e' a lista de quem chamar. */
+  const mes = agora - 30 * 864e5;
+  const perdidos = todos.filter((s) => s.pago_ate && !venceEm(s.pago_ate) && s.plano !== "pago"
+    && Date.parse(s.pago_ate) >= mes);
+  const codigos = await sb("cyron_codigo?select=usado_em") || [];
+  const livres = codigos.filter((c) => !c.usado_em).length;
+  const usados = codigos.filter((c) => c.usado_em && Date.parse(c.usado_em) >= mes).length;
+
+  const nome = (s) => String(s.nome || "sem nome").slice(0, 40);
+  const lista = (xs, f) => xs.length
+    ? xs.slice(0, 10).map(f).join("\n") + (xs.length > 10 ? `\n_e mais ${xs.length - 10}_` : "")
+    : "_ninguém_";
+  const beta = BETA || venceEm(BETA_ATE);
+
+  return {
+    color: 0xC9A227,
+    title: "💰 Dinheiro",
+    ...(beta ? { description: "_Beta ligado: todos usam os limites do pago, mas aqui só conta quem pagou de verdade._" } : {}),
+    fields: [
+      { name: "Entra por mês, se todos renovarem", value: `**${reais(receita)}**\n` +
+          `Pro ${quantos("pro")} × ${reais(PRECO_MENSAL.pro)} · Aliança ${quantos("alianca")} × ${reais(PRECO_MENSAL.alianca)}` },
+      { name: "Pagando", value: String(por.pago.length), inline: true },
+      { name: "Em teste", value: String(por.teste.length), inline: true },
+      { name: "Liberados na mão", value: String(por.liberado.length), inline: true },
+      { name: "⏰ Vencem em 7 dias", value: lista(vencendo, ({ s, ate }) =>
+          `• ${nome(s)} — ${quandoFoi(ate, "R")}${venceEm(s.pago_ate) ? "" : " _(teste)_"}`) },
+      { name: "💸 Não renovaram (30 dias)", value: lista(perdidos, (s) =>
+          `• ${nome(s)} — venceu ${quandoFoi(Date.parse(s.pago_ate), "R")}`) },
+      { name: "🎟️ Códigos", value: `${livres} livres · ${usados} usados em 30 dias`, inline: true },
+      { name: "Grátis", value: String(por.gratis.length), inline: true },
+    ],
+    footer: { text: "estimativa pelo plano de cada servidor; não lê o extrato do banco" },
+  };
+}
+
+async function embedDoCrescimento() {
+  const DIAS = 14;
+  const dias = Array.from({ length: DIAS }, (_, i) => diaISO(Date.now() - (DIAS - 1 - i) * 864e5));
+  const uso = await sb(`cyron_uso_diario?dia=gte.${dias[0]}&select=dia,traducoes`) || [];
+  const todos = await sb("cyron_servidor?select=nome,criado_em,saiu_em") || [];
+  const escolhas = await sb("discord_idioma_jogador?select=idioma") || [];
+
+  const porDia = new Map(dias.map((d) => [d, 0]));
+  for (const l of uso) if (porDia.has(l.dia)) porDia.set(l.dia, porDia.get(l.dia) + Number(l.traducoes || 0));
+  const serie = [...porDia.values()];
+  const estaSemana = serie.slice(7).reduce((a, b) => a + b, 0);
+  const antes = serie.slice(0, 7).reduce((a, b) => a + b, 0);
+
+  const desde = Date.parse(dias[7]);
+  const entraram = todos.filter((s) => Date.parse(s.criado_em) >= desde);
+  const sairam = todos.filter((s) => s.saiu_em && Date.parse(s.saiu_em) >= desde);
+  const entradas = dias.map((d) => todos.filter((s) => String(s.criado_em || "").slice(0, 10) === d).length);
+
+  const conta = new Map();
+  for (const e of escolhas) if (e.idioma) conta.set(e.idioma, (conta.get(e.idioma) || 0) + 1);
+  const idiomas = [...conta].sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  return {
+    color: 0x3B82F6,
+    title: "📈 Crescimento",
+    fields: [
+      { name: "Traduções em 14 dias", value: "```\n" + grafiquinho(serie) + "\n```" +
+          `Esta semana **${emK(estaSemana)}** · a anterior ${emK(antes)} · ${variacaoEmTexto(estaSemana, antes)}` },
+      { name: "Servidores", value: `**${todos.filter((s) => !s.saiu_em).length}** ativos\n` +
+          `+${entraram.length} entraram · −${sairam.length} saíram em 7 dias`, inline: true },
+      { name: "Entradas por dia", value: "```\n" + grafiquinho(entradas) + "\n```", inline: true },
+      { name: "🆕 Chegaram nesta semana", value: entraram.length
+          ? entraram.slice(-8).map((s) => `• ${String(s.nome || "sem nome").slice(0, 40)}`).join("\n")
+          : "_ninguém_" },
+      { name: "🌐 Idiomas dos membros", value: idiomas.length
+          ? idiomas.map(([c, n]) => `${nomeDoIdioma(c)} **${n}**`).join(" · ")
+          : "_ninguém escolheu ainda_" },
+    ],
+    footer: { text: "cada barrinha é um dia, do mais antigo até hoje" },
+  };
+}
+
+async function embedDosServidores() {
+  const todos = await sb("cyron_servidor?select=id,guild_id,nome,plano,nivel,pago_ate,teste_ate,saiu_em&order=criado_em.asc") || [];
+  const uso = await sb(`cyron_uso_diario?dia=gte.${diaISO(Date.now() - 6 * 864e5)}&select=servidor_id,traducoes`) || [];
+  const soma = new Map();
+  for (const l of uso) soma.set(l.servidor_id, (soma.get(l.servidor_id) || 0) + Number(l.traducoes || 0));
+  const ativos = todos.filter((s) => !s.saiu_em)
+    .sort((a, b) => (soma.get(b.id) || 0) - (soma.get(a.id) || 0));
+
+  const selo = { pago: "🟢", liberado: "🔵", teste: "🟡", gratis: "⚪", saiu: "⚫" };
+  const dia = (t) => new Date(t).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  const plano = (s) => {
+    const sit = situacaoDoPagamento(s);
+    const faixa = nomeDaFaixa(faixaPaga(s));
+    if (sit === "pago") return `${faixa} até ${dia(venceEm(s.pago_ate))}`;
+    if (sit === "teste") return `teste até ${dia(venceEm(s.teste_ate))}`;
+    if (sit === "liberado") return `${faixa} liberado`;
+    return "grátis";
+  };
+  const linhas = ativos.slice(0, 25).map((s) =>
+    `${selo[situacaoDoPagamento(s)]} **${String(s.nome || "sem nome").slice(0, 40)}** · ${plano(s)} · ${soma.get(s.id) || 0} trad.`);
+
+  return {
+    embed: {
+      color: 0x2E8B7A,
+      title: `🔎 Servidores — ${ativos.length} ativos`,
+      description: (linhas.length ? linhas.join("\n") : "_nenhum servidor ainda_") +
+        (ativos.length > 25 ? `\n_e mais ${ativos.length - 25}: use 🔎 Procurar_` : "") +
+        "\n\n🟢 pagando · 🟡 teste · 🔵 liberado na mão · ⚪ grátis",
+      footer: { text: "traduções dos últimos 7 dias · escolha um no menu para agir" },
+    },
+    servidores: ativos.map((s) => ({ id: s.id, nome: s.nome, linha: `${plano(s)} · ${soma.get(s.id) || 0} traduções em 7 dias` })),
+  };
+}
+
+async function embedDasFerramentas() {
+  const motores = new Set((motoresDoDono() || []).map((m) => m.tipo));
+  const tem = (t) => (motores.has(t) ? "🟢" : "⚪");
+  return {
+    color: 0x6B7280,
+    title: "🧰 Ferramentas",
+    fields: [
+      { name: "🔑 Chaves de tradução", value: `${tem("deepl")} DeepL · ${tem("azure")} Azure`, inline: true },
+      { name: "🧪 Beta", value: BETA ? "ligado" : venceEm(BETA_ATE) ? `até ${quandoFoi(venceEm(BETA_ATE), "d")}` : "desligado", inline: true },
+      { name: "O que cada botão faz", value: [
+        "🔑 **Chaves** — DeepL e Azure da casa",
+        "👁️ **Leitura de imagem** e 🎧 **Áudio** — chaves da Azure para o 📝 e o 🎧",
+        "⚙️ **Ajustes** — links de pagamento, beta e textos",
+        "🎟️ **Gerar códigos** — dias de plano para vender ou dar",
+        "🧪 **Meus comandos** / ➕ **Novo comando** — comandos deste servidor",
+        "🏗️ **Montar suporte** — arruma o servidor de suporte",
+        "🔄 **Remontar painel** — refaz os canais deste painel",
+      ].join("\n") },
+    ],
   };
 }
 
@@ -11897,6 +12151,25 @@ async function embedDeUso() {
           `**${i + 1}.** ${nomes.get(id) || id} — ${(v.c / 1000).toFixed(1)}k caracteres · ${v.t} traduções`).join("\n")
       : "_ninguém traduziu nada nos últimos 7 dias_",
   };
+}
+
+/* Os erros juntados por lugar, o mais repetido primeiro.
+
+   Trinta linhas iguais de um mesmo defeito escondem o unico erro diferente
+   que importava. Agrupado, o que se repete vira um numero e o resto aparece. */
+function errosAgrupados() {
+  const grupos = new Map();
+  for (const e of errosRecentes) {
+    const g = grupos.get(e.onde) || { onde: e.onde, vezes: 0, ultimo: 0, porque: "" };
+    g.vezes++;
+    if (e.quando >= g.ultimo) { g.ultimo = e.quando; g.porque = e.porque; }
+    grupos.set(e.onde, g);
+  }
+  const lista = [...grupos.values()].sort((a, b) => b.vezes - a.vezes || b.ultimo - a.ultimo);
+  if (!lista.length) return "🟢 nenhum";
+  return lista.slice(0, 6).map((g) =>
+    `**${String(g.onde).slice(0, 40)}** ×${g.vezes} · ${quandoFoi(g.ultimo, "R")}\n${String(g.porque).slice(0, 70)}`)
+    .join("\n").slice(0, 1000);
 }
 
 function embedDeErros() {
@@ -11988,6 +12261,15 @@ async function cliqueAdmin(inter) {
     return inter.showModal(janelaValida(await janelaDeComando(escolhido)));
   }
   if (acao === "busca" && inter.isButton()) return inter.showModal(janelaValida(janelaDeBusca()));
+  /* Escolher um servidor na aba abre a ficha AO LADO, e o painel fica onde
+     estava: da' para abrir varias fichas sem voltar a aba. */
+  if (acao === "ficha" && inter.isStringSelectMenu()) {
+    const id = encodeURIComponent(inter.values?.[0] || "");
+    const s = (await sb(`cyron_servidor?id=eq.${id}&select=*`))?.[0];
+    if (!s) return inter.reply({ flags: 64, content: "Esse servidor não está mais no banco." });
+    await inter.deferReply({ flags: 64 });
+    return inter.editReply(await fichaRapida(s));
+  }
 
   await inter.deferUpdate();
 
@@ -12000,14 +12282,9 @@ async function cliqueAdmin(inter) {
       embeds: [await embedDoResumo()], components: linhasDoAdmin(),
     });
   }
-  if (acao === "remontar") {
-    await montarPainelDoDono();
-    return inter.editReply({ embeds: [await embedDoResumo()], components: linhasDoAdmin() });
-  }
-  if (acao === "uso") return inter.editReply({ embeds: [await embedDeUso()], components: linhasDoAdmin() });
-  if (acao === "erros") return inter.editReply({ embeds: [embedDeErros()], components: linhasDoAdmin() });
-  if (acao === "saude") return inter.editReply({ embeds: [await embedDeSaude()], components: linhasDoAdmin() });
-  return inter.editReply({ embeds: [await embedDoResumo()], components: linhasDoAdmin() });
+  if (acao === "remontar") await montarPainelDoDono();
+  /* O menu de abas manda a aba escolhida; cada botao manda o nome dele. */
+  return inter.editReply(await telaDoAdmin(acao === "aba" ? inter.values?.[0] : acao));
 }
 
 async function gerarCodigos(inter) {
@@ -12747,6 +13024,7 @@ async function embedDeSaude() {
          não dá erro, dá "não respondeu a tempo" em quem clicou. */
       { name: "Memória", value: `${Math.round(process.memoryUsage().rss / 1048576)} MB de ${TETO_MEMORIA} MB`, inline: true },
       { name: "Mensagens guardadas", value: `${mensagensGuardadas()}`, inline: true },
+      { name: "🐛 Erros desde que subi", value: errosAgrupados() },
     ],
     footer: { text: "os contadores zeram quando eu reinicio" },
   };
@@ -12789,22 +13067,34 @@ async function procurarServidor(inter) {
       achados.slice(0, 15).map((s) => `• ${s.nome} — \`${s.guild_id}\`${s.saiu_em ? " _(saiu)_" : ""}`).join("\n"));
   }
 
-  const s = achados[0];
+  return inter.editReply(await fichaRapida(achados[0]));
+}
+
+/* A ficha curta de um servidor, com os botoes de agir.
+
+   A mesma para quem procura pelo nome e para quem escolhe na aba Servidores:
+   duas portas, uma ficha so'. */
+async function fichaRapida(s) {
   const uso = await usoDeHoje(s.id);
-  return inter.editReply({
+  const sit = situacaoDoPagamento(s);
+  const ate = venceEm(s.pago_ate) || venceEm(s.teste_ate);
+  return {
     content: s.canal_admin ? `Ficha completa em <#${s.canal_admin}>` : undefined,
     embeds: [{
       color: s.saiu_em ? 0x8A3A33 : planoDe(s) === "pago" ? 0x2E8B7A : 0xB08A2E,
-      title: s.nome,
+      title: String(s.nome || "sem nome").slice(0, 200),
       description: s.saiu_em ? `⚠️ saiu ${quandoFoi(Date.parse(s.saiu_em), "R")}` : "no ar",
       fields: [
-        { name: "Plano", value: planoDe(s), inline: true },
+        { name: "Plano", value: { pago: `${nomeDaFaixa(faixaPaga(s))} pago`, teste: "em teste",
+            liberado: `${nomeDaFaixa(faixaPaga(s))} liberado na mão`, gratis: "grátis", saiu: "saiu" }[sit], inline: true },
+        { name: "Vence", value: ate ? quandoFoi(ate, "R") : "—", inline: true },
         { name: "Hoje", value: `${uso.traducoes} traduções`, inline: true },
         { name: "guild", value: `\`${s.guild_id}\``, inline: true },
+        ...(s.criado_em ? [{ name: "Chegou", value: quandoFoi(Date.parse(s.criado_em), "R"), inline: true }] : []),
       ],
     }],
     components: botoesDaFicha(s),
-  });
+  };
 }
 
 /* O cartao e' desenhado por ULTIMO na volta do relogio.
