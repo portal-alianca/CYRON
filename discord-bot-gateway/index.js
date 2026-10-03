@@ -7158,24 +7158,6 @@ function textoDaRepeticao(min) {
   return h ? `${h}h${m ? `${m}m` : ""}` : `${m}m`;
 }
 
-/* As opcoes do campo "repetir" enquanto se digita. */
-function sugestoesDeRepetir(digitado) {
-  const fora = [];
-  const t = String(digitado || "").trim();
-  const lido = t ? repetirDoTexto(t) : null;
-  if (lido) fora.push({ name: `🔁 ${t}  →  a cada ${textoDaRepeticao(lido)} / every ${textoDaRepeticao(lido)}`, value: t });
-  for (const [nome, valor] of [
-    ["Não repetir / Don't repeat", "0"],
-    ["🔁 Todo dia / Every day (24h)", "24h"],
-    ["🔁 Toda semana / Every week (7d)", "7d"],
-    ["🔁 A cada 2 dias / Every 2 days", "2d"],
-    ["🔁 A cada 12h / Every 12h", "12h"],
-  ]) {
-    if (!fora.some((f) => f.value === valor)) fora.push({ name: nome, value: valor });
-  }
-  return fora.slice(0, 25);
-}
-
 /* A proxima vez DEPOIS de agora. Um laco, e nao uma conta so', porque o bot
    pode ter ficado fora varias repeticoes: quem chega atrasado pula todas. */
 function proximaVez(quandoMs, repetirMin, agora = Date.now()) {
@@ -7543,100 +7525,231 @@ async function gravarEvento(guild, servidor, userId, { titulo, detalhes, quando,
   return { ev, existente, campos };
 }
 
+/* ---------------- falar a lingua de quem chamou ----------------
+
+   O /evento e' usado por lider coreano, arabe, turco. Tudo que ele LE sai na
+   lingua dele: a escolhida no bot, senao a do aplicativo. As frases sao
+   escritas aqui em portugues e passam pelo tradutor (com cache: a mesma
+   frase so' e' paga uma vez por lingua).
+
+   O que nao e' frase -- <t:...>, mencao, numero, emoji -- fica FORA da
+   traducao e e' colado depois. Tradutor estraga marcacao. */
+async function linguaDe(inter) {
+  return (await idiomaEscolhido(inter.user.id).catch(() => null)) || idiomaDoAplicativo(inter.locale) || "pt";
+}
+
+async function nalingua(idioma, guildId, ...frases) {
+  if (!idioma || idioma === "pt") return frases;
+  const motor = await motorDoGuild(guildId).catch(() => undefined);
+  const fora = [];
+  for (const f of frases) {
+    if (!f) { fora.push(f); continue; }
+    const r = await traduzirEmbed({ description: f }, idioma, motor).catch(() => null);
+    fora.push(r?.description || f);
+  }
+  return fora;
+}
+
+/* As opcoes que viraram LISTA. Escolher numa lista nao tem "nao entendi". */
+const REPETICOES = [0, 720, 1440, 2850, 2880, 10080];
+const FUSOS = [0, -180, -240, -300, -360, -420, -480, -600, -120, -60, 60, 120, 180, 210, 240,
+  300, 330, 360, 420, 480, 540, 570, 600, 660, 720];
+/* O botao 🌍 do painel gira so' pelos mais usados; o resto vem pelo campo
+   "fuso" do comando. */
+const FUSOS_RAPIDOS = [0, -180, -300, 60, 180, 480, 540];
+
+function rotuloDaRepeticao(min) {
+  if (!min) return "🔂 —";
+  return `${min === 2850 ? "🐻" : "🔁"} ${textoDaRepeticao(min)}`;
+}
+
+/* O dia, a hora e o minuto de um instante, no fuso dado. */
+function partesNoFuso(ms, fuso) {
+  const d = new Date(ms + fuso * 60000);
+  return { ano: d.getUTCFullYear(), mes: d.getUTCMonth() + 1, dia: d.getUTCDate(),
+    hora: d.getUTCHours(), min: d.getUTCMinutes() };
+}
+function instanteDe(pt, fuso) {
+  return Date.UTC(pt.ano, pt.mes - 1, pt.dia, pt.hora, pt.min) - fuso * 60000;
+}
+
+/* A proxima hora cheia depois de agora + 1h: o painel abre num horario que
+   ja vale, e quem so' quer ajustar a hora nao precisa mexer no dia. */
+function horarioInicial(agora = Date.now()) {
+  return Math.ceil((agora + 3600000) / 3600000) * 3600000;
+}
+
+/* O rascunho do evento: o /evento sem data, o /evento com data que eu nao
+   entendi, e o ✏️ do leitor caem todos aqui. */
+function opcoesDoDia(p, idioma, agora = Date.now()) {
+  const local = { pt: "pt-BR", en: "en-US", es: "es-ES", "zh-CN": "zh-CN" }[idioma] || idioma || "en-US";
+  const hoje = partesNoFuso(agora, p.fuso);
+  const escolhido = partesNoFuso(p.quando, p.fuso);
+  const fora = [];
+  for (let i = 0; i < 25; i++) {
+    const ms = Date.UTC(hoje.ano, hoje.mes - 1, hoje.dia + i, 12);
+    const d = new Date(ms);
+    let semana = "";
+    try { semana = new Intl.DateTimeFormat(local, { weekday: "short", timeZone: "UTC" }).format(d); } catch { /* sem ICU */ }
+    const v = `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+    fora.push({
+      label: `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}${semana ? ` · ${semana}` : ""}`,
+      value: v,
+      default: d.getUTCFullYear() === escolhido.ano && d.getUTCMonth() + 1 === escolhido.mes && d.getUTCDate() === escolhido.dia,
+    });
+  }
+  /* Data lida de um print mais de 25 dias a frente: ela entra no lugar do
+     ultimo dia, senao a lista abriria sem nenhuma marcada e o primeiro
+     toque em hora jogaria o evento para hoje. */
+  if (!fora.some((o) => o.default)) {
+    fora[fora.length - 1] = { label: `${String(escolhido.dia).padStart(2, "0")}/${String(escolhido.mes).padStart(2, "0")}/${escolhido.ano}`,
+      value: `${escolhido.ano}-${escolhido.mes}-${escolhido.dia}`, default: true };
+  }
+  return fora;
+}
+
+async function painelDoRascunho(token, p, idioma, agora = Date.now()) {
+  const pt = partesNoFuso(p.quando, p.fuso);
+  const z = (n) => String(n).padStart(2, "0");
+  const s = Math.floor(p.quando / 1000);
+  const passou = p.quando <= agora;
+
+  const [explica, aviso] = await nalingua(idioma, p.guildId,
+    "Escolha o dia, a hora e o minuto abaixo. A hora é a do fuso mostrado; logo embaixo cada pessoa vê no próprio relógio.",
+    passou ? "Esse horário já passou. Escolha outro." : "");
+
+  const minutos = Array.from({ length: 12 }, (_, i) => i * 5);
+  if (!minutos.includes(pt.min)) minutos.push(pt.min);
+  minutos.sort((a, b) => a - b);
+  const reps = REPETICOES.includes(p.repetir) ? REPETICOES : [...REPETICOES, p.repetir];
+
+  return {
+    content: "",
+    embeds: [{
+      color: passou ? 0xE74C3C : COR,
+      title: `📅 ${String(p.titulo || "—").slice(0, 200)}`,
+      description: explica + "\n\n" +
+        `🌍 **${textoDoFuso(p.fuso)}** ${z(pt.dia)}/${z(pt.mes)}/${pt.ano} ${z(pt.hora)}:${z(pt.min)}\n` +
+        `🕒 <t:${s}:F> · ⏳ <t:${s}:R>\n` +
+        `${rotuloDaRepeticao(p.repetir)} · ${p.lembrete ? `⏰ −${p.lembrete}m ✉️` : "🔕"}` +
+        (p.cargoId ? ` · 📣 <@&${p.cargoId}>` : "") +
+        (aviso ? `\n\n⚠️ ${aviso}` : ""),
+      ...(p.gif || p.imagem ? { thumbnail: { url: p.gif || p.imagem } } : {}),
+    }],
+    components: [
+      { type: 1, components: [{ type: 3, custom_id: `evsel:dia:${token}`, options: opcoesDoDia(p, idioma, agora) }] },
+      { type: 1, components: [{ type: 3, custom_id: `evsel:hora:${token}`,
+        options: Array.from({ length: 24 }, (_, h) => ({ label: `${z(h)} h`, value: String(h), default: h === pt.hora })) }] },
+      { type: 1, components: [{ type: 3, custom_id: `evsel:min:${token}`,
+        options: minutos.map((m) => ({ label: `:${z(m)}`, value: String(m), default: m === pt.min })) }] },
+      { type: 1, components: [{ type: 3, custom_id: `evsel:rep:${token}`,
+        options: reps.map((r) => ({ label: rotuloDaRepeticao(r), value: String(r), default: r === p.repetir })) }] },
+      { type: 1, components: [
+        { type: 2, custom_id: `evsel:lemb:${token}`, style: 2, emoji: { name: p.lembrete ? "⏰" : "🔕" },
+          label: p.lembrete ? `−${p.lembrete} min` : "—" },
+        { type: 2, custom_id: `evsel:fuso:${token}`, style: 2, emoji: { name: "🌍" }, label: textoDoFuso(p.fuso) },
+        { type: 2, custom_id: `evsel:nome:${token}`, style: 2, emoji: { name: "✏️" } },
+        { type: 2, custom_id: `evsel:criar:${token}`, style: 3, emoji: { name: "✅" }, disabled: passou || !p.titulo },
+        { type: 2, custom_id: `evsel:sair:${token}`, style: 4, emoji: { name: "✖️" } },
+      ] },
+    ],
+    allowedMentions: { parse: [] },
+  };
+}
+
+/* Grava o rascunho e devolve a confirmacao, na lingua de quem pediu. */
+async function confirmarEvento(inter, p, idioma) {
+  const servidor = await servidorDoGuild(inter.guildId);
+  if (!servidor) return { content: "Ainda não terminei de me instalar aqui.", embeds: [], components: [] };
+  let gif = p.gif || null;
+  if (!gif && p.imagem) gif = await reHospedar(p.imagem, `evento-${inter.guildId}`).catch(() => null);
+  const { ev, existente } = await gravarEvento(inter.guild, servidor, inter.user.id, {
+    titulo: p.titulo, detalhes: p.detalhes, quando: p.quando, repetir: p.repetir,
+    lembrete: p.lembrete, cargoId: p.cargoId, gif,
+  });
+  const [falhou] = ev?.id ? [null] : await nalingua(idioma, inter.guildId, NAO_GRAVEI_EVENTO);
+  if (!ev?.id) return { content: falhou, embeds: [], components: [] };
+
+  const cargo = p.cargoId ? inter.guild.roles.cache.get(p.cargoId) : null;
+  const cargoMudo = cargo && !cargo.mentionable &&
+    !inter.guild.members.me?.permissions?.has(PermissionFlagsBits.MentionEveryone);
+  const [feito, mudar, mudo] = await nalingua(idioma, inter.guildId,
+    existente ? "Evento atualizado na sala de eventos." : "Evento criado na sala de eventos.",
+    "Para mudar, use /evento de novo com o mesmo nome.",
+    cargoMudo ? "Esse cargo não está como mencionável, e eu não tenho permissão de marcar todos. " +
+      "Ligue \"Permitir que qualquer um mencione este cargo\" nas configurações do cargo." : "");
+  const s = Math.floor(p.quando / 1000);
+  return {
+    content: "",
+    embeds: [{
+      color: COR_OK,
+      title: `✅ ${String(p.titulo).slice(0, 200)}`,
+      description: `${feito}\n\n🕒 <t:${s}:F> · ⏳ <t:${s}:R>\n` +
+        `${rotuloDaRepeticao(p.repetir)} · ${p.lembrete ? `⏰ −${p.lembrete}m ✉️` : "🔕"}` +
+        (p.cargoId ? ` · 📣 <@&${p.cargoId}>` : "") +
+        (mudo ? `\n\n⚠️ ${mudo}` : "") + `\n\n_${mudar}_`,
+    }],
+    components: [{ type: 1, components: [
+      { type: 2, custom_id: `evento:apagar:${ev.id}`, style: 4, emoji: { name: "🗑️" } },
+    ] }],
+    allowedMentions: { parse: [] },
+  };
+}
+
 /* O lider mandou o comando.
 
    Mesmo nome de um evento que ja existe neste servidor = EDITAR, e nao criar
    outro. E' assim que o dono "mexe" num evento sem uma tela de edicao: manda
-   de novo com o horario certo, e as inscricoes ficam. */
+   de novo com o horario certo, e as inscricoes ficam.
+
+   Fuso, repetir e lembrete sao LISTAS: nada para digitar errado. O "quando"
+   digitado e' o atalho de quem ja sabe; sem ele, ou se eu nao entender, nao
+   ha "nao entendi" -- abre o painel com dia, hora e minuto para escolher. */
 async function criarEvento(inter) {
   await inter.deferReply({ flags: 64 });
+  const idioma = await linguaDe(inter);
 
   const servidor = await servidorDoGuild(inter.guildId);
-  if (!servidor) return inter.editReply({ content: "Ainda não terminei de me instalar aqui." });
+  if (!servidor) return inter.editReply({ content: (await nalingua(idioma, inter.guildId, "Ainda não terminei de me instalar aqui."))[0] });
 
   const titulo = inter.options.getString("o-que").trim();
-  const bruto = inter.options.getString("quando").trim();
+  const bruto = (inter.options.getString("quando") || "").trim();
   const detalhes = (inter.options.getString("detalhes") || "").trim();
-  const fusoBruto = (inter.options.getString("fuso") || "").trim();
-  const repetirBruto = (inter.options.getString("repetir") || "").trim();
+  const fusoEscolhido = inter.options.getInteger("fuso");
+  const repetir = inter.options.getInteger("repetir") ?? 0;
   const lembrete = inter.options.getInteger("lembrete") ?? 0;
   /* O @everyone tambem aparece na lista de cargos. Marcar o servidor inteiro
      a cada repeticao nao e' convite, e' alarme -- esse fica de fora. */
   const escolhido = inter.options.getRole("cargo");
   const cargo = escolhido && escolhido.id !== inter.guildId ? escolhido : null;
 
-  /* O fuso guardado deste oficial vale quando ele não escreve nenhum: depois
-     da primeira vez, marcar um evento é preencher duas coisas. */
-  const fuso = fusoBruto ? fusoDoTexto(fusoBruto)
-    : (Number((await ajustes())[`fuso:${inter.user.id}`]) || 0);
-  if (fusoBruto && fuso === null) {
-    return inter.editReply({ content:
-      `🤔 Não entendi o fuso **${fusoBruto}**. Escreva como \`-3\`, \`+2\`, \`+5:30\` ou \`0\` para UTC.` });
-  }
-
-  const quando = quandoDoTexto(bruto, Date.now(), fuso ?? 0);
-  if (quando === null) {
-    /* A recusa ENSINA, porque a forma ambígua é a que mais vai aparecer:
-       "20h30" some aqui e a pessoa precisa saber para onde ir. */
-    const dica = porqueNaoEntendi(bruto);
-    return inter.editReply({ content:
-      `🤔 Não entendi **${bruto}**.` + (dica ? ` ${dica}` : "") + "\n\n" +
-      "**Daqui a tanto tempo:** `3h` · `90m` · `2h30m` · `2d`\n" +
-      "**Hora marcada:** `20:30` · `16/09 20:30` — com dois-pontos\n\n" +
-      "_`20h30` eu recuso de propósito: como duração seriam vinte horas e meia, " +
-      "como relógio seriam oito e meia da noite, e marcar no horário errado é " +
-      "pior que não marcar._" });
-  }
-
-  const repetir = repetirDoTexto(repetirBruto);
-  if (repetir === null) {
-    return inter.editReply({ content:
-      `🤔 Não entendi o repetir **${repetirBruto}**. Use \`24h\`, \`7d\`, \`47h30m\` ou \`0\` para não repetir — ` +
-      "entre 1 hora e 30 dias." });
-  }
+  /* UTC e' o padrao, porque e' o relogio do jogo. Quem ja escolheu outro
+     uma vez fica com o dele. */
+  const fuso = fusoEscolhido ?? (Number((await ajustes())[`fuso:${inter.user.id}`]) || 0);
+  if (fusoEscolhido !== null) await porAjuste(`fuso:${inter.user.id}`, String(fusoEscolhido)).catch(() => {});
 
   let gif = null;
   try {
     gif = await gifDoEvento(inter);
   } catch (e) {
-    return inter.editReply({ content: `🖼️ ${PORQUE_DO_GIF[e?.message] || PORQUE_DO_GIF.subir}` });
+    const [porque] = await nalingua(idioma, inter.guildId, PORQUE_DO_GIF[e?.message] || PORQUE_DO_GIF.subir);
+    return inter.editReply({ content: `🖼️ ${porque}` });
   }
 
-  /* O fuso deste oficial fica lembrado para a próxima vez vir preenchida. */
-  if (fuso !== null) await porAjuste(`fuso:${inter.user.id}`, String(fuso)).catch(() => {});
+  const p = {
+    guildId: inter.guildId, userId: inter.user.id, titulo, detalhes: detalhes || null,
+    fuso, repetir: REPETICOES.includes(repetir) ? repetir : 0,
+    lembrete: LEMBRETES.includes(lembrete) ? lembrete : 0,
+    cargoId: cargo?.id || null, gif, imagem: null,
+  };
 
-  const { ev, existente, campos } = await gravarEvento(inter.guild, servidor, inter.user.id, {
-    titulo, detalhes, quando, repetir, lembrete, cargoId: cargo?.id, gif,
-  });
-  if (!ev?.id) {
-    return inter.editReply({ content: NAO_GRAVEI_EVENTO });
+  const quando = bruto ? quandoDoTexto(bruto, Date.now(), fuso) : null;
+  if (quando !== null) {
+    return inter.editReply(await confirmarEvento(inter, { ...p, quando }, idioma));
   }
-
-  const s = Math.floor(quando / 1000);
-  const linhas = [
-    `📅 **${titulo}** ${existente ? "atualizado" : "marcado"}: <t:${s}:F> — <t:${s}:R>.`,
-    repetir ? `🔁 Repete a cada **${textoDaRepeticao(repetir)}**.` : "Não repete.",
-    campos.lembrete_min ? `⏰ Quem se inscrever recebe um lembrete no privado **${campos.lembrete_min} min antes**.`
-      : "⏰ Sem lembrete antes — só o aviso na hora.",
-    cargo ? `📣 Na hora eu marco ${cargo} e os inscritos.` : "📣 Na hora eu marco os inscritos.",
-    "",
-    "_Cada pessoa vê o horário no fuso dela. Para mudar algo, use `/evento` de novo com o mesmo nome._",
-  ];
-  /* Cargo que nao se deixa marcar: o Discord engole a mencao calado. Melhor
-     avisar agora do que o lider descobrir na hora do rally. */
-  if (cargo && !cargo.mentionable &&
-      !inter.guild.members.me?.permissions?.has(PermissionFlagsBits.MentionEveryone)) {
-    linhas.push(`⚠️ O cargo ${cargo} não está como "mencionável", e eu não tenho permissão de marcar todos. ` +
-      "Ligue \"Permitir que qualquer um @mencione este cargo\" nas configurações do cargo.");
-  }
-  return inter.editReply({
-    content: linhas.join("\n"),
-    allowedMentions: { parse: [] },
-    components: [{ type: 1, components: [
-      { type: 2, custom_id: `evento:apagar:${ev.id}`, style: 4, emoji: { name: "🗑️" },
-        label: "Apagar" },
-    ] }],
-  });
+  p.quando = horarioInicial();
+  const token = guardarProposta(p);
+  return inter.editReply(await painelDoRascunho(token, p, idioma));
 }
 
 /* ---------------- o leitor automatico de eventos ----------------
@@ -7769,43 +7882,44 @@ function guardarProposta(p, agora = Date.now()) {
   return token;
 }
 
-function cartaoDaProposta(p) {
-  const campos = [{ name: "📛 Nome", value: p.titulo || "_não achei — toque em ✏️ Corrigir_" }];
+/* O que o leitor achou, antes de criar. */
+async function cartaoDaProposta(token, p, idioma) {
+  const [titulo, achei, semNome, semData, fusoLido, fusoSalvo, ambiguo] = await nalingua(idioma, p.guildId,
+    "Encontrei este evento",
+    "Confira antes de criar. Nada é criado sem você tocar em ✅. Para mudar o dia, a hora, o fuso ou o nome, toque em ✏️.",
+    "Não achei o nome.",
+    "Não achei data nem contador.",
+    "fuso lido no texto",
+    "o texto não dizia o fuso",
+    p.ambiguo ? "Os dois números podem ser dia ou mês. Li como dia/mês; se for o contrário, toque em ✏️." : "");
+  const linhas = [achei, "", `📛 **${p.titulo || `_${semNome}_`}**`];
   if (p.quando) {
     const s = Math.floor(p.quando / 1000);
-    campos.push({ name: "🕒 Quando", value: `<t:${s}:F> · <t:${s}:R>` });
-    campos.push({ name: "🌍 Fuso", value: p.fusoAchado !== null && p.fusoAchado !== undefined
-      ? `${textoDoFuso(p.fuso)} — lido no texto`
-      : `${textoDoFuso(p.fuso)} — o seu fuso salvo (o texto não dizia)` });
+    linhas.push(`🕒 <t:${s}:F> · ⏳ <t:${s}:R>`,
+      `🌍 ${textoDoFuso(p.fuso)} — ${p.fusoAchado !== null && p.fusoAchado !== undefined ? fusoLido : fusoSalvo}`);
   } else {
-    campos.push({ name: "🕒 Quando", value: "_não achei data nem contador — toque em ✏️ Corrigir_" });
+    linhas.push(`🕒 _${semData}_`);
   }
-  if (p.ambiguo) {
-    campos.push({ name: "⚠️ Confira a data", value:
-      "Os dois números podem ser dia ou mês. Li como **dia/mês**. Se for o contrário, toque em ✏️ Corrigir." });
-  }
+  if (ambiguo) linhas.push("", `⚠️ ${ambiguo}`);
   return {
-    color: COR,
-    title: "📅 Encontrei este evento",
-    description: "Confira antes de criar. Nada é criado sem você tocar em ✅.",
-    fields: campos,
-    ...(p.imagem ? { thumbnail: { url: p.imagem } } : {}),
+    content: "",
+    embeds: [{ color: COR, title: `📅 ${titulo}`, description: linhas.join("\n"),
+      ...(p.imagem ? { thumbnail: { url: p.imagem } } : {}) }],
+    components: [{ type: 1, components: [
+      { type: 2, custom_id: `leitor:criar:${token}`, style: 3, emoji: { name: "✅" }, disabled: !(p.titulo && p.quando) },
+      { type: 2, custom_id: `leitor:corrigir:${token}`, style: 2, emoji: { name: "✏️" } },
+    ] }],
+    allowedMentions: { parse: [] },
   };
-}
-
-function botoesDaProposta(token, p) {
-  return [{ type: 1, components: [
-    { type: 2, custom_id: `leitor:criar:${token}`, style: 3, emoji: { name: "✅" }, label: "Criar",
-      disabled: !(p.titulo && p.quando) },
-    { type: 2, custom_id: `leitor:corrigir:${token}`, style: 2, emoji: { name: "✏️" }, label: "Corrigir" },
-  ] }];
 }
 
 /* Apps → Criar evento. */
 async function lerEventoDaMensagem(inter) {
   await inter.deferReply({ flags: 64 });
+  const idioma = await linguaDe(inter);
+  const dizer = async (t) => inter.editReply({ content: (await nalingua(idioma, inter.guildId, t))[0] });
   const servidor = await servidorDoGuild(inter.guildId);
-  if (!servidor) return inter.editReply({ content: "Ainda não terminei de me instalar aqui." });
+  if (!servidor) return dizer("Ainda não terminei de me instalar aqui.");
 
   const msg = inter.targetMessage;
   let texto = textoDaMensagem(msg) || "";
@@ -7816,101 +7930,102 @@ async function lerEventoDaMensagem(inter) {
       const leitura = await lerImagemDaMensagem(img);
       if (leitura?.texto) { texto += "\n" + leitura.texto; leuImagem = true; }
     } catch (e) {
-      const aviso = falhaDeLeitura(e);
-      if (!texto.trim()) return inter.editReply({ embeds: [aviso] });
+      if (!texto.trim()) {
+        const aviso = falhaDeLeitura(e);
+        return inter.editReply({ embeds: [await traduzirEmbed(aviso, idioma, await motorDoGuild(inter.guildId)).catch(() => aviso)] });
+      }
     }
   }
   if (!texto.trim()) {
-    return inter.editReply({ content: img && !visaoDoDono
+    return dizer(img && !visaoDoDono
       ? "🖼️ A leitura de imagens não está ligada neste bot, e a mensagem não tem texto."
-      : "🤔 Essa mensagem não tem texto nem imagem para eu ler." });
+      : "🤔 Essa mensagem não tem texto nem imagem para eu ler.");
   }
 
   const fusoPadrao = Number((await ajustes())[`fuso:${inter.user.id}`]) || 0;
   const achado = extrairEvento(texto, Date.now(), fusoPadrao);
   const p = {
     guildId: inter.guildId, userId: inter.user.id, ...achado,
+    repetir: 0, lembrete: 0, cargoId: null, gif: null, detalhes: null,
     /* O print vira a imagem do evento -- quem nao tem GIF ainda ganha o urso
-       do proprio jogo. So' anexo de verdade, e so' se ele foi lido. */
+       do proprio jogo. So' se ele foi lido. */
     imagem: leuImagem ? img.url : null,
   };
   const token = guardarProposta(p);
-  return inter.editReply({ embeds: [cartaoDaProposta(p)], components: botoesDaProposta(token, p) });
+  return inter.editReply(await cartaoDaProposta(token, p, idioma));
 }
 
-function janelaDaProposta(token, p) {
-  const campo = (id, rotulo, valor, obrig, max, dica) => ({ type: 1, components: [{
-    type: 4, custom_id: id, label: rotulo, style: 1, required: obrig, max_length: max,
-    ...(valor ? { value: String(valor).slice(0, max) } : {}), ...(dica ? { placeholder: dica } : {}),
-  }] });
-  return {
-    custom_id: `leitor:janela:${token}`,
-    title: "Criar evento",
-    components: [
-      campo("nome", "Nome", p.titulo, true, 100, "Armadilha de Caça 1"),
-      campo("quando", "Data e hora (dia/mês/ano hora:min)", p.quando ? relogioNoFuso(p.quando, p.fuso) : "", true, 30, "04/10/2026 11:30"),
-      campo("fuso", "Fuso dessa hora (0 = UTC, -3 = Brasília)", String(p.fuso ?? 0), true, 10, "0"),
-      campo("repetir", "Repetir? (24h, 7d, 47h30m — vazio: não)", "", false, 20, "47h30m"),
-      campo("lembrete", "Lembrete antes, em minutos (5, 10, 15, 30, 60)", "", false, 3, "10"),
-    ],
-  };
-}
-
-async function cliqueLeitor(inter) {
-  const [, acao, token] = inter.customId.split(":");
+/* Os cliques do rascunho: os do leitor (leitor:) e os do painel (evsel:). */
+async function cliqueRascunho(inter) {
+  const [tipo, acao, token] = inter.customId.split(":");
   const p = PROPOSTAS_DE_EVENTO.get(token);
+  const idioma = await linguaDe(inter);
   if (!p || p.expira < Date.now()) {
-    return inter.reply({ flags: 64, content: "⌛ Esse rascunho expirou. Use **Apps → Criar evento** de novo." });
+    const [t] = await nalingua(idioma, inter.guildId, "Esse rascunho expirou. Comece de novo pelo /evento ou por Apps → Criar evento.");
+    return inter.reply({ flags: 64, content: `⌛ ${t}` });
   }
   if (p.userId !== inter.user.id || !inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    return inter.reply({ flags: 64, content: "Só quem pediu, e administra o servidor, mexe neste rascunho." });
+    const [t] = await nalingua(idioma, inter.guildId, "Só quem pediu, e administra o servidor, mexe neste rascunho.");
+    return inter.reply({ flags: 64, content: t });
+  }
+  p.expira = Date.now() + PROPOSTA_VALE;
+
+  /* O nome e' o unico campo digitado, e so' quando a pessoa quer. */
+  if (acao === "nome") {
+    const [rotulo] = await nalingua(idioma, inter.guildId, "Nome do evento");
+    return inter.showModal({
+      custom_id: `evsel:nomejanela:${token}`, title: "📅",
+      components: [{ type: 1, components: [{ type: 4, custom_id: "nome", label: rotulo.slice(0, 45), style: 1,
+        required: true, max_length: 100, ...(p.titulo ? { value: p.titulo } : {}) }] }],
+    });
   }
 
-  if (acao === "corrigir") return inter.showModal(janelaDaProposta(token, p));
+  await inter.deferUpdate();
 
-  let final = p;
-  let repetir = 0, lembrete = 0;
-  if (acao === "janela") {
-    await inter.deferUpdate();
-    const ler = (id) => String(inter.fields.getTextInputValue(id) || "").trim();
-    const fuso = fusoDoTexto(ler("fuso"));
-    if (fuso === null) return inter.editReply({ content: `🤔 Não entendi o fuso **${ler("fuso")}**. Use \`0\`, \`-3\`, \`+8\`.`, embeds: [], components: [] });
-    const quando = quandoDoTexto(ler("quando"), Date.now(), fuso);
-    if (quando === null) return inter.editReply({ content: `🤔 Não entendi a data **${ler("quando")}**. Escreva como \`04/10/2026 11:30\`.`, embeds: [], components: [] });
-    repetir = repetirDoTexto(ler("repetir"));
-    if (repetir === null) return inter.editReply({ content: `🤔 Não entendi o repetir **${ler("repetir")}**. Use \`24h\`, \`7d\` ou \`47h30m\`.`, embeds: [], components: [] });
-    lembrete = Number(ler("lembrete")) || 0;
-    if (lembrete && !LEMBRETES.includes(lembrete)) {
-      return inter.editReply({ content: `🤔 O lembrete tem que ser ${LEMBRETES.join(", ")} minutos.`, embeds: [], components: [] });
-    }
-    final = { ...p, titulo: ler("nome"), quando, fuso };
-    await porAjuste(`fuso:${inter.user.id}`, String(fuso)).catch(() => {});
-  } else if (acao === "criar") {
-    await inter.deferUpdate();
+  if (tipo === "leitor" && acao === "criar") {
     if (!(p.titulo && p.quando)) return;
-  } else {
-    return;
+    PROPOSTAS_DE_EVENTO.delete(token);
+    return inter.editReply(await confirmarEvento(inter, p, idioma));
+  }
+  if (tipo === "leitor" && acao === "corrigir") {
+    if (!p.quando || p.quando <= Date.now()) p.quando = horarioInicial();
+    return inter.editReply(await painelDoRascunho(token, p, idioma));
   }
 
-  const servidor = await servidorDoGuild(inter.guildId);
-  if (!servidor) return inter.editReply({ content: "Ainda não terminei de me instalar aqui.", embeds: [], components: [] });
-
-  let gif = null;
-  if (final.imagem) gif = await reHospedar(final.imagem, `evento-${inter.guildId}`).catch(() => null);
-  const { ev, existente } = await gravarEvento(inter.guild, servidor, inter.user.id, {
-    titulo: final.titulo, quando: final.quando, repetir, lembrete, gif,
-  });
-  if (!ev?.id) return inter.editReply({ content: NAO_GRAVEI_EVENTO, embeds: [], components: [] });
-  PROPOSTAS_DE_EVENTO.delete(token);
-
-  const s = Math.floor(final.quando / 1000);
-  return inter.editReply({
-    content: `✅ **${final.titulo}** ${existente ? "atualizado" : "criado"} na sala de eventos: <t:${s}:F> — <t:${s}:R>.` +
-      (repetir ? `\n🔁 Repete a cada **${textoDaRepeticao(repetir)}**.` : "") +
-      (lembrete ? `\n⏰ Lembrete no privado ${lembrete} min antes.` : "") +
-      "\n_Repetir, lembrete, GIF e cargo também dá para ajustar com `/evento` usando o mesmo nome._",
-    embeds: [], components: [], allowedMentions: { parse: [] },
-  });
+  const pt = partesNoFuso(p.quando, p.fuso);
+  const valor = inter.values?.[0];
+  if (acao === "dia" && valor) {
+    const [a, m, d] = valor.split("-").map(Number);
+    p.quando = instanteDe({ ...pt, ano: a, mes: m, dia: d }, p.fuso);
+  } else if (acao === "hora" && valor !== undefined) {
+    p.quando = instanteDe({ ...pt, hora: Number(valor) }, p.fuso);
+  } else if (acao === "min" && valor !== undefined) {
+    p.quando = instanteDe({ ...pt, min: Number(valor) }, p.fuso);
+  } else if (acao === "rep" && valor !== undefined) {
+    p.repetir = Number(valor) || 0;
+  } else if (acao === "lemb") {
+    const ciclo = [0, ...LEMBRETES];
+    p.lembrete = ciclo[(ciclo.indexOf(p.lembrete) + 1) % ciclo.length];
+  } else if (acao === "fuso") {
+    /* Trocar o fuso mantem o RELOGIO: quem escolheu 11:30 e lembrou que era
+       UTC quer 11:30 UTC, e nao o mesmo instante escrito de outro jeito. */
+    const i = FUSOS_RAPIDOS.indexOf(p.fuso);
+    const novo = FUSOS_RAPIDOS[(i + 1) % FUSOS_RAPIDOS.length];
+    p.quando = instanteDe(pt, novo);
+    p.fuso = novo;
+    await porAjuste(`fuso:${inter.user.id}`, String(novo)).catch(() => {});
+  } else if (acao === "nomejanela") {
+    const nome = String(inter.fields.getTextInputValue("nome") || "").trim();
+    if (nome) p.titulo = nome.slice(0, 100);
+  } else if (acao === "sair") {
+    PROPOSTAS_DE_EVENTO.delete(token);
+    return inter.editReply({ content: "✖️", embeds: [], components: [] });
+  } else if (acao === "criar") {
+    if (p.quando <= Date.now() || !p.titulo) return inter.editReply(await painelDoRascunho(token, p, idioma));
+    PROPOSTAS_DE_EVENTO.delete(token);
+    return inter.editReply(await confirmarEvento(inter, p, idioma));
+  }
+  return inter.editReply(await painelDoRascunho(token, p, idioma));
 }
 
 async function cliqueEvento(inter) {
@@ -13581,8 +13696,9 @@ client.on("interactionCreate", async (inter) => {
     if (inter.isMessageComponent() && inter.customId.startsWith("evento:")) {
       return await cliqueEvento(inter);
     }
-    if ((inter.isButton() || inter.isModalSubmit()) && inter.customId.startsWith("leitor:")) {
-      return await cliqueLeitor(inter);
+    if ((inter.isMessageComponent() || inter.isModalSubmit()) &&
+        (inter.customId.startsWith("leitor:") || inter.customId.startsWith("evsel:"))) {
+      return await cliqueRascunho(inter);
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("arena:")) {
       return await cliqueArena(inter);
@@ -13663,8 +13779,6 @@ client.on("interactionCreate", async (inter) => {
          qualquer pedido. Com o /evento pedindo sugestão de horário, ele
          receberia nomes de rally onde esperava "3h". */
       if (inter.commandName === "evento") {
-        const foco = inter.options.getFocused(true);
-        if (foco?.name === "repetir") return inter.respond(sugestoesDeRepetir(String(foco.value || "")));
         const fuso = Number((await ajustes())[`fuso:${inter.user.id}`]) || 0;
         return inter.respond(
           sugestoesDeQuando(String(inter.options.getFocused() || ""), Date.now(), fuso));
@@ -15031,6 +15145,100 @@ async function soltarAsInteracoes(agora = false) {
 
    /help e' de todo mundo, de proposito: e' a unica porta que a pessoa que nao
    entende o idioma da casa consegue achar sozinha. */
+/* As descricoes do /evento na lingua do aplicativo de cada lider.
+
+   O Discord mostra a descricao certa sozinho, pela lingua do app -- e' de
+   graca e nao passa pelo tradutor. Arabe nao esta aqui porque o Discord nao
+   tem arabe como lingua de aplicativo; quem usa em arabe ve o ingles. */
+const TRADUCOES_DO_EVENTO = (() => {
+  const L = {
+    comando: {
+      en: "Schedule an event with a time", es: "Programar un evento con hora", fr: "Programmer un événement à une heure",
+      de: "Ein Ereignis mit Uhrzeit planen", it: "Programma un evento con orario", ru: "Запланировать событие на время",
+      uk: "Запланувати подію на час", tr: "Saatli bir etkinlik planla", pl: "Zaplanuj wydarzenie na godzinę",
+      id: "Jadwalkan acara dengan waktu", vi: "Lên lịch sự kiện theo giờ", th: "ตั้งเวลากิจกรรม",
+      ja: "時間を決めてイベントを予定", ko: "시간을 정해 이벤트 예약", zh: "安排一个定时活动",
+    },
+    "o-que": {
+      en: "Event name. E.g. Bear Trap", es: "Nombre del evento. Ej: Trampa del Oso", fr: "Nom de l'événement. Ex : Piège à ours",
+      de: "Name des Ereignisses. Z. B. Bärenfalle", it: "Nome dell'evento. Es: Trappola dell'orso", ru: "Название события. Напр.: Медведь",
+      uk: "Назва події. Напр.: Ведмідь", tr: "Etkinlik adı. Örn: Ayı Tuzağı", pl: "Nazwa wydarzenia. Np. Pułapka na niedźwiedzia",
+      id: "Nama acara. Mis: Perangkap Beruang", vi: "Tên sự kiện. VD: Bẫy Gấu", th: "ชื่อกิจกรรม เช่น กับดักหมี",
+      ja: "イベント名。例: 熊罠", ko: "이벤트 이름. 예: 곰 사냥", zh: "活动名称。例：猎熊",
+    },
+    quando: {
+      en: "Optional: 3h · 20:30 · 04/10 11:30. Empty: pick it in the panel", es: "Opcional: 3h · 20:30 · 04/10 11:30. Vacío: elige en el panel",
+      fr: "Optionnel : 3h · 20:30 · 04/10 11:30. Vide : choisir dans le panneau", de: "Optional: 3h · 20:30 · 04/10 11:30. Leer: im Panel wählen",
+      it: "Opzionale: 3h · 20:30 · 04/10 11:30. Vuoto: scegli nel pannello", ru: "Необязательно: 3h · 20:30 · 04/10 11:30. Пусто — выбор в панели",
+      uk: "Необов'язково: 3h · 20:30 · 04/10 11:30. Порожньо — вибір у панелі", tr: "İsteğe bağlı: 3h · 20:30 · 04/10 11:30. Boş: panelden seç",
+      pl: "Opcjonalnie: 3h · 20:30 · 04/10 11:30. Puste: wybierz w panelu", id: "Opsional: 3h · 20:30 · 04/10 11:30. Kosong: pilih di panel",
+      vi: "Tùy chọn: 3h · 20:30 · 04/10 11:30. Để trống: chọn trong bảng", th: "ไม่บังคับ: 3h · 20:30 · 04/10 11:30 เว้นว่าง: เลือกในแผง",
+      ja: "任意: 3h · 20:30 · 04/10 11:30。空欄ならパネルで選択", ko: "선택: 3h · 20:30 · 04/10 11:30. 비우면 패널에서 선택", zh: "可选：3h · 20:30 · 04/10 11:30。留空则在面板中选择",
+    },
+    fuso: {
+      en: "Time zone of the time (default: UTC, the game clock)", es: "Zona horaria (por defecto: UTC, el reloj del juego)",
+      fr: "Fuseau horaire (par défaut : UTC, l'horloge du jeu)", de: "Zeitzone (Standard: UTC, die Spieluhr)",
+      it: "Fuso orario (predefinito: UTC, l'orologio del gioco)", ru: "Часовой пояс (по умолчанию: UTC, время игры)",
+      uk: "Часовий пояс (типово: UTC, час гри)", tr: "Saat dilimi (varsayılan: UTC, oyun saati)", pl: "Strefa czasowa (domyślnie: UTC, zegar gry)",
+      id: "Zona waktu (bawaan: UTC, jam game)", vi: "Múi giờ (mặc định: UTC, giờ trong game)", th: "เขตเวลา (ค่าเริ่มต้น: UTC เวลาในเกม)",
+      ja: "タイムゾーン（既定: UTC、ゲーム内時刻）", ko: "시간대 (기본: UTC, 게임 시간)", zh: "时区（默认：UTC，游戏时间）",
+    },
+    repetir: {
+      en: "Repeat the event?", es: "¿Repetir el evento?", fr: "Répéter l'événement ?", de: "Ereignis wiederholen?",
+      it: "Ripetere l'evento?", ru: "Повторять событие?", uk: "Повторювати подію?", tr: "Etkinlik tekrarlansın mı?",
+      pl: "Powtarzać wydarzenie?", id: "Ulangi acara?", vi: "Lặp lại sự kiện?", th: "ทำซ้ำกิจกรรมไหม?",
+      ja: "イベントを繰り返す？", ko: "이벤트를 반복할까요?", zh: "重复此活动？",
+    },
+    lembrete: {
+      en: "DM reminder before it starts, for whoever signed up", es: "Recordatorio por privado antes del inicio, para los inscritos",
+      fr: "Rappel en privé avant le début, pour les inscrits", de: "DM-Erinnerung vor dem Start für Angemeldete",
+      it: "Promemoria in privato prima dell'inizio, per gli iscritti", ru: "Напоминание в ЛС до начала для записавшихся",
+      uk: "Нагадування в ПП до початку для записаних", tr: "Başlamadan önce kayıtlılara özelden hatırlatma",
+      pl: "Przypomnienie na priv przed startem dla zapisanych", id: "Pengingat via DM sebelum mulai, untuk yang mendaftar",
+      vi: "Nhắc qua tin nhắn riêng trước khi bắt đầu cho người đăng ký", th: "แจ้งเตือนทางข้อความส่วนตัวก่อนเริ่ม สำหรับผู้ลงชื่อ",
+      ja: "開始前に登録者へDMでリマインド", ko: "시작 전 신청자에게 DM 알림", zh: "开始前私信提醒已报名的人",
+    },
+    gif: {
+      en: "Event GIF or image (file)", es: "GIF o imagen del evento (archivo)", fr: "GIF ou image de l'événement (fichier)",
+      de: "GIF oder Bild des Ereignisses (Datei)", it: "GIF o immagine dell'evento (file)", ru: "GIF или картинка события (файл)",
+      uk: "GIF або зображення події (файл)", tr: "Etkinlik GIF'i veya görseli (dosya)", pl: "GIF lub obraz wydarzenia (plik)",
+      id: "GIF atau gambar acara (file)", vi: "GIF hoặc ảnh sự kiện (tệp)", th: "GIF หรือรูปกิจกรรม (ไฟล์)",
+      ja: "イベントのGIFまたは画像（ファイル）", ko: "이벤트 GIF 또는 이미지 (파일)", zh: "活动的 GIF 或图片（文件）",
+    },
+    "gif-link": {
+      en: "Or the GIF link (https://...)", es: "O el enlace del GIF (https://...)", fr: "Ou le lien du GIF (https://...)",
+      de: "Oder der GIF-Link (https://...)", it: "Oppure il link della GIF (https://...)", ru: "Или ссылка на GIF (https://...)",
+      uk: "Або посилання на GIF (https://...)", tr: "Ya da GIF bağlantısı (https://...)", pl: "Albo link do GIF-a (https://...)",
+      id: "Atau tautan GIF (https://...)", vi: "Hoặc liên kết GIF (https://...)", th: "หรือลิงก์ GIF (https://...)",
+      ja: "またはGIFのリンク (https://...)", ko: "또는 GIF 링크 (https://...)", zh: "或 GIF 链接 (https://...)",
+    },
+    cargo: {
+      en: "Role to ping at start time, besides who signed up", es: "Rol a mencionar al inicio, además de los inscritos",
+      fr: "Rôle à mentionner au début, en plus des inscrits", de: "Rolle, die zum Start erwähnt wird, plus Angemeldete",
+      it: "Ruolo da menzionare all'inizio, oltre agli iscritti", ru: "Роль для упоминания при старте, кроме записавшихся",
+      uk: "Роль для згадки на старті, крім записаних", tr: "Başlangıçta etiketlenecek rol (kayıtlılara ek olarak)",
+      pl: "Rola do oznaczenia na starcie, poza zapisanymi", id: "Peran yang di-mention saat mulai, selain pendaftar",
+      vi: "Vai trò được nhắc khi bắt đầu, ngoài người đăng ký", th: "บทบาทที่จะแท็กตอนเริ่ม นอกจากผู้ลงชื่อ",
+      ja: "開始時にメンションするロール（登録者以外）", ko: "시작 시 멘션할 역할 (신청자 외)", zh: "开始时要提及的身份组（报名者之外）",
+    },
+    detalhes: {
+      en: "Anything else to say", es: "Algo más que decir", fr: "Autre chose à dire", de: "Was sonst noch gesagt werden muss",
+      it: "Altro da dire", ru: "Что ещё нужно сказать", uk: "Що ще треба сказати", tr: "Söylenecek başka bir şey",
+      pl: "Co jeszcze trzeba powiedzieć", id: "Hal lain yang perlu disampaikan", vi: "Điều gì khác cần nói", th: "รายละเอียดเพิ่มเติม",
+      ja: "その他の連絡事項", ko: "추가로 전할 내용", zh: "其他需要说明的",
+    },
+  };
+  /* Minha lingua -> as do Discord. */
+  const DISCORD = { en: ["en-US", "en-GB"], es: ["es-ES", "es-419"], fr: ["fr"], de: ["de"], it: ["it"], ru: ["ru"],
+    uk: ["uk"], tr: ["tr"], pl: ["pl"], id: ["id"], vi: ["vi"], th: ["th"], ja: ["ja"], ko: ["ko"], zh: ["zh-CN", "zh-TW"] };
+  const fora = {};
+  for (const [campo, linguas] of Object.entries(L)) {
+    fora[campo] = {};
+    for (const [l, texto] of Object.entries(linguas)) for (const d of DISCORD[l]) fora[campo][d] = texto.slice(0, 100);
+  }
+  return fora;
+})();
+
 const GLOBAIS_DO_CYRON = [
   {
     name: "cyron",
@@ -15049,37 +15257,44 @@ const GLOBAIS_DO_CYRON = [
        cargo muda depois do comando publicado. */
     name: "evento",
     description: "Marcar um evento com hora / Schedule an event",
+    descriptionLocalizations: TRADUCOES_DO_EVENTO.comando,
     defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
     dmPermission: false,
-    /* Opcoes, e nao uma janela.
-
-       A janela pedia quatro campos e obrigava a decorar a sintaxe do
-       "quando" -- e so' dizia se tinha entendido DEPOIS de enviar. Aqui o
-       autocompletar mostra o horario ja resolvido enquanto se digita, e o
-       fuso vira um campo opcional que quase ninguem precisa abrir. */
+    /* So' o nome e' obrigatorio. Sem "quando", abre o painel com dia, hora e
+       minuto para escolher -- nada para digitar errado. Fuso, repetir e
+       lembrete sao listas pelo mesmo motivo. Os nomes das escolhas sao so'
+       numero e emoji: servem em qualquer lingua sem traducao. */
     options: [
       { type: 3, name: "o-que", required: true, max_length: 100,
-        description: "O nome do evento. Ex: Urso · Bear Trap" },
-      { type: 3, name: "quando", required: true, autocomplete: true,
-        description: "3h · 90m · 20:30 · 23/09 20:30 — escolha uma sugestão" },
-      { type: 3, name: "repetir", required: false, autocomplete: true, max_length: 20,
-        description: "Repetir? 24h · 7d · 47h30m — vazio: não repete" },
+        description: "O nome do evento. Ex: Urso · Bear Trap",
+        descriptionLocalizations: TRADUCOES_DO_EVENTO["o-que"] },
+      { type: 3, name: "quando", required: false, autocomplete: true,
+        description: "Opcional: 3h · 20:30 · 04/10 11:30. Vazio: escolha no painel",
+        descriptionLocalizations: TRADUCOES_DO_EVENTO.quando },
+      { type: 4, name: "fuso", required: false,
+        description: "Fuso da hora (padrão: UTC, o relógio do jogo)",
+        descriptionLocalizations: TRADUCOES_DO_EVENTO.fuso,
+        choices: FUSOS.map((f) => ({ name: textoDoFuso(f) + (f === 0 ? " 🎮" : f === -180 ? " 🇧🇷" : ""), value: f })) },
+      { type: 4, name: "repetir", required: false,
+        description: "Repetir o evento?",
+        descriptionLocalizations: TRADUCOES_DO_EVENTO.repetir,
+        choices: REPETICOES.map((r) => ({ name: rotuloDaRepeticao(r), value: r })) },
       { type: 4, name: "lembrete", required: false,
         description: "Lembrete no privado de quem se inscreveu, antes do início",
-        choices: [
-          { name: "Sem lembrete / No reminder", value: 0 },
-          ...LEMBRETES.map((m) => ({ name: `${m} min antes / ${m} min before`, value: m })),
-        ] },
+        descriptionLocalizations: TRADUCOES_DO_EVENTO.lembrete,
+        choices: [{ name: "🔕 —", value: 0 }, ...LEMBRETES.map((m) => ({ name: `⏰ −${m} min`, value: m }))] },
       { type: 11, name: "gif", required: false,
-        description: "GIF ou imagem do evento (arquivo)" },
+        description: "GIF ou imagem do evento (arquivo)",
+        descriptionLocalizations: TRADUCOES_DO_EVENTO.gif },
       { type: 3, name: "gif-link", required: false, max_length: 500,
-        description: "Ou o link do GIF (https://...)" },
+        description: "Ou o link do GIF (https://...)",
+        descriptionLocalizations: TRADUCOES_DO_EVENTO["gif-link"] },
       { type: 8, name: "cargo", required: false,
-        description: "Cargo para marcar na hora, além de quem se inscreveu" },
+        description: "Cargo para marcar na hora, além de quem se inscreveu",
+        descriptionLocalizations: TRADUCOES_DO_EVENTO.cargo },
       { type: 3, name: "detalhes", required: false, max_length: 800,
-        description: "O que mais precisa ser dito" },
-      { type: 3, name: "fuso", required: false, max_length: 10,
-        description: "Fuso da hora digitada. Ex: -3 · 0 para UTC (como no jogo)" },
+        description: "O que mais precisa ser dito",
+        descriptionLocalizations: TRADUCOES_DO_EVENTO.detalhes },
     ],
   },
   {
