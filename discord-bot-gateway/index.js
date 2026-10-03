@@ -10502,21 +10502,36 @@ function quemTemIdioma(membros, cargos, escolhidos) {
    ninguem. Os nomes das linguas vao na propria lingua, e o resto e' numero. */
 function cartaoDosIdiomas(porIdioma, sem, desligado = false) {
   const total = porIdioma.reduce((a, [, n]) => a + n, 0);
+  const maior = Math.max(1, ...porIdioma.map(([, n]) => n));
+  /* Tudo na DESCRICAO, e nao em campos.
+     Em campo lado a lado, o celular empilha um embaixo do outro e a lista
+     vira uma parede; e mencao dentro de campo aparece como numero cru
+     (<@1487...>) para quem nao tem a pessoa carregada. Na descricao a mencao
+     vira nome. Cada lingua e' bandeira, barra e numero -- sem o nome escrito,
+     porque o nome em arabe inverte a ordem da linha inteira. */
+  const barra = (n) => {
+    const cheios = Math.max(1, Math.round((n / maior) * 10));
+    return "█".repeat(cheios) + "░".repeat(10 - cheios);
+  };
+  const bandeira = (c) => LINGUAS_MENU.find(([cod]) => cod === c)?.[2] || "🏳️";
+  const linhas = porIdioma.slice(0, 20).map(([c, n]) => `${bandeira(c)} \`${barra(n)}\` **${n}**`);
   const MOSTRAR = 40;
   const faltam = sem.length
     ? sem.slice(0, MOSTRAR).map((id) => `<@${id}>`).join(" ") +
-      (sem.length > MOSTRAR ? `\n_and ${sem.length - MOSTRAR} more_` : "")
+      (sem.length > MOSTRAR ? ` _and ${sem.length - MOSTRAR} more_` : "")
     : "✅ Everyone has picked a language!";
   return {
     color: sem.length ? 0xC9A227 : 0x2E8B7A,
     title: "🌐 Pick your language",
-    description: "Choose your language in the menu below and the whole server arrives **translated for you** — " +
-      "announcements, chat, events, everything.",
-    fields: [
-      ...porIdioma.slice(0, 18).map(([c, n]) => ({ name: nomeNaPropriaLingua(c), value: `**${n}** ${n === 1 ? "member" : "members"}`, inline: true })),
-      { name: `❓ Still without a language — ${sem.length}`, value: faltam.slice(0, 1024) },
-    ],
-    footer: { text: `${total} with a language · ${sem.length} without · updates every 10 min · daily reminder ${desligado ? "off" : "on"}` },
+    description: [
+      "Choose your language in the menu below and the whole server arrives **translated for you**.",
+      "",
+      linhas.length ? linhas.join("\n") : "_nobody yet_",
+      "",
+      `❓ **Still without a language — ${sem.length}**`,
+      faltam,
+    ].join("\n").slice(0, 4000),
+    footer: { text: `${total} with a language · ${sem.length} without · daily reminder ${desligado ? "off" : "on"}` },
   };
 }
 

@@ -4645,6 +4645,7 @@ function conferirCartao(onde, embed, componentes = []) {
     globalThis.nomeNaPropriaLingua = (c) => ({ pt: "🇧🇷 Português", en: "🇬🇧 English" })[c] || c;
     globalThis.menuIdioma = () => [{ type: 1, components: [{ type: 3, custom_id: "escolher-idioma",
       options: [{ label: "Português", value: "pt" }] }] }];
+    globalThis.LINGUAS_MENU = globalThis.LINGUAS_MENU || [["pt", "Português", "🇧🇷", "Português"], ["en", "Inglês", "🇬🇧", "English"]];
     const Q = carregar(["diaISO", "LEMBRAR_A_CADA_DIAS", "LEMBRETES_POR_DIA", "quemTemIdioma",
       "cartaoDosIdiomas", "botaoDoLembrete", "quemLembrarHoje"]);
     const cargos = [{ idioma: "pt", role_id: "r-pt" }, { idioma: "en", role_id: "r-en" }];
@@ -4657,16 +4658,16 @@ function conferirCartao(onde, embed, componentes = []) {
     ok("sem idioma: quem não tem cargo nem escolheu no bot (bots fora)", sem, ["leo", "max"]);
     const quadro = Q.cartaoDosIdiomas(porIdioma, sem);
     conferirCartao("o quadro de idiomas", quadro, Q.botaoDoLembrete(false));
-    const faltamCampo = quadro.fields.at(-1);
-    verdade("o quadro marca quem falta (sem notificar: é cartão)", /<@leo> <@max>/.test(faltamCampo.value));
+    verdade("o quadro marca quem falta, na descrição (em campo a menção vira número cru)",
+      /<@leo> <@max>/.test(quadro.description) && !quadro.fields);
     verdade("todo em inglês", /Pick your language/.test(quadro.title) && !/Escolha|Sem idioma/.test(JSON.stringify(quadro)));
-    ok("um campo por língua, lado a lado", quadro.fields.filter((f) => f.inline).map((f) => f.name), ["🇧🇷 Português", "🇬🇧 English"]);
+    verdade("uma linha por língua: bandeira, barra e número", /🇧🇷 `██████████` \*\*2\*\*\n🇬🇧 `█████░░░░░` \*\*1\*\*/.test(quadro.description));
     verdade("o menu de escolher vai junto do quadro",
       Q.botaoDoLembrete(false).some((l) => l.components.some((c) => c.custom_id === "escolher-idioma")));
     const muitos = Array.from({ length: 300 }, (_, i) => `u${i}`);
     conferirCartao("o quadro com 300 sem idioma", Q.cartaoDosIdiomas(porIdioma, muitos));
-    verdade("e diz quantos ficaram de fora da lista", /and 260 more/.test(Q.cartaoDosIdiomas(porIdioma, muitos).fields.at(-1).value));
-    verdade("todo mundo com idioma: comemora", /Everyone has picked/.test(Q.cartaoDosIdiomas(porIdioma, []).fields.at(-1).value));
+    verdade("e diz quantos ficaram de fora da lista", /and 260 more/.test(Q.cartaoDosIdiomas(porIdioma, muitos).description));
+    verdade("todo mundo com idioma: comemora", /Everyone has picked/.test(Q.cartaoDosIdiomas(porIdioma, []).description));
 
     let r = Q.quemLembrarHoje(["leo", "max"], {}, "2026-10-03");
     ok("primeiro dia: marca os dois", r.hojeVao, ["leo", "max"]);
