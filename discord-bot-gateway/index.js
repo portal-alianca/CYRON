@@ -12924,7 +12924,30 @@ function botoesDaFicha(servidor) {
     { type: 2, custom_id: `cli:detalhes:${servidor.id}`, style: 2, emoji: { name: "🔍" }, label: "Detalhes" },
     { type: 2, custom_id: `cli:nivel:${servidor.id}`, style: 1, emoji: { name: "🔀" },
       label: servidor.nivel === "pro" ? "Passar p/ Aliança" : "Passar p/ Pro" },
+  ] }, { type: 1, components: [
+    { type: 2, custom_id: `cli:painel:${servidor.id}`, style: 2, emoji: { name: "📊" }, label: "Ver o painel deles" },
   ] }];
+}
+
+/* O painel de um servidor do jeito que os admins de la' veem, para o dono do
+   bot -- sem precisar ser admin no servidor deles.
+
+   So' para ver: o menu de abas e' outro (cli:aba), e nenhum botao de agir
+   vem junto. Os botoes do painel de verdade falam com o servidor onde foram
+   apertados, e aqui esse servidor seria o painel do dono. */
+async function painelDeOutroServidor(servidor, aba = "uso") {
+  const guild = client.guilds.cache.get(String(servidor.guild_id));
+  if (!guild) return { content: "Não estou nesse servidor agora — não tenho como montar o painel dele." };
+  const valida = ABAS_DO_PAINEL.some((a) => a.valor === aba) ? aba : "uso";
+  const { embed, extras = [] } = await montarPainel(guild, servidor, "", valida);
+  return {
+    content: `👁️ O painel de **${String(servidor.nome || "").slice(0, 80)}**, como os admins de lá veem (só para ver).`,
+    embeds: [embed, ...extras],
+    components: [{ type: 1, components: [{
+      type: 3, custom_id: `cli:aba:${servidor.id}`, placeholder: "Outra aba",
+      options: ABAS_DO_PAINEL.map((a) => ({ value: a.valor, label: a.nome, emoji: { name: a.emoji }, default: a.valor === valida })),
+    }] }],
+  };
 }
 
 async function cliqueDaFicha(inter) {
@@ -12937,8 +12960,16 @@ async function cliqueDaFicha(inter) {
     return inter.reply({ flags: 64, content: "Não achei esse servidor no banco. A ficha está velha." });
   }
 
+  /* Trocar de aba edita a propria visao; abrir o painel e' uma resposta nova. */
+  if (acao === "aba" && inter.isStringSelectMenu()) {
+    await inter.deferUpdate();
+    return inter.editReply(await painelDeOutroServidor(servidor, inter.values?.[0]));
+  }
+
   await inter.deferReply({ flags: 64 });
   const guild = client.guilds.cache.get(String(servidor.guild_id));
+
+  if (acao === "painel") return inter.editReply(await painelDeOutroServidor(servidor, "uso"));
 
   if (acao === "mais30") {
     const base = venceEm(servidor.pago_ate) || Date.now();
