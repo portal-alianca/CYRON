@@ -6464,7 +6464,29 @@ async function replicasOrfas(guild, servidor) {
    em dois faria o menu simplesmente parar de aceitar cliques no plano gratis,
    sem dizer por que -- o silencio de sempre. Deixando escolher e explicando na
    hora, a pessoa fica sabendo que existe limite, qual e', e o que fazer. */
-function componentesDoPainel(servidor, fontes, limite, orfas, opcoes) {
+/* As abas do painel do servidor. O rotulo leva as duas linguas porque o
+   fixado e' um so' para todos os administradores. */
+const ABAS_DO_PAINEL = [
+  { valor: "resumo", emoji: "🏠", nome: "Visão geral · Overview" },
+  { valor: "traducao", emoji: "🌐", nome: "Tradução · Translation" },
+  { valor: "uso", emoji: "📊", nome: "Uso · Usage" },
+  { valor: "agenda", emoji: "📆", nome: "Agenda · Events" },
+  { valor: "plano", emoji: "💳", nome: "Plano · Plan" },
+];
+
+/* Em que aba esta' a mensagem onde clicaram: e' a opcao marcada do menu. */
+function abaDaMensagem(msg) {
+  for (const linha of msg?.components || []) {
+    for (const c of (linha.toJSON?.() ?? linha).components || []) {
+      if (c.custom_id !== "cyron:aba") continue;
+      const marcada = (c.options || []).find((o) => o.default);
+      if (marcada && ABAS_DO_PAINEL.some((a) => a.valor === marcada.value)) return marcada.value;
+    }
+  }
+  return "resumo";
+}
+
+function componentesDoPainel(servidor, fontes, limite, orfas, opcoes, aba = "resumo") {
   const escolhidos = new Set(fontes.map((f) => f.canal_id));
 
   /* O teto do menu e' o teto do plano, e nao o do Discord.
@@ -6481,9 +6503,13 @@ function componentesDoPainel(servidor, fontes, limite, orfas, opcoes) {
      onde poderia tirar as fontes sobrando. */
   const teto = Math.min(25, Math.max(limite.fontes, escolhidos.size));
 
-  const linhas = [];
+  const linhas = [{ type: 1, components: [{
+    type: 3, custom_id: "cyron:aba", placeholder: "Abrir uma aba · Open a tab",
+    options: ABAS_DO_PAINEL.map((a) => ({ value: a.valor, label: a.nome, emoji: { name: a.emoji },
+      default: a.valor === aba })),
+  }] }];
 
-  if (opcoes.length) {
+  if (aba === "traducao" && opcoes.length) {
     linhas.push({
       type: 1,
       components: [{
@@ -6507,7 +6533,7 @@ function componentesDoPainel(servidor, fontes, limite, orfas, opcoes) {
     });
   }
 
-  linhas.push({
+  if (aba === "traducao") linhas.push({
     type: 1,
     components: [
       {
@@ -6526,7 +6552,6 @@ function componentesDoPainel(servidor, fontes, limite, orfas, opcoes) {
          desfazem algo. Verbo e objeto: dá para decidir sem clicar para ver. */
       { type: 2, custom_id: "cyron:palavras", style: 2, emoji: { name: "📖" }, label: "Palavras que eu não traduzo" },
       { type: 2, custom_id: "cyron:remontar", style: 2, emoji: { name: "🔄" }, label: "Reconstruir os canais" },
-      { type: 2, custom_id: "cyron:ajuda", style: 2, emoji: { name: "❓" }, label: "Ajuda" },
     ],
   });
 
@@ -6574,36 +6599,44 @@ function componentesDoPainel(servidor, fontes, limite, orfas, opcoes) {
     ...(servidor.plano === "pago"
       ? []
       : [{ type: 2, custom_id: "cyron:codigo", style: 1, emoji: { name: "🎟️" }, label: "Ativar código" }]),
-    ...(orfas?.length
-      ? [{
-          type: 2, custom_id: "cyron:limpar", style: 4, emoji: { name: "🗑️" },
-          label: `Apagar ${orfas.length} ${orfas.length === 1 ? "cópia sem origem" : "cópias sem origem"}`,
-        }]
-      : []),
   ];
-  if (situacao.length) linhas.push({ type: 1, components: situacao });
+  const teste = podeTestar(servidor)
+    ? [{ type: 2, custom_id: "cyron:teste", style: 3, emoji: { name: "🎁" }, label: "Testar 7 dias grátis" }]
+    : [];
+  /* Pro, Alianca, Pix e codigo sao quatro; o teste e' o quinto e ultimo que
+     cabe. Os dois primeiros e o teste nunca aparecem juntos com o resto
+     cheio porque quem pode testar e' quem ainda nao pagou -- mas o corte
+     garante o teto mesmo se isso mudar. */
+  if (aba === "plano" && (situacao.length || teste.length)) {
+    linhas.push({ type: 1, components: [...situacao, ...teste].slice(0, 5) });
+  }
 
   /* Linha própria, e não junto dos de situação: aquela linha já chega a três
      botões, e cinco é o teto do Discord -- passar disso não dá erro bonito,
      o painel inteiro deixa de ser postado. Foi assim que ele parou de
      atualizar uma vez. */
-  linhas.push({
-    type: 1,
-    components: [
+  if (aba === "agenda") {
+    linhas.push({ type: 1, components: [
       { type: 2, custom_id: "cyron:anunciar", style: 2, emoji: { name: "📣" },
         label: "Anunciar a Arena no servidor" },
-      /* O cartão fixado é UMA mensagem para o servidor inteiro, então ele é
-         português para todos os administradores. Este botão devolve a cópia
-         de cada um, na língua dela -- mesma saída do 🌐 da arena, e a única
-         possível numa mensagem só. */
-      { type: 2, custom_id: "cyron:idioma", style: 2, emoji: { name: "🌐" },
-        label: "Na minha língua · My language" },
+    ] });
+  }
+
+  /* A visao geral e' o fixado. O botao 🌐 de antes saiu: escolher qualquer
+     aba no menu ja' abre o painel na lingua de quem escolheu, so' para ela. */
+  if (aba === "resumo") {
+    linhas.push({ type: 1, components: [
+      { type: 2, custom_id: "cyron:ajuda", style: 2, emoji: { name: "❓" }, label: "Ajuda" },
       botaoDeSuporte(),
-      ...(podeTestar(servidor)
-        ? [{ type: 2, custom_id: "cyron:teste", style: 3, emoji: { name: "🎁" }, label: "Testar 7 dias grátis" }]
+      ...(orfas?.length
+        ? [{
+            type: 2, custom_id: "cyron:limpar", style: 4, emoji: { name: "🗑️" },
+            label: `Apagar ${orfas.length} ${orfas.length === 1 ? "cópia sem origem" : "cópias sem origem"}`,
+          }]
         : []),
-    ],
-  });
+      ...teste,
+    ] });
+  }
 
   return linhas;
 }
@@ -9615,7 +9648,7 @@ function botoesDoRecibo() {
 
    O /cyron é outra coisa: nasce do clique de UMA pessoa, e aí a língua dela
    manda. Mesmo desenho, mesmo estado, mesma função -- só o idioma muda. */
-async function montarPainel(guild, servidor, idioma = "") {
+async function montarPainel(guild, servidor, idioma = "", aba = "resumo") {
   const T = falaFixa(idioma, await motorDoGuild(guild.id).catch(() => MOTOR_AUTO));
   const fontes = await sb(
     `discord_fonte_replica?servidor_id=eq.${servidor.id}&gera_replica=is.true&tipo=neq.${TIPO_AGENDA}&select=canal_id,tipo&order=criado_em.asc`) || [];
@@ -9675,6 +9708,7 @@ async function montarPainel(guild, servidor, idioma = "") {
   const campos = [
     espelhoIncluso
       ? {
+        _aba: "traducao",
         name: `${marca(vivas.length, limite.fontes)} ` +
           await T("Canais que eu traduzo — {0} de {1}", vivas.length, limite.fontes),
         /* Menção de canal é `<#id>`: número, e não texto. Nunca vai ao
@@ -9686,6 +9720,7 @@ async function montarPainel(guild, servidor, idioma = "") {
             : "_" + await T("nenhum, e não sobrou canal para escolher: todos os canais de texto daqui já são meus. Crie um canal onde vocês escrevem e ele aparece no menu.") + "_",
       }
       : {
+        _aba: "traducao",
         name: await T("🔒 Salas por idioma — do plano pago"),
         value: await T("Aqui a conversa acontece traduzida para todo mundo ao mesmo tempo: cada " +
           "idioma ganha uma categoria com os seus canais, e quem escreve na sala dele " +
@@ -9695,6 +9730,7 @@ async function montarPainel(guild, servidor, idioma = "") {
       },
     espelhoIncluso
       ? {
+        _aba: "traducao",
         name: `${marca(idiomas.length, limite.idiomas)} ` +
           await T("Idiomas — {0} de {1}", idiomas.length, limite.idiomas),
         /* Na própria língua, como no placar da arena e no menu de escolha: o
@@ -9708,6 +9744,7 @@ async function montarPainel(guild, servidor, idioma = "") {
         /* Continua valendo escolher idioma no plano grátis, e por isso o
            número continua aqui: o bot fala com cada pessoa na língua dela.
            O que não existe é a sala. */
+        _aba: "traducao",
         name: await T("🌐 Escolheram um idioma — {0}", idiomas.length),
         value: idiomas.length
           ? await T("eu falo com cada uma na língua dela")
@@ -9715,11 +9752,13 @@ async function montarPainel(guild, servidor, idioma = "") {
         inline: true,
       },
     {
+      _aba: "traducao",
       name: await T("🌐 Motor de tradução"),
       value: motorUsado,
       inline: true,
     },
     {
+      _aba: "uso",
       name: await T("📊 Traduzido hoje"),
       /* Sem separador de milhar, e não toLocaleString("pt-BR"): "1.240" é mil
          duzentos e quarenta em português e um vírgula dois quatro em inglês.
@@ -9746,6 +9785,7 @@ async function montarPainel(guild, servidor, idioma = "") {
        nao tinha como saber se era "nao usei" ou "nao chegou". O relato foi
        exatamente esse: "nao achei". Campo mudo e' pior que campo vazio. */
     {
+      _aba: "uso",
       name: await T("📅 Neste mês"),
       value: !mes
         ? "_" + await T("não consegui somar o mês agora") + "_"
@@ -9764,6 +9804,7 @@ async function montarPainel(guild, servidor, idioma = "") {
        chave) fica invisível. Foi esse o defeito de ontem, e não vou repetir
        ele num lugar novo. */
     ...(servidor.tradutor_chave ? [] : [{
+      _aba: "uso",
       name: `${marca(gastoHoje, cotaHoje)} ` + await T("Cota do tradutor da casa — hoje"),
       value: await T("{0}k de {1}k caracteres",
         (gastoHoje / 1000).toFixed(1), (cotaHoje / 1000).toFixed(0)) +
@@ -9775,6 +9816,7 @@ async function montarPainel(guild, servidor, idioma = "") {
       inline: true,
     }]),
     {
+      _aba: "traducao",
       name: await T("💬 Tradutor por mensagem"),
       value: servidor.tradutor_topico
         ? await T("🟢 **ligado**\nbotão de tradução em cada mensagem")
@@ -9787,6 +9829,7 @@ async function montarPainel(guild, servidor, idioma = "") {
        existe, porque um recurso que ninguem conhece nao e' usado por
        ninguem. */
     {
+      _aba: "traducao",
       name: await T("🏳️ Tradução por bandeira"),
       value: await T("🟢 **sempre ligada**\nquem reage com a bandeira do país dele " +
         "recebe aquela mensagem traduzida, no privado"),
@@ -9833,6 +9876,7 @@ async function montarPainel(guild, servidor, idioma = "") {
   const salas = idiomas.filter((i) => i.canal_id && guild.channels.cache.has(i.canal_id));
   if (salas.length) {
     campos.push({
+      _aba: "traducao",
       name: await T("💬 Salas de conversa — {0}", salas.length),
       value: salas.map((i) => `<#${i.canal_id}>`).join(" ") + "\n_" +
         await T("Uma por idioma. Não são cópias: é onde cada idioma conversa, e o que se escreve numa aparece traduzido nas outras.") + "_",
@@ -9847,6 +9891,7 @@ async function montarPainel(guild, servidor, idioma = "") {
   if (emBeta && !pagoAte && servidor.plano !== "pago") {
     const g = PLANOS.gratis;
     campos.push({
+      _aba: "plano",
       name: fimDoBeta
         ? await T("🧪 CYRON em beta — até {0}", dia(fimDoBeta))
         : await T("🧪 CYRON está em beta"),
@@ -9871,6 +9916,7 @@ async function montarPainel(guild, servidor, idioma = "") {
   const trocados = cargoTrocado.get(servidor.id) || [];
   if (trocados.length && !cargoRuim) {
     campos.push({
+      _aba: "resumo",
       name: await T("🧹 Cargos antigos que dá para apagar"),
       /* Nome de cargo é do servidor, e vai como marcador: nunca chega ao
          tradutor, e não vira chave de cache que só serve a um cliente. */
@@ -9928,12 +9974,109 @@ async function montarPainel(guild, servidor, idioma = "") {
      botoes ali do lado, essas cinco linhas passaram a ensinar o caminho mais
      dificil pra fazer o que um clique faz -- e ocupavam a metade de baixo do
      painel, empurrando o estado (que e' o que se olha todo dia) pra cima. */
+  /* As abas. O fixado e' sempre a visao geral; as outras abrem efemeras, na
+     lingua de quem escolheu. O que so' uma aba usa so' e' buscado nela: o
+     fixado e' redesenhado a cada volta do relogio, em todo servidor. */
+  campos.unshift({
+    _aba: "resumo",
+    name: await T("📋 Em resumo"),
+    value: [
+      espelhoIncluso
+        ? await T("🌐 **{0}** de {1} idiomas · 📺 **{2}** de {3} canais traduzidos",
+          idiomas.length, limite.idiomas, vivas.length, limite.fontes)
+        : await T("🌐 **{0}** pessoas com idioma escolhido", idiomas.length),
+      salas.length ? await T("💬 **{0}** salas de conversa", salas.length) : "",
+      uso.traducoes
+        ? await T("📊 **{0}** traduções hoje", uso.traducoes)
+        : await T("📊 nenhuma tradução ainda hoje"),
+      servidor.tradutor_topico ? await T("💬 tradutor por mensagem ligado") : "",
+    ].filter(Boolean).join("\n") + "\n_" + await T("Use o menu para ver cada parte.") + "_",
+  });
+
+  if (aba === "uso") {
+    const DIAS = 14;
+    const dias = Array.from({ length: DIAS }, (_, i) => diaISO(Date.now() - (DIAS - 1 - i) * 864e5));
+    const linhas = await sb(`cyron_uso_diario?servidor_id=eq.${servidor.id}&dia=gte.${dias[0]}&select=dia,traducoes`)
+      .catch(() => null) || [];
+    const porDia = new Map(dias.map((d) => [d, 0]));
+    for (const l of linhas) if (porDia.has(l.dia)) porDia.set(l.dia, porDia.get(l.dia) + Number(l.traducoes || 0));
+    const serie = [...porDia.values()];
+    const estaSemana = serie.slice(7).reduce((a, b) => a + b, 0);
+    const antes = serie.slice(0, 7).reduce((a, b) => a + b, 0);
+    campos.push({
+      _aba: "uso",
+      name: await T("📈 Últimos 14 dias"),
+      value: "```\n" + grafiquinho(serie) + "\n```" +
+        await T("Esta semana **{0}** traduções · a anterior {1} · {2}", estaSemana, antes, variacaoEmTexto(estaSemana, antes)),
+    });
+  }
+
+  if (aba === "agenda") {
+    const agora = Date.now();
+    const proximos = (await eventosDoServidor(servidor.id)).filter((e) => Date.parse(e.quando) >= agora).slice(0, 8);
+    const ids = proximos.map((e) => Number(e.id)).filter(Boolean);
+    const inscritos = new Map();
+    if (ids.length) {
+      const presencas = await sb(`cyron_evento_presenca?evento_id=in.(${ids.join(",")})&vai=is.true&select=evento_id`)
+        .catch(() => null) || [];
+      for (const p of presencas) inscritos.set(Number(p.evento_id), (inscritos.get(Number(p.evento_id)) || 0) + 1);
+    }
+    const sala = canalDaAgenda(guild);
+    const linhas = [];
+    for (const e of proximos) {
+      const t = Math.floor(Date.parse(e.quando) / 1000);
+      linhas.push(`**${String(e.titulo || "").slice(0, 60)}** — <t:${t}:f> (<t:${t}:R>)` +
+        (e.repetir_min ? " 🔁" : "") + " · 👥 " + (inscritos.get(Number(e.id)) || 0));
+    }
+    campos.push({
+      _aba: "agenda",
+      name: await T("📆 Próximos eventos — {0}", proximos.length),
+      value: (linhas.length ? linhas.join("\n") : "_" + await T("nenhum evento marcado") + "_") +
+        (sala ? "\n" + await T("Agenda: {0}", "<#" + sala.id + ">") : ""),
+    });
+    campos.push({
+      _aba: "agenda",
+      name: await T("➕ Como marcar um evento"),
+      value: await T("Escreva **/evento**, ou clique com o botão direito numa mensagem → **Apps** → **Criar evento** " +
+        "para eu ler a data, a hora e o nome sozinho."),
+    });
+  }
+
+  if (aba === "plano") {
+    const faixa = faixaDe(servidor);
+    const lingua = idioma || "pt";
+    campos.unshift({
+      _aba: "plano",
+      name: await T("💳 Seu plano"),
+      value: [
+        `**${await T({ gratis: "Plano grátis", pro: "Plano Pro", alianca: "Plano Aliança" }[faixa])}**${prazo}`,
+        await T("🌐 {0} de {1} idiomas · 📺 {2} de {3} canais traduzidos",
+          idiomas.length, limite.idiomas, vivas.length, limite.fontes),
+        servidor.tradutor_chave
+          ? await T("🔑 chave própria de tradutor: sem teto diário")
+          : await T("📊 até {0}k caracteres por dia do tradutor da casa", (cotaHoje / 1000).toFixed(0)),
+      ].join("\n"),
+    });
+    campos.push({
+      _aba: "plano",
+      name: await T("⬆️ Os planos"),
+      value: [
+        await T("**Pro** — {0} idiomas · {1} canais · {2}", PLANOS.pro.idiomas, PLANOS.pro.fontes, precoDoPlano(lingua, "pro")),
+        await T("**Aliança** — {0} idiomas · {1} canais · {2}", PLANOS.alianca.idiomas, PLANOS.alianca.fontes, precoDoPlano(lingua, "alianca")),
+        "_" + await T("Mudar de plano não apaga nada: o que passa do limite apenas para de crescer.") + "_",
+      ].join("\n"),
+    });
+  }
+
+  const daAba = campos.filter((c) => c._aba === aba).map(({ _aba, ...c }) => c);
+
   const embed = {
-    title: "⚙️ CYRON",
+    title: { resumo: "⚙️ CYRON", traducao: "⚙️ CYRON · 🌐", uso: "⚙️ CYRON · 📊",
+      agenda: "⚙️ CYRON · 📆", plano: "⚙️ CYRON · 💳" }[aba] || "⚙️ CYRON",
     description: await vereditoDoPainel(problemas, vivas.length, idiomas.length, T),
     color: corDoPainel(noTeto, fila.length > 0 || inalcancaveis.length > 0 || !!cargoRuim),
-    /* Problemas primeiro, sempre. */
-    fields: [...problemas, ...campos],
+    /* Problemas primeiro, sempre -- e na visao geral, que e' onde se olha. */
+    fields: [...(aba === "resumo" ? problemas : []), ...daAba],
     /* Dois moldes inteiros, e não "Plano {0}" com o nome dentro.
 
        Eu tinha posto o nome do plano como marcador, tratando-o como marca. A
@@ -9949,7 +10092,7 @@ async function montarPainel(guild, servidor, idioma = "") {
     },
   };
 
-  return { embed, componentes: componentesDoPainel(servidor, vivas, limite, orfas, elegiveis) };
+  return { embed, componentes: componentesDoPainel(servidor, vivas, limite, orfas, elegiveis, aba) };
 }
 
 async function cartaoDeConfig(guild, servidor) {
@@ -10183,7 +10326,10 @@ async function refrescarPainel(inter, servidor) {
      português sozinho", que parece defeito e é dos piores de explicar. */
   const noFixado = inter.message?.id === servidor.msg_config;
   const idioma = noFixado ? "" : await idiomaEscolhido(inter.user.id);
-  const { embed, componentes } = await montarPainel(inter.guild, servidor, idioma);
+  /* Continua na aba em que a pessoa estava: apertar um botao da aba Traducao
+     e cair de volta na visao geral faria o botao parecer nao ter feito nada. */
+  const aba = noFixado ? "resumo" : abaDaMensagem(inter.message);
+  const { embed, componentes } = await montarPainel(inter.guild, servidor, idioma, aba);
   await inter.editReply({ embeds: [embed], components: componentes }).catch(() => {});
   /* Se o clique veio da copia efemera do /cyron, o fixado ficou pra tras. */
   if (!noFixado) {
@@ -10453,6 +10599,21 @@ async function cliquePainel(inter) {
     await inter.deferReply({ flags: 64 });
     const meu = (await idiomaEscolhido(inter.user.id)) || idiomaDoAplicativo(inter.locale);
     const { embed, componentes } = await montarPainel(inter.guild, servidor, meu);
+    return inter.editReply({ embeds: [embed], components: componentes });
+  }
+
+  /* Trocar de aba.
+
+     No fixado, a aba abre AO LADO, efemera e na lingua de quem escolheu: o
+     fixado e' de todos e continua na visao geral. Na copia efemera, a propria
+     copia troca de aba. */
+  if (acao === "aba" && inter.isStringSelectMenu()) {
+    const aba = ABAS_DO_PAINEL.some((a) => a.valor === inter.values?.[0]) ? inter.values[0] : "resumo";
+    const noFixado = inter.message?.id === servidor.msg_config;
+    if (noFixado) await inter.deferReply({ flags: 64 });
+    else await inter.deferUpdate();
+    const meu = (await idiomaEscolhido(inter.user.id)) || idiomaDoAplicativo(inter.locale);
+    const { embed, componentes } = await montarPainel(inter.guild, servidor, meu, aba);
     return inter.editReply({ embeds: [embed], components: componentes });
   }
 

@@ -2549,6 +2549,7 @@ function conferirCartao(onde, embed, componentes = []) {
   const { montarPainel } = carregar([
     "porMolde", "falaFixa", "vereditoDoPainel", "comoEstaOMotor",
     "DIAS_DE_RITMO", "primeiroDiaDoMes", "ritmoDiario", "emK", "usoDoMes",
+    "diaISO", "BARRINHAS", "grafiquinho", "variacaoEmTexto", "PRECOS", "precoDoPlano",
     "montarPainel"]);
 
   globalThis.COR = 0xF5A623;
@@ -2556,7 +2557,13 @@ function conferirCartao(onde, embed, componentes = []) {
   globalThis.MOTORES = { deepl: { nome: "DeepL" }, azure: { nome: "Azure Translator" } };
   globalThis.BETA = false;
   globalThis.BETA_ATE = null;
-  globalThis.PLANOS = { gratis: { idiomas: 2, fontes: 1 }, pago: { idiomas: 20, fontes: 10 } };
+  globalThis.PLANOS = { gratis: { idiomas: 2, fontes: 1 }, pago: { idiomas: 20, fontes: 10 },
+    pro: { idiomas: 5, fontes: 3 }, alianca: { idiomas: 20, fontes: 10 } };
+  globalThis.faixaDe = () => "gratis";
+  globalThis.canalDaAgenda = () => ({ id: "c-agenda" });
+  globalThis.eventosDoServidor = async () => [
+    { id: 1, titulo: "Armadilha do Urso 1", quando: new Date(Date.now() + 3600e3).toISOString(), repetir_min: 2850 },
+    { id: 2, titulo: "Velho", quando: new Date(Date.now() - 3600e3).toISOString() }];
   globalThis.falhaDoMotor = new Map();
   globalThis.esperando = new Map();
   globalThis.semAlcance = new Map();
@@ -2602,11 +2609,23 @@ function conferirCartao(onde, embed, componentes = []) {
     }
   };
 
-  soTexto(await montarPainel(guild, servidor, ""), "em português");
-  soTexto(await montarPainel(guild, servidor, "de"), "em alemão");
+  for (const aba of ["resumo", "traducao", "uso", "agenda", "plano"]) {
+    soTexto(await montarPainel(guild, servidor, "", aba), `a aba ${aba} em português`);
+    soTexto(await montarPainel(guild, servidor, "de", aba), `a aba ${aba} em alemão`);
+    conferirCartao(`o painel do servidor, aba ${aba}`, (await montarPainel(guild, servidor, "", aba)).embed);
+  }
+  verdade("o fixado (sem aba) é a visão geral",
+    (await montarPainel(guild, servidor, "")).embed.fields.some((f) => /Em resumo/.test(f.name)));
+  const agenda = (await montarPainel(guild, servidor, "", "agenda")).embed.fields[0];
+  verdade("a aba Agenda lista o próximo evento", /Armadilha do Urso 1/.test(agenda.value));
+  verdade("e não o que já passou", !/Velho/.test(agenda.value));
+  const uso14 = (await montarPainel(guild, servidor, "", "uso")).embed.fields.find((f) => /14 dias/.test(f.name));
+  verdade("a aba Uso tem o gráfico de 14 dias", /[▁▂▃▄▅▆▇█]{14}/.test(String(uso14?.value)));
+  verdade("cada campo mora numa aba só: o motor não aparece na visão geral",
+    !(await montarPainel(guild, servidor, "")).embed.fields.some((f) => /Motor de tradução/.test(f.name)));
 
   /* E o campo do motor -- o que quebrou -- tem que dizer alguma coisa. */
-  const emCasa = await montarPainel(guild, servidor, "");
+  const emCasa = await montarPainel(guild, servidor, "", "traducao");
   const motor = emCasa.embed.fields.find((f) => /Motor de tradução/.test(f.name));
   verdade("o campo do motor existe", !!motor);
   verdade("e diz qual motor está em uso", /Google grátis/.test(motor.value));
@@ -2614,7 +2633,7 @@ function conferirCartao(onde, embed, componentes = []) {
   /* No painel traduzido, o motor tem que ser traduzido junto: ele passou anos
      sem receber o T porque a chamada estava sem await, e sem T ele voltaria em
      português dentro de um cartão alemão. */
-  const emAlemao = await montarPainel(guild, servidor, "de");
+  const emAlemao = await montarPainel(guild, servidor, "de", "traducao");
   const motorDe = emAlemao.embed.fields.find((f) => f.name.includes("Motor de tradução"));
   /* String() de propósito: se o valor voltar a ser uma Promise, quem tem que
      falhar é o guarda acima, com nome. Um `.startsWith` estourando aqui
@@ -2627,7 +2646,7 @@ function conferirCartao(onde, embed, componentes = []) {
      A função usoDoMes() pode estar perfeita e nunca ser chamada — foi assim
      que o painel ficou preso no dia enquanto o limite era mensal. Aqui se
      confere o que chega na tela. */
-  const doMes = emCasa.embed.fields.find((f) => /Neste mês/.test(f.name));
+  const doMes = (await montarPainel(guild, servidor, "", "uso")).embed.fields.find((f) => /Neste mês/.test(f.name));
   verdade("o painel tem o campo do mês", !!doMes);
   verdade("com o total de traduções do mês", /1240/.test(String(doMes?.value)));
   verdade("e os caracteres em k, sem separador de milhar", /213k/.test(String(doMes?.value)));
@@ -2645,7 +2664,7 @@ function conferirCartao(onde, embed, componentes = []) {
     const antes = globalThis.usoDoMes;
 
     globalThis.usoDoMes = async () => ({ traducoes: 0, caracteres: 0, cache: 0, porDia: 0 });
-    const zerado = await montarPainel(guild, servidor, "");
+    const zerado = await montarPainel(guild, servidor, "", "uso");
     const campoZerado = zerado.embed.fields.find((f) => /Neste mês/.test(f.name));
     verdade("mês zerado ainda mostra o campo", !!campoZerado);
     verdade("e diz que não houve nada, em vez de sumir",
@@ -2654,7 +2673,7 @@ function conferirCartao(onde, embed, componentes = []) {
     /* Falha de consulta é outra coisa, e tem que ler como outra coisa: dizer
        "nada ainda" aqui seria o painel afirmando um zero que ele não sabe. */
     globalThis.usoDoMes = async () => { throw new Error("banco fora"); };
-    const quebrado = await montarPainel(guild, servidor, "");
+    const quebrado = await montarPainel(guild, servidor, "", "uso");
     const campoQuebrado = quebrado.embed.fields.find((f) => /Neste mês/.test(f.name));
     verdade("consulta falhando ainda mostra o campo", !!campoQuebrado);
     verdade("e diz que não conseguiu somar, não que foi zero",
@@ -2678,14 +2697,15 @@ function conferirCartao(onde, embed, componentes = []) {
 
 /* ---- os botões dizem o que fazem ---- */
 {
-  const { componentesDoPainel } = carregar(["podeTestar", "componentesDoPainel"]);
+  const { componentesDoPainel } = carregar(["ABAS_DO_PAINEL", "podeTestar", "componentesDoPainel"]);
   /* Vive num `let` que só o carregamento dos ajustes preenche; aqui ele nunca
      roda, então o botão de assinar entra pelo mesmo caminho de um servidor
      sem link configurado. */
   globalThis.LINK_PAGAMENTO_VIVO = "https://pague.exemplo/x";
   globalThis.LINK_PRO_VIVO = "https://pague.exemplo/pro";
   const servidor = { id: "s1", plano: "gratis", tradutor_topico: true };
-  const linhas = componentesDoPainel(servidor, [], { fontes: 10, idiomas: 20 }, [], []);
+  const linhas = ["resumo", "traducao", "uso", "agenda", "plano"].flatMap((aba) =>
+    componentesDoPainel(servidor, [], { fontes: 10, idiomas: 20 }, [], [], aba).slice(1));
   const botoes = linhas.flatMap((l) => l.components).filter((c) => c.type === 2);
   const rotulos = botoes.map((b) => String(b.label || ""));
 
@@ -2698,16 +2718,20 @@ function conferirCartao(onde, embed, componentes = []) {
       verdade(`"${a}" não é começo de "${b}"`, !b.startsWith(a));
     }
   }
-  ok("nenhum rótulo se repete", new Set(rotulos).size, rotulos.length);
+  for (const aba of ["resumo", "traducao", "uso", "agenda", "plano"]) {
+    const daAba = componentesDoPainel(servidor, [], { fontes: 10, idiomas: 20 }, [], [], aba)
+      .flatMap((l) => l.components).filter((c) => c.type === 2).map((c) => String(c.label || ""));
+    ok(`aba ${aba}: nenhum rótulo se repete`, new Set(daAba).size, daAba.length);
+  }
   for (const r of rotulos) verdade(`"${r}" cabe no botão`, r.length <= 80);
 }
 
 /* ---- os dois degraus de assinatura ---- */
 {
-  const { componentesDoPainel } = carregar(["podeTestar", "componentesDoPainel"]);
+  const { componentesDoPainel } = carregar(["ABAS_DO_PAINEL", "podeTestar", "componentesDoPainel"]);
   globalThis.LINK_PAGAMENTO_VIVO = "https://pague.exemplo/alianca";
   globalThis.LINK_PRO_VIVO = "https://pague.exemplo/pro";
-  const assinar = (servidor) => componentesDoPainel(servidor, [], { fontes: 10, idiomas: 20 }, [], [])
+  const assinar = (servidor) => componentesDoPainel(servidor, [], { fontes: 10, idiomas: 20 }, [], [], "plano")
     .flatMap((l) => l.components).filter((c) => c.style === 5 && /Assinar/.test(c.label));
   const gratis = assinar({ id: "s1", plano: "gratis" });
   ok("servidor grátis vê os dois degraus, Pro primeiro", gratis.map((b) => b.label), ["Assinar Pro", "Assinar Aliança"]);
@@ -2716,8 +2740,32 @@ function conferirCartao(onde, embed, componentes = []) {
   globalThis.LINK_PRO_VIVO = "";
   ok("sem o link do Pro no /admin, só a Aliança", assinar({ id: "s1", plano: "gratis" }).map((b) => b.label), ["Assinar Aliança"]);
   ok("quem já assina não vê botão de assinar", assinar({ id: "s1", plano: "gratis", stripe_assinatura: "sub_1" }).length, 0);
-  const linhas = componentesDoPainel({ id: "s1", plano: "gratis" }, [], { fontes: 10, idiomas: 20 }, [{}, {}], []);
-  verdade("nenhuma fileira passa de 5 botões (o Discord recusa o painel inteiro)", linhas.every((l) => l.components.length <= 5));
+  for (const aba of ["resumo", "traducao", "uso", "agenda", "plano"]) {
+    const linhas = componentesDoPainel({ id: "s1", plano: "gratis" }, [], { fontes: 10, idiomas: 20 }, [{}, {}],
+      [{ id: "c1", name: "geral" }], aba);
+    verdade(`aba ${aba}: nenhuma fileira passa de 5 botões (o Discord recusa o painel inteiro)`,
+      linhas.every((l) => l.components.length <= 5));
+    conferirCartao(`os botões da aba ${aba}`, { title: aba }, linhas);
+    ok(`aba ${aba}: o menu marca a aba certa`, linhas[0].components[0].options.find((o) => o.default)?.value, aba);
+  }
+  const porAba = (aba) => componentesDoPainel({ id: "s1", plano: "gratis" }, [], { fontes: 10, idiomas: 20 }, [{}],
+    [{ id: "c1", name: "geral" }], aba).flatMap((l) => l.components).map((c) => c.custom_id);
+  verdade("o menu de canais mora na aba Tradução", porAba("traducao").includes("cyron:fontes") && !porAba("resumo").includes("cyron:fontes"));
+  verdade("apagar cópias sem origem fica na visão geral", porAba("resumo").includes("cyron:limpar"));
+  verdade("Pix e código ficam na aba Plano", porAba("plano").includes("cyron:pix") && porAba("plano").includes("cyron:codigo"));
+  verdade("anunciar a arena fica na Agenda", porAba("agenda").includes("cyron:anunciar"));
+  const { abaDaMensagem } = carregar(["ABAS_DO_PAINEL", "abaDaMensagem"]);
+  ok("a aba da mensagem é a opção marcada", abaDaMensagem({ components: porAba && [
+    { components: [{ custom_id: "cyron:aba", options: [{ value: "resumo" }, { value: "uso", default: true }] }] }] }), "uso");
+  ok("mensagem sem menu é a visão geral", abaDaMensagem({ components: [] }), "resumo");
+  const fonteIdx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+  verdade("depois de um clique, a cópia efêmera continua na aba em que estava",
+    /const aba = noFixado \? "resumo" : abaDaMensagem\(inter\.message\)/.test(fonteIdx));
+  verdade("no fixado, a aba abre ao lado, só para quem escolheu",
+    /if \(noFixado\) await inter\.deferReply\(\{ flags: 64 \}\);\s*else await inter\.deferUpdate\(\);/.test(fonteIdx));
+  verdade("e o fixado é sempre a visão geral", /montarPainel\(guild, servidor\);/.test(fonteIdx));
+  ok("aba inventada também", abaDaMensagem({ components: [
+    { components: [{ custom_id: "cyron:aba", options: [{ value: "x", default: true }] }] }] }), "resumo");
   globalThis.LINK_PRO_VIVO = "";
 }
 
@@ -2809,8 +2857,8 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o clique chega (depois da checagem de Gerenciar Servidor)",
     checagem > 0 && painel.indexOf('if (acao === "pix")') > checagem &&
     /if \(acao\.startsWith\("pix:"\)\) \{[^}]*return await cobrarPix\(inter, servidor, acao\.slice\("pix:"\.length\)\)/.test(idx));
-  const { componentesDoPainel } = carregar(["podeTestar", "componentesDoPainel"]);
-  const temPix = (s) => componentesDoPainel(s, [], { fontes: 10, idiomas: 20 }, [], [])
+  const { componentesDoPainel } = carregar(["ABAS_DO_PAINEL", "podeTestar", "componentesDoPainel"]);
+  const temPix = (s) => componentesDoPainel(s, [], { fontes: 10, idiomas: 20 }, [], [], "plano")
     .flatMap((l) => l.components).some((c) => c.custom_id === "cyron:pix");
   verdade("o painel oferece Pix a quem não é pago", temPix({ id: "s1", plano: "gratis" }));
   verdade("e não a quem já assina pela Stripe", !temPix({ id: "s1", plano: "gratis", stripe_assinatura: "sub_1" }));
