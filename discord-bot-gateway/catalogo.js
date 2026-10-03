@@ -404,6 +404,18 @@ export const RECURSOS = [
     prova: "cartaoDoEvento",
   },
   {
+    chave: "leitor-de-evento",
+    categoria: "viver",
+    plano: "gratis",
+    nome: { pt: "Evento a partir do print", en: "Event from a screenshot" },
+    como: { pt: "Segure a mensagem → Apps → Criar evento", en: "Hold the message → Apps → Create event" },
+    oque: {
+      pt: "Mande o print do lembrete do jogo, ou uma frase como “Urso 04/10 20:30”: o bot lê o nome, a data, a hora, o UTC e até o contador “1d 11:14:06”, mostra o evento pronto e só cria quando você confirma.",
+      en: "Send the game's reminder screenshot, or a line like “Bear 04/10 20:30”: the bot reads the name, date, time, the UTC mark and even a “1d 11:14:06” countdown, shows the event ready and only creates it when you confirm.",
+    },
+    prova: "extrairEvento",
+  },
+  {
     chave: "presenca",
     categoria: "viver",
     plano: "gratis",

@@ -7504,6 +7504,45 @@ const PORQUE_DO_GIF = {
   subir: "Não consegui guardar o GIF agora. Tente de novo em instantes.",
 };
 
+const NAO_GRAVEI_EVENTO = "Não consegui guardar o evento. Se isto continuar, a tabela dos eventos " +
+  "pode não estar atualizada — está em `supabase/migracoes/005-eventos-agenda.sql`.";
+
+/* Grava (ou edita, pelo nome) e redesenha a sala. Um caminho so' para o
+   /evento e para o leitor automatico: duas copias desta conta divergiriam no
+   dia em que uma ganhasse um campo e a outra nao. */
+async function gravarEvento(guild, servidor, userId, { titulo, detalhes, quando, repetir, lembrete, cargoId, gif }) {
+  const campos = {
+    titulo, detalhes: detalhes || null, quando: new Date(quando).toISOString(),
+    repetir_min: repetir || null,
+    lembrete_min: LEMBRETES.includes(lembrete) ? lembrete : null,
+    cargo_id: cargoId || null,
+    lembrete_feito: false, aviso_feito: false,
+    /* GIF so' muda quando veio um novo: editar o horario nao apaga o urso. */
+    ...(gif ? { gif_url: gif } : {}),
+  };
+
+  const existente = (await sb(`cyron_evento?servidor_id=eq.${servidor.id}` +
+    `&titulo=eq.${encodeURIComponent(titulo)}&select=id,gif_url&limit=1`).catch(() => null))?.[0];
+
+  let ev = null;
+  if (existente) {
+    await sbPatch(`cyron_evento?id=eq.${existente.id}`, campos).catch((e) =>
+      console.error("eventos: nao consegui editar:", e?.message || e));
+    ev = { ...campos, id: existente.id };
+  } else {
+    const criado = await sbPost("cyron_evento", {
+      ...campos, servidor_id: servidor.id, guild_id: guild.id,
+      votacao: true, criado_por: userId,
+    }).catch((e) => {
+      console.error("eventos: nao consegui criar:", e?.message || e);
+      return null;
+    });
+    ev = Array.isArray(criado) ? criado[0] : criado;
+  }
+  if (ev?.id) await desenharEventos(guild, servidor).catch(() => {});
+  return { ev, existente, campos };
+}
+
 /* O lider mandou o comando.
 
    Mesmo nome de um evento que ja existe neste servidor = EDITAR, e nao criar
@@ -7566,41 +7605,12 @@ async function criarEvento(inter) {
   /* O fuso deste oficial fica lembrado para a próxima vez vir preenchida. */
   if (fuso !== null) await porAjuste(`fuso:${inter.user.id}`, String(fuso)).catch(() => {});
 
-  const campos = {
-    titulo, detalhes: detalhes || null, quando: new Date(quando).toISOString(),
-    repetir_min: repetir || null,
-    lembrete_min: LEMBRETES.includes(lembrete) ? lembrete : null,
-    cargo_id: cargo?.id || null,
-    lembrete_feito: false, aviso_feito: false,
-    /* GIF so' muda quando veio um novo: editar o horario nao apaga o urso. */
-    ...(gif ? { gif_url: gif } : {}),
-  };
-
-  const existente = (await sb(`cyron_evento?servidor_id=eq.${servidor.id}` +
-    `&titulo=eq.${encodeURIComponent(titulo)}&select=id&limit=1`).catch(() => null))?.[0];
-
-  let ev = null;
-  if (existente) {
-    await sbPatch(`cyron_evento?id=eq.${existente.id}`, campos).catch((e) =>
-      console.error("eventos: nao consegui editar:", e?.message || e));
-    ev = { ...campos, id: existente.id };
-  } else {
-    const criado = await sbPost("cyron_evento", {
-      ...campos, servidor_id: servidor.id, guild_id: inter.guildId,
-      votacao: true, criado_por: inter.user.id,
-    }).catch((e) => {
-      console.error("eventos: nao consegui criar:", e?.message || e);
-      return null;
-    });
-    ev = Array.isArray(criado) ? criado[0] : criado;
-  }
+  const { ev, existente, campos } = await gravarEvento(inter.guild, servidor, inter.user.id, {
+    titulo, detalhes, quando, repetir, lembrete, cargoId: cargo?.id, gif,
+  });
   if (!ev?.id) {
-    return inter.editReply({ content:
-      "Não consegui guardar o evento. Se isto continuar, a tabela dos eventos " +
-      "pode não estar atualizada — está em `supabase/migracoes/005-eventos-agenda.sql`." });
+    return inter.editReply({ content: NAO_GRAVEI_EVENTO });
   }
-
-  await desenharEventos(inter.guild, servidor).catch(() => {});
 
   const s = Math.floor(quando / 1000);
   const linhas = [
@@ -7626,6 +7636,280 @@ async function criarEvento(inter) {
       { type: 2, custom_id: `evento:apagar:${ev.id}`, style: 4, emoji: { name: "🗑️" },
         label: "Apagar" },
     ] }],
+  });
+}
+
+/* ---------------- o leitor automatico de eventos ----------------
+
+   Segurar uma mensagem → Apps → "Criar evento". Texto ou print do jogo: o bot
+   le, acha o nome, a data e a hora, e MOSTRA antes de criar. Nada nasce sem o
+   lider tocar em ✅ -- leitor que chuta e cria sozinho marca rally na hora
+   errada, e isso e' pior que nao ter leitor.
+
+   O fuso: jogo quase sempre escreve "UTC". Achando, vale UTC (ou o UTC+N
+   escrito). Nao achando, vale o fuso guardado de quem pediu, como no /evento. */
+
+const PROPOSTAS_DE_EVENTO = new Map(); // token -> proposta
+const PROPOSTA_VALE = 15 * 60 * 1000;
+
+/* Le o texto e devolve { titulo, quando, fusoAchado, ambiguo, como }.
+   `quando` e' null quando nenhuma data futura apareceu. Pura. */
+function extrairEvento(bruto, agora = Date.now(), fusoPadrao = 0) {
+  const texto = String(bruto || "").replace(/\r/g, "");
+  const t = texto.replace(/[ \t]+/g, " ");
+
+  /* ---- fuso ---- */
+  const mz = t.match(/\b(?:UTC|GMT)\s*([+-]\s*\d{1,2}(?::?\d{2})?)?/i);
+  const fusoAchado = mz ? (mz[1] ? fusoDoTexto(mz[1].replace(/\s/g, "")) : 0) : null;
+  const fuso = fusoAchado ?? fusoPadrao ?? 0;
+
+  const naData = (ano, mes, dia, hora, min) => {
+    if (hora > 23 || min > 59 || mes < 1 || mes > 12 || dia < 1 || dia > 31) return null;
+    const ms = Date.UTC(ano, mes - 1, dia, hora, min) - fuso * 60000;
+    const d = new Date(ms + fuso * 60000);
+    if (d.getUTCMonth() !== mes - 1 || d.getUTCDate() !== dia) return null;
+    return ms;
+  };
+  const futuro = (ms) => ms !== null && ms > agora && ms <= agora + EVENTO_MAX;
+
+  let quando = null, ambiguo = false, como = null;
+
+  /* 1. Ano na frente: 2026-10-04 11:30. A primeira que for FUTURA -- o print
+        do lembrete traz tambem a hora em que ele foi tirado, que ja passou. */
+  for (const m of t.matchAll(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})[ T,]+(\d{1,2}):(\d{2})/g)) {
+    const ms = naData(+m[1], +m[2], +m[3], +m[4], +m[5]);
+    if (futuro(ms)) { quando = ms; como = "data"; break; }
+  }
+
+  /* 2. Dia/mes: 04/10 11:30, 04/10/2026 11:30. Os dois numeros ate' 12 e
+        diferentes sao ambiguos (4 de outubro ou 10 de abril): leio como
+        dia/mes, que e' como quase o mundo todo escreve, e AVISO. */
+  if (quando === null) {
+    for (const m of t.matchAll(/(?<![\d:/.-])(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?[ ,]+(?:(?:às|as|at|um|a las)\s+)?(\d{1,2}):(\d{2})(?!\d)/gi)) {
+      const a = +m[1], b = +m[2];
+      const hoje = new Date(agora + fuso * 60000).getUTCFullYear();
+      const ano = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : hoje;
+      let ms = naData(ano, b, a, +m[4], +m[5]);
+      if (ms !== null && !m[3] && ms <= agora) ms = naData(ano + 1, b, a, +m[4], +m[5]);
+      if (futuro(ms)) {
+        quando = ms; como = "data";
+        ambiguo = a <= 12 && b <= 12 && a !== b;
+        break;
+      }
+    }
+  }
+
+  /* 3. Contador do jogo: "1d 11:14:06", "21:14:06". Conta a partir de agora.
+        O que vem logo depois de uma data e' relogio, nao contador. */
+  if (quando === null) {
+    for (const m of t.matchAll(/(?:(\d{1,3})\s*d(?:ays?|ias?)?\s+)?(?<![\d:])(\d{1,3}):(\d{2}):(\d{2})(?![\d:])/gi)) {
+      const antes = t.slice(Math.max(0, m.index - 12), m.index);
+      if (/\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\s*$/.test(antes)) continue;
+      const ms = ((+(m[1] || 0) * 24 + +m[2]) * 60 + +m[3]) * 60000 + +m[4] * 1000;
+      if (+m[3] > 59 || +m[4] > 59 || ms <= 0) continue;
+      if (futuro(agora + ms)) { quando = Math.round((agora + ms) / 60000) * 60000; como = "contador"; break; }
+    }
+  }
+
+  /* 4. So' a hora, colada no UTC: "11:30 UTC". Hoje, ou amanha se ja passou. */
+  if (quando === null) {
+    const m = t.match(/(?:UTC|GMT)[^\d\n]{0,3}(\d{1,2}):(\d{2})(?!\d)|(?<!\d)(\d{1,2}):(\d{2})\s*(?:UTC|GMT)/i);
+    /* A hora de uma data que ja passou nao e' "hoje a essa hora": a data
+       foi recusada de proposito, e a hora dela vai junto. */
+    const deData = m && /\d{1,4}[-/.]\d{1,2}(?:[-/.]\d{1,4})?[ T,]*$/.test(t.slice(Math.max(0, m.index - 12),
+      m.index + (m[0].search(/\d/))));
+    if (m && !deData) {
+      const h = +(m[1] ?? m[3]), mi = +(m[2] ?? m[4]);
+      const d = new Date(agora + fuso * 60000);
+      let ms = naData(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), h, mi);
+      if (ms !== null && ms <= agora) ms += 86400000;
+      if (futuro(ms)) { quando = ms; como = "hora"; }
+    }
+  }
+
+  /* ---- o nome ----
+     Colchete primeiro ([Armadilha de Caça 1], 【熊】): jogo poe o nome do
+     evento entre colchetes quase sempre. Senao, a primeira linha com cara de
+     titulo -- letras, curta, sem data. */
+  let titulo = null;
+  const mb = texto.match(/[\[【「]\s*([^\]】」\n]{2,80}?)\s*[\]】」]/);
+  if (mb) titulo = mb[1].trim();
+  if (!titulo) {
+    for (const linha of texto.split("\n").map((l) => l.trim())) {
+      if (linha.length < 3 || linha.length > 80) continue;
+      if (!/\p{L}{3,}/u.test(linha)) continue;
+      if (/\d{1,2}:\d{2}|\d{4}[-/.]\d{1,2}|^(?:utc|gmt)\b/i.test(linha)) continue;
+      titulo = linha.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N})]+$/gu, "");
+      if (titulo.length >= 3) break;
+      titulo = null;
+    }
+  }
+
+  return { titulo: titulo ? titulo.slice(0, 100) : null, quando, fusoAchado, fuso, ambiguo, como };
+}
+
+/* "04/10 11:30" no fuso dado: e' como o campo do formulario vem preenchido,
+   no mesmo formato que quandoDoTexto aceita de volta. */
+function relogioNoFuso(ms, fusoMin = 0) {
+  const d = new Date(ms + fusoMin * 60000);
+  const z = (n) => String(n).padStart(2, "0");
+  return `${z(d.getUTCDate())}/${z(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${z(d.getUTCHours())}:${z(d.getUTCMinutes())}`;
+}
+
+function textoDoFuso(min) {
+  if (!min) return "UTC";
+  const s = min < 0 ? "-" : "+", a = Math.abs(min);
+  return `UTC${s}${Math.floor(a / 60)}${a % 60 ? `:${String(a % 60).padStart(2, "0")}` : ""}`;
+}
+
+function guardarProposta(p, agora = Date.now()) {
+  for (const [k, v] of PROPOSTAS_DE_EVENTO) if (v.expira < agora) PROPOSTAS_DE_EVENTO.delete(k);
+  const token = randomBytes(6).toString("hex");
+  PROPOSTAS_DE_EVENTO.set(token, { ...p, expira: agora + PROPOSTA_VALE });
+  return token;
+}
+
+function cartaoDaProposta(p) {
+  const campos = [{ name: "📛 Nome", value: p.titulo || "_não achei — toque em ✏️ Corrigir_" }];
+  if (p.quando) {
+    const s = Math.floor(p.quando / 1000);
+    campos.push({ name: "🕒 Quando", value: `<t:${s}:F> · <t:${s}:R>` });
+    campos.push({ name: "🌍 Fuso", value: p.fusoAchado !== null && p.fusoAchado !== undefined
+      ? `${textoDoFuso(p.fuso)} — lido no texto`
+      : `${textoDoFuso(p.fuso)} — o seu fuso salvo (o texto não dizia)` });
+  } else {
+    campos.push({ name: "🕒 Quando", value: "_não achei data nem contador — toque em ✏️ Corrigir_" });
+  }
+  if (p.ambiguo) {
+    campos.push({ name: "⚠️ Confira a data", value:
+      "Os dois números podem ser dia ou mês. Li como **dia/mês**. Se for o contrário, toque em ✏️ Corrigir." });
+  }
+  return {
+    color: COR,
+    title: "📅 Encontrei este evento",
+    description: "Confira antes de criar. Nada é criado sem você tocar em ✅.",
+    fields: campos,
+    ...(p.imagem ? { thumbnail: { url: p.imagem } } : {}),
+  };
+}
+
+function botoesDaProposta(token, p) {
+  return [{ type: 1, components: [
+    { type: 2, custom_id: `leitor:criar:${token}`, style: 3, emoji: { name: "✅" }, label: "Criar",
+      disabled: !(p.titulo && p.quando) },
+    { type: 2, custom_id: `leitor:corrigir:${token}`, style: 2, emoji: { name: "✏️" }, label: "Corrigir" },
+  ] }];
+}
+
+/* Apps → Criar evento. */
+async function lerEventoDaMensagem(inter) {
+  await inter.deferReply({ flags: 64 });
+  const servidor = await servidorDoGuild(inter.guildId);
+  if (!servidor) return inter.editReply({ content: "Ainda não terminei de me instalar aqui." });
+
+  const msg = inter.targetMessage;
+  let texto = textoDaMensagem(msg) || "";
+  const img = imagemDaMensagem(msg);
+  let leuImagem = false;
+  if (img && visaoDoDono) {
+    try {
+      const leitura = await lerImagemDaMensagem(img);
+      if (leitura?.texto) { texto += "\n" + leitura.texto; leuImagem = true; }
+    } catch (e) {
+      const aviso = falhaDeLeitura(e);
+      if (!texto.trim()) return inter.editReply({ embeds: [aviso] });
+    }
+  }
+  if (!texto.trim()) {
+    return inter.editReply({ content: img && !visaoDoDono
+      ? "🖼️ A leitura de imagens não está ligada neste bot, e a mensagem não tem texto."
+      : "🤔 Essa mensagem não tem texto nem imagem para eu ler." });
+  }
+
+  const fusoPadrao = Number((await ajustes())[`fuso:${inter.user.id}`]) || 0;
+  const achado = extrairEvento(texto, Date.now(), fusoPadrao);
+  const p = {
+    guildId: inter.guildId, userId: inter.user.id, ...achado,
+    /* O print vira a imagem do evento -- quem nao tem GIF ainda ganha o urso
+       do proprio jogo. So' anexo de verdade, e so' se ele foi lido. */
+    imagem: leuImagem ? img.url : null,
+  };
+  const token = guardarProposta(p);
+  return inter.editReply({ embeds: [cartaoDaProposta(p)], components: botoesDaProposta(token, p) });
+}
+
+function janelaDaProposta(token, p) {
+  const campo = (id, rotulo, valor, obrig, max, dica) => ({ type: 1, components: [{
+    type: 4, custom_id: id, label: rotulo, style: 1, required: obrig, max_length: max,
+    ...(valor ? { value: String(valor).slice(0, max) } : {}), ...(dica ? { placeholder: dica } : {}),
+  }] });
+  return {
+    custom_id: `leitor:janela:${token}`,
+    title: "Criar evento",
+    components: [
+      campo("nome", "Nome", p.titulo, true, 100, "Armadilha de Caça 1"),
+      campo("quando", "Data e hora (dia/mês/ano hora:min)", p.quando ? relogioNoFuso(p.quando, p.fuso) : "", true, 30, "04/10/2026 11:30"),
+      campo("fuso", "Fuso dessa hora (0 = UTC, -3 = Brasília)", String(p.fuso ?? 0), true, 10, "0"),
+      campo("repetir", "Repetir? (24h, 7d, 47h30m — vazio: não)", "", false, 20, "47h30m"),
+      campo("lembrete", "Lembrete antes, em minutos (5, 10, 15, 30, 60)", "", false, 3, "10"),
+    ],
+  };
+}
+
+async function cliqueLeitor(inter) {
+  const [, acao, token] = inter.customId.split(":");
+  const p = PROPOSTAS_DE_EVENTO.get(token);
+  if (!p || p.expira < Date.now()) {
+    return inter.reply({ flags: 64, content: "⌛ Esse rascunho expirou. Use **Apps → Criar evento** de novo." });
+  }
+  if (p.userId !== inter.user.id || !inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    return inter.reply({ flags: 64, content: "Só quem pediu, e administra o servidor, mexe neste rascunho." });
+  }
+
+  if (acao === "corrigir") return inter.showModal(janelaDaProposta(token, p));
+
+  let final = p;
+  let repetir = 0, lembrete = 0;
+  if (acao === "janela") {
+    await inter.deferUpdate();
+    const ler = (id) => String(inter.fields.getTextInputValue(id) || "").trim();
+    const fuso = fusoDoTexto(ler("fuso"));
+    if (fuso === null) return inter.editReply({ content: `🤔 Não entendi o fuso **${ler("fuso")}**. Use \`0\`, \`-3\`, \`+8\`.`, embeds: [], components: [] });
+    const quando = quandoDoTexto(ler("quando"), Date.now(), fuso);
+    if (quando === null) return inter.editReply({ content: `🤔 Não entendi a data **${ler("quando")}**. Escreva como \`04/10/2026 11:30\`.`, embeds: [], components: [] });
+    repetir = repetirDoTexto(ler("repetir"));
+    if (repetir === null) return inter.editReply({ content: `🤔 Não entendi o repetir **${ler("repetir")}**. Use \`24h\`, \`7d\` ou \`47h30m\`.`, embeds: [], components: [] });
+    lembrete = Number(ler("lembrete")) || 0;
+    if (lembrete && !LEMBRETES.includes(lembrete)) {
+      return inter.editReply({ content: `🤔 O lembrete tem que ser ${LEMBRETES.join(", ")} minutos.`, embeds: [], components: [] });
+    }
+    final = { ...p, titulo: ler("nome"), quando, fuso };
+    await porAjuste(`fuso:${inter.user.id}`, String(fuso)).catch(() => {});
+  } else if (acao === "criar") {
+    await inter.deferUpdate();
+    if (!(p.titulo && p.quando)) return;
+  } else {
+    return;
+  }
+
+  const servidor = await servidorDoGuild(inter.guildId);
+  if (!servidor) return inter.editReply({ content: "Ainda não terminei de me instalar aqui.", embeds: [], components: [] });
+
+  let gif = null;
+  if (final.imagem) gif = await reHospedar(final.imagem, `evento-${inter.guildId}`).catch(() => null);
+  const { ev, existente } = await gravarEvento(inter.guild, servidor, inter.user.id, {
+    titulo: final.titulo, quando: final.quando, repetir, lembrete, gif,
+  });
+  if (!ev?.id) return inter.editReply({ content: NAO_GRAVEI_EVENTO, embeds: [], components: [] });
+  PROPOSTAS_DE_EVENTO.delete(token);
+
+  const s = Math.floor(final.quando / 1000);
+  return inter.editReply({
+    content: `✅ **${final.titulo}** ${existente ? "atualizado" : "criado"} na sala de eventos: <t:${s}:F> — <t:${s}:R>.` +
+      (repetir ? `\n🔁 Repete a cada **${textoDaRepeticao(repetir)}**.` : "") +
+      (lembrete ? `\n⏰ Lembrete no privado ${lembrete} min antes.` : "") +
+      "\n_Repetir, lembrete, GIF e cargo também dá para ajustar com `/evento` usando o mesmo nome._",
+    embeds: [], components: [], allowedMentions: { parse: [] },
   });
 }
 
@@ -13222,6 +13506,11 @@ async function comandoDeInteracao(inter) {
       description: `A partir de agora tudo aparece em **${nomeDoIdioma(novo)}**.` }, { idioma: novo });
   }
 
+  if (nome === "Criar evento") {
+    if (!inter.guildId) return inter.reply({ flags: 64, content: "Isto só funciona dentro de um servidor." });
+    return lerEventoDaMensagem(inter);
+  }
+
   if (nome === "Translate") {
     /* Pela mesma funcao da bandeira, e nao por `.content`.
        Aviso automatico chega com o corpo vazio e a mensagem inteira dentro do
@@ -13291,6 +13580,9 @@ client.on("interactionCreate", async (inter) => {
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("evento:")) {
       return await cliqueEvento(inter);
+    }
+    if ((inter.isButton() || inter.isModalSubmit()) && inter.customId.startsWith("leitor:")) {
+      return await cliqueLeitor(inter);
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("arena:")) {
       return await cliqueArena(inter);
@@ -13846,7 +14138,7 @@ client.on("messageReactionAdd", async (reacao, quem) => {
    A lista diz "nao mexa nisto", e nao "todo mundo usa". Sem ele aqui,
    separarComandos leria /admin como comando do jogo e o empurraria pros
    servidores com alianca -- exatamente o contrario do que ele e'. */
-const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento"]);
+const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento"]);
 
 async function separarComandos() {
   try {
@@ -14791,6 +15083,15 @@ const GLOBAIS_DO_CYRON = [
     ],
   },
   {
+    /* O leitor automatico: segurar a mensagem (texto ou print do jogo) →
+       Apps → Criar evento. Do lider, como o /evento. */
+    type: 3,
+    name: "Criar evento",
+    nameLocalizations: { "en-US": "Create event", "en-GB": "Create event", "es-ES": "Crear evento" },
+    defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
+    dmPermission: false,
+  },
+  {
     /* De todo mundo, como o /help: o placar fixado e' bilingue por ser uma
        mensagem so', e este comando e' a saida para quem nao le nenhuma das
        duas linguas. */
@@ -14868,10 +15169,19 @@ async function garantirComandosGlobais() {
   if (!umaVezPorProcesso("comandos-globais")) return;
   try {
     const globais = await client.application.commands.fetch();
-    const existem = new Set([...globais.values()].map((c) => c.name));
     for (const def of GLOBAIS_DO_CYRON) {
       if (def.name === "admin") continue;   // quem cuida dele e' arrumarOndeMoraOAdmin
-      if (existem.has(def.name)) continue;
+      /* Ja publicado nao queria dizer atualizado. So' se criava o que faltava,
+         e um campo novo no /evento (repetir, GIF, cargo) nunca chegava ao
+         Discord: o codigo esperava a opcao e a lista mostrava a velha. */
+      const publicado = [...globais.values()].find((c) => c.name === def.name);
+      if (publicado) {
+        if (!publicado.equals(def)) {
+          await publicado.edit(def);
+          console.log(`comandos: /${def.name} atualizado`);
+        }
+        continue;
+      }
       await client.application.commands.create(def);
       console.log(`comandos: /${def.name} publicado`);
     }
