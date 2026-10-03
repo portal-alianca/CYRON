@@ -10537,7 +10537,13 @@ function quemTemIdioma(membros, cargos, escolhidos) {
 /* Em ingles, e so' em ingles: o quadro e' UMA mensagem para gente de vinte
    linguas, e duas linguas lado a lado dobravam o tamanho sem servir a mais
    ninguem. Os nomes das linguas vao na propria lingua, e o resto e' numero. */
-function cartaoDosIdiomas(porIdioma, sem, desligado = false) {
+/* Nome para dentro de cartao: os simbolos de formatacao do Discord escapados,
+   senao um apelido com * ou _ desmonta a linha. */
+function nomeSeguro(nome) {
+  return String(nome || "").replace(/[\\*_`~|>]/g, (c) => `\\${c}`).slice(0, 32).trim();
+}
+
+function cartaoDosIdiomas(porIdioma, sem, desligado = false, nomes = new Map()) {
   const total = porIdioma.reduce((a, [, n]) => a + n, 0);
   const maior = Math.max(1, ...porIdioma.map(([, n]) => n));
   /* Tudo na DESCRICAO, e nao em campos.
@@ -10553,8 +10559,12 @@ function cartaoDosIdiomas(porIdioma, sem, desligado = false) {
   const bandeira = (c) => LINGUAS_MENU.find(([cod]) => cod === c)?.[2] || "🏳️";
   const linhas = porIdioma.slice(0, 20).map(([c, n]) => `${bandeira(c)} \`${barra(n)}\` **${n}**`);
   const MOSTRAR = 40;
+  /* O NOME, e nao a mencao. Mencao dentro de cartao so' vira nome para quem
+     ja' tem a pessoa carregada no Discord -- para os outros aparece
+     <@1487...>, que foi o que apareceu no TOP. Quem notifica de verdade e' o
+     lembrete, que e' mensagem normal e sempre mostra o nome. */
   const faltam = sem.length
-    ? sem.slice(0, MOSTRAR).map((id) => `<@${id}>`).join(" ") +
+    ? sem.slice(0, MOSTRAR).map((id) => (nomeSeguro(nomes.get(id)) ? `**${nomeSeguro(nomes.get(id))}**` : `<@${id}>`)).join(" · ") +
       (sem.length > MOSTRAR ? ` _and ${sem.length - MOSTRAR} more_` : "")
     : "✅ Everyone has picked a language!";
   return {
@@ -10671,11 +10681,12 @@ async function quadroDeIdiomas(guild, servidor, { forcar = false, agora = Date.n
   const lista = await membrosDo(guild).catch(() => null);
   if (!lista) return;
   const membros = [...lista.values()].map((m) => ({ id: m.id, bot: m.user?.bot, cargos: m.roles?.cache || new Map() }));
+  const nomes = new Map([...lista.values()].map((m) => [m.id, m.displayName || m.user?.globalName || m.user?.username || ""]));
   const { porIdioma, sem } = quemTemIdioma(membros, cargos, new Set(escolhas.map((e) => String(e.discord_user_id))));
 
   const marcas = await ajustes();
   const desligado = !!marcas[`idioma_lembrete_off:${servidor.id}`];
-  const carga = { embeds: [cartaoDosIdiomas(porIdioma, sem, desligado)], components: botaoDoLembrete(desligado) };
+  const carga = { embeds: [cartaoDosIdiomas(porIdioma, sem, desligado, nomes)], components: botaoDoLembrete(desligado) };
   const chaveQuadro = `idioma_quadro:${servidor.id}`;
   const guardado = lerGuardado(marcas[chaveQuadro]);
   /* Mudou de sala (ou e' do formato antigo, sem sala): o quadro velho sai de
