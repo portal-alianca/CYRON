@@ -4144,7 +4144,7 @@ function conferirCartao(onde, embed, componentes = []) {
 /* ============ o cartão do evento ============ */
 {
   const { cartaoDoEvento, botoesDoEvento } = carregar([
-    "EVENTO_SOBREVIVE", "CRONOMETRO_FINO", "cronometro", "cartaoDoEvento", "botoesDoEvento"]);
+    "EVENTO_SOBREVIVE", "CRONOMETRO_FINO", "cronometro", "PALAVRAS_DO_CARTAO", "COR_PERTO", "COR_COMECOU", "PERTO", "corDoEvento", "nomeLimpo", "cartaoDoEvento", "botoesDoEvento"]);
   globalThis.COR = 0xF5A623;
 
   const AGORA = Date.UTC(2026, 8, 15, 12, 0);
@@ -4159,15 +4159,23 @@ function conferirCartao(onde, embed, componentes = []) {
      ver o horário de Brasília escrito por extenso. */
   const cartao = cartaoDoEvento(base, [], AGORA);
   const s = Math.floor((AGORA + 3 * 3600000) / 1000);
-  verdade("a hora vai como marcação do Discord, no fuso de quem lê",
-    cartao.description.includes(`<t:${s}:F>`));
-  verdade("e o cronômetro exato, sem o arredondamento do Discord", cartao.description.includes("⏳ **3h 00m**"));
-  /* A única hora escrita por mim é a do JOGO, em UTC e dizendo que é UTC. */
-  verdade("a hora do jogo aparece em UTC", cartao.description.includes("🎮 **15/09 15:00 UTC**"));
-  verdade("e nenhuma outra hora é escrita por mim, em fuso nenhum",
-    !/\b\d{1,2}:\d{2}\b/.test(cartao.description.replace(/🎮[^\n]*/, "")));
+  const campo = (c, ini) => c.fields.find((f) => f.name.startsWith(ini));
+  verdade("três caixinhas lado a lado: jogo, seu horário, falta",
+    ["🎮", "🕒", "⏳"].every((e) => campo(cartao, e)?.inline === true));
+  verdade("a hora de quem lê vai como marcação do Discord, no fuso dele",
+    campo(cartao, "🕒").value === `<t:${s}:d> <t:${s}:t>`);
+  ok("o cronômetro exato, sem o arredondamento do Discord", campo(cartao, "⏳").value, "**3h 00m**");
+  /* A única hora escrita por mim é a do JOGO, em UTC. */
+  ok("a hora do jogo, como aparece na tela dele (UTC)", campo(cartao, "🎮").value, "**15/09 15:00**");
+  ok("o nome da caixinha diz que é UTC", campo(cartao, "🎮").name, "🎮 Jogo (UTC)");
   verdade("o título do líder aparece como ele escreveu", cartao.title.includes("Urso · Bear Trap"));
   verdade("os detalhes também", cartao.description.includes("Cavalaria nível 5."));
+  ok("o nome sai limpo, sem espaço sobrando", cartaoDoEvento({ ...base, titulo: "Armadilha  1 " }, [], AGORA).title, "📅 Armadilha 1");
+  ok("longe: amarelo", cartaoDoEvento(base, [], AGORA).color, 0xF5A623);
+  ok("menos de 1 hora: verde", cartaoDoEvento({ ...base, quando: daqui(0.5) }, [], AGORA).color, 0x2ECC71);
+  ok("começou: vermelho", cartaoDoEvento({ ...base, quando: daqui(-0.2) }, [], AGORA).color, 0xE74C3C);
+  ok("começou há mais de 1 hora: cinza", cartaoDoEvento({ ...base, quando: daqui(-2) }, [], AGORA).color, 0x9aa0a6);
+  verdade("sem rodapé repetido", !cartao.footer);
 
   conferirCartao("o evento sem votação", cartao, botoesDoEvento(base));
 
@@ -4178,10 +4186,11 @@ function conferirCartao(onde, embed, componentes = []) {
     { discord_user_id: "3", vai: false },
   ];
   const votado = cartaoDoEvento(comVoto, gente, AGORA);
-  verdade("conta quem se inscreveu", votado.fields.some((f) => f.name === "🔔 2"));
-  verdade("e o \"não vou\" antigo não conta como inscrito", !votado.fields[0].value.includes("<@3>"));
-  verdade("as pessoas aparecem como menção, que não tem língua",
-    votado.fields[0].value.includes("<@1>"));
+  const ins = votado.fields.find((f) => f.name.startsWith("🔔"));
+  ok("conta quem se inscreveu", ins.name, "🔔 Inscritos (2)");
+  verdade("e o \"não vou\" antigo não conta como inscrito", !ins.value.includes("<@3>"));
+  verdade("as pessoas aparecem como menção, que não tem língua", ins.value.includes("<@1>"));
+  ok("o botão mostra quantos", botoesDoEvento(comVoto, AGORA, 2)[0].components[0].label, "Subscribe · 2");
   conferirCartao("o evento com votação", votado, botoesDoEvento(comVoto));
 
   /* Ninguém votou ainda: campo vazio é recusado pelo Discord, então tem que
@@ -4198,7 +4207,7 @@ function conferirCartao(onde, embed, componentes = []) {
   /* ---- evento que já passou ---- */
   const passado = { ...comVoto, quando: daqui(-2) };
   const velho = cartaoDoEvento(passado, gente, AGORA);
-  verdade("evento que passou muda de marca", velho.title.startsWith("✔️"));
+  verdade("evento que passou muda de marca", velho.title.startsWith("🔴"));
   verdade("e perde os botões de presença, que não fazem mais sentido",
     !botoesDoEvento(passado, AGORA)[0].components.some((b) => b.custom_id.startsWith("evento:vou")));
   verdade("mas mantém o 🌐, porque ainda dá para querer ler",
@@ -4215,7 +4224,7 @@ function conferirCartao(onde, embed, componentes = []) {
 {
   const m = carregar(["REPETIR_MIN", "REPETIR_MAX", "LEMBRETES", "MENCOES_MAX", "EVENTO_SOBREVIVE",
     "repetirDoTexto", "textoDaRepeticao", "proximaVez", "mencoesDoAviso",
-    "CRONOMETRO_FINO", "cronometro", "cartaoDoEvento", "botoesDoEvento"]);
+    "CRONOMETRO_FINO", "cronometro", "PALAVRAS_DO_CARTAO", "COR_PERTO", "COR_COMECOU", "PERTO", "corDoEvento", "nomeLimpo", "cartaoDoEvento", "botoesDoEvento"]);
   globalThis.COR = 0xF5A623;
 
   /* ---- repetir ---- */
@@ -4268,9 +4277,9 @@ function conferirCartao(onde, embed, componentes = []) {
   const completo = { ...ev, detalhes: "Cavalaria.", repetir_min: 2850, lembrete_min: 10,
     gif_url: "https://x.supabase.co/storage/v1/object/public/top-midia/urso.gif", votacao: true };
   const c = m.cartaoDoEvento(completo, [{ discord_user_id: "1", vai: true }], AG);
-  verdade("o GIF vai como imagem do cartão", c.image?.url === completo.gif_url);
-  verdade("a repetição aparece, sem palavra nenhuma", c.description.includes("🔁 47h30m"));
-  verdade("o lembrete também", c.description.includes("⏰ −10m"));
+  verdade("o GIF vai pequeno, no canto do cartão", c.thumbnail?.url === completo.gif_url && !c.image);
+  verdade("a repetição aparece dita", c.description.includes("🔁 Repete a cada **47h30m**"));
+  verdade("o lembrete também", c.description.includes("⏰ Aviso no privado: **10 min antes**"));
   verdade("e o cargo", c.description.includes("<@&555555555555555555>"));
   conferirCartao("o evento completo", c, m.botoesDoEvento(completo, AG));
   verdade("o botão é de inscrição", m.botoesDoEvento(completo, AG)[0].components[0].custom_id === "evento:vou:7");
@@ -4461,8 +4470,8 @@ function conferirCartao(onde, embed, componentes = []) {
   const f = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
   verdade("o cronômetro anda de minuto em minuto nas últimas 48 horas",
     /async function rodarAgendaDeEventos[^]*?CRONOMETRO_FINO[^]{0,600}desenharEventos\(guild, servidor\)/.test(f));
-  verdade("e o cartão original só é editado quando mudou",
-    /ultimaCargaDaCopia\.get\(antiga\.id\) === json\) continue/.test(f));
+  verdade("e o cartão só é editado quando mudou",
+    /async function pintarSala[^]*?ultimaCargaDaCopia\.get\(msgs\[i\]\.id\) === json\) continue/.test(f));
 }
 
 /* ============ o cartão em cada sala de idioma ============ */
@@ -4472,8 +4481,8 @@ function conferirCartao(onde, embed, componentes = []) {
   globalThis.presencasDoEvento = async () => [{ discord_user_id: "1", vai: true }];
   globalThis.motorDe = () => ({ tipo: "auto" });
   globalThis.client = { user: { id: "bot" } };
-  const m = carregar(["EVENTO_SOBREVIVE", "TIPO_AGENDA", "ROTULO_INSCREVER", "RODAPE_AGENDA", "textoDaRepeticao",
-    "CRONOMETRO_FINO", "cronometro", "cartaoDoEvento", "botoesDoEvento", "eventoDoCartao", "traducoesDaAgenda", "traduzirPara", "cargaNaLingua",
+  const m = carregar(["EVENTO_SOBREVIVE", "TIPO_AGENDA", "ROTULO_INSCREVER", "textoDaRepeticao",
+    "CRONOMETRO_FINO", "cronometro", "PALAVRAS_DO_CARTAO", "COR_PERTO", "COR_COMECOU", "PERTO", "corDoEvento", "nomeLimpo", "cartaoDoEvento", "botoesDoEvento", "eventoDoCartao", "traducoesDaAgenda", "traduzirPara", "palavrasNaLingua", "cargaNaLingua", "AVISO_FICA", "emOrdem", "ehAvisoDeInicio", "pintarSala", "avisoDeInicio",
     "ultimaCargaDaCopia", "desenharNasCopias"]);
   const AGORA = Date.UTC(2026, 9, 2, 12);
   const ev = { id: 7, titulo: "Armadilha de Caça 1", detalhes: "Cavalaria", quando: new Date(AGORA + 3600000).toISOString() };
@@ -4484,13 +4493,14 @@ function conferirCartao(onde, embed, componentes = []) {
   const c = await m.cargaNaLingua(ev, [], "ko", { tipo: "auto" }, AGORA);
   verdade("o título sai na língua da sala", c.embeds[0].title.includes("[ko] Armadilha de Caça 1"));
   verdade("os detalhes também", c.embeds[0].description.includes("[ko] Cavalaria"));
-  verdade("a hora continua marcação do Discord, sem passar pelo tradutor",
-    c.embeds[0].description.includes(`<t:${(AGORA + 3600000) / 1000}:F>`) && !c.embeds[0].description.includes("[ko] 🕒"));
-  ok("o botão 🔔 vem com o rótulo da língua", c.components[0].components[0].label, "참가 신청");
+  verdade("as palavras das caixinhas também", c.embeds[0].fields[0].name === "🎮 [ko] Jogo (UTC)");
+  ok("a hora continua marcação do Discord, sem passar pelo tradutor",
+    c.embeds[0].fields[1].value, `<t:${(AGORA + 3600000) / 1000}:d> <t:${(AGORA + 3600000) / 1000}:t>`);
+  ok("o botão 🔔 vem com o rótulo da língua e o número", c.components[0].components[0].label, "참가 신청 · 0");
   ok("e é o mesmo botão do original (o clique cai no mesmo evento)", c.components[0].components[0].custom_id, "evento:vou:7");
   ok("na sala da língua não há 🌐", c.components[0].components.length, 1);
-  ok("língua sem rótulo próprio cai no inglês", (await m.cargaNaLingua(ev, [], "xx", {}, AGORA)).components[0].components[0].label, "Subscribe");
-  ok("evento que passou não tem botão", (await m.cargaNaLingua({ ...ev, quando: new Date(AGORA - 1).toISOString() }, [], "en", {}, AGORA)).components.length, 0);
+  ok("evento que passou: o botão fica, desligado (é por ele que a sala acha o cartão)",
+    (await m.cargaNaLingua({ ...ev, quando: new Date(AGORA - 1).toISOString() }, [], "en", {}, AGORA)).components[0].components[0].disabled, true);
 
   /* A passada inteira, com salas de mentira. */
   const sala = (idioma, msgs = []) => {
@@ -4505,27 +4515,49 @@ function conferirCartao(onde, embed, componentes = []) {
     }
     return { canal, enviados, apagados, editados };
   };
-  const velho = { id: "v1", author: { id: "bot" }, components: [{ components: [{ customId: "evento:vou:99" }] }] };
-  const atual = { id: "a1", author: { id: "bot" }, components: [{ components: [{ customId: "evento:vou:7" }] }] };
+  const cartaoDe = (id, evId, extra = {}) => ({ id, author: { id: "bot" }, createdTimestamp: AGORA,
+    components: [{ components: [{ customId: `evento:vou:${evId}` }] }], ...extra });
+  const velho = cartaoDe("100", 99);
+  const atual = cartaoDe("200", 7);
   const pt = sala("pt", [velho, atual]);
   const es = sala("es");
   globalThis.salasDaAgenda = async () => [{ canal: pt.canal, idioma: "pt" }, { canal: es.canal, idioma: "es" }];
   globalThis.canalDaAgenda = () => ({ id: "agenda" });
   await m.desenharNasCopias({}, { id: "s" }, [ev], null, AGORA);
-  ok("o cartão de evento que acabou some da sala", pt.apagados, ["v1"]);
+  ok("o cartão de evento que acabou some da sala", pt.apagados, ["100"]);
   ok("o que já existe é editado, não duplicado", [pt.enviados.length, pt.editados.length], [0, 1]);
   ok("a sala que ainda não tem cartão ganha um", es.enviados.length, 1);
   const edicoes = pt.editados.length;
   await m.desenharNasCopias({}, { id: "s" }, [ev], null, AGORA);
   ok("passada sem mudança não edita de novo", pt.editados.length, edicoes);
 
-  /* Na hora: apaga e reenvia, marcando. */
-  const pt2 = sala("pt", [{ ...atual, id: "a2" }]);
+  /* A ordem: o mais perto embaixo. */
+  const longe = { ...ev, id: 8, quando: new Date(AGORA + 30 * 3600000).toISOString() };
+  const errada = sala("pt", [cartaoDe("300", 7), cartaoDe("400", 8)]);   // o perto em cima: errado
+  globalThis.salasDaAgenda = async () => [{ canal: errada.canal, idioma: "pt" }];
+  await m.desenharNasCopias({}, { id: "s" }, [ev, longe], null, AGORA);
+  ok("ordem errada: apaga e posta de novo", errada.apagados.sort(), ["300", "400"]);
+  verdade("do mais longe ao mais perto (o perto por último, embaixo)",
+    errada.enviados.length === 2 && errada.enviados[1].components[0].components[0].custom_id === "evento:vou:7");
+  const certa = sala("pt", [cartaoDe("500", 8), cartaoDe("600", 7)]);
+  globalThis.salasDaAgenda = async () => [{ canal: certa.canal, idioma: "pt" }];
+  await m.desenharNasCopias({}, { id: "s" }, [ev, longe], null, AGORA);
+  ok("ordem certa: ninguém é apagado", certa.apagados, []);
+
+  /* Na hora: o aviso é uma mensagem própria, embaixo, marcando. */
+  const pt2 = sala("pt", [cartaoDe("700", 7)]);
   globalThis.salasDaAgenda = async () => [{ canal: pt2.canal, idioma: "pt" }];
-  await m.desenharNasCopias({}, { id: "s" }, [ev], { id: 7, content: "🔔 <@1>", allowedMentions: { parse: [], users: ["1"], roles: [] } }, AGORA);
-  ok("na hora o cartão da sala é apagado", pt2.apagados, ["a2"]);
-  verdade("e reenviado marcando os inscritos", pt2.enviados[0]?.content === "🔔 <@1>" &&
-    pt2.enviados[0]?.allowedMentions.users[0] === "1");
+  await m.desenharNasCopias({}, { id: "s" }, [ev],
+    { ev, aviso: { content: "🔔 **Armadilha** <@1>", allowedMentions: { parse: [], users: ["1"], roles: [] } } }, AGORA);
+  ok("o cartão fica onde está", pt2.apagados, []);
+  verdade("e o aviso sai embaixo, marcando os inscritos", pt2.enviados.at(-1)?.content === "🔔 **Armadilha** <@1>" &&
+    pt2.enviados.at(-1)?.allowedMentions.users[0] === "1");
+  /* Aviso velho some sozinho. */
+  const comAviso = sala("pt", [cartaoDe("800", 7), { id: "900", author: { id: "bot" }, components: [],
+    content: "🔔 **Armadilha**", createdTimestamp: AGORA - 3 * 3600000 }]);
+  globalThis.salasDaAgenda = async () => [{ canal: comAviso.canal, idioma: "pt" }];
+  await m.desenharNasCopias({}, { id: "s" }, [ev], null, AGORA);
+  ok("o aviso de início some duas horas depois", comAviso.apagados, ["900"]);
 }
 
 {
@@ -4551,8 +4583,8 @@ function conferirCartao(onde, embed, componentes = []) {
     /setInterval\(\(\) => \{[^]{0,400}rodarAgendaDeEventos\(\)[^]{0,120}\}, 60 \* 1000\)/.test(f));
 
   const aviso = f.slice(f.indexOf("async function avisarNaHora"), f.indexOf("async function rodarAgendaDeEventos"));
-  verdade("na hora o cartão é REENVIADO (editar não faz o celular apitar)",
-    /velha\.delete\(\)[^]{0,200}canal\.send\(/.test(aviso));
+  verdade("na hora sai um aviso NOVO marcando (editar não faz o celular apitar)",
+    /if \(marcar\) \{\s*await canal\.send\(avisoDeInicio\(ev, aviso\)\)/.test(aviso));
   verdade("repetir renova o prazo da privacidade do evento e das inscrições",
     /criado_em: hoje[^]{0,200}cyron_evento_presenca\?evento_id=eq\.\$\{ev\.id\}`, \{ criado_em: hoje \}/.test(aviso));
 
@@ -4581,9 +4613,8 @@ function conferirCartao(onde, embed, componentes = []) {
     fonteEv.indexOf("async function cliqueEvento"),
     fonteEv.indexOf("const CANAL_ARENA"));
   verdade("achei o clique do evento para conferir", clique.length > 100);
-  verdade("a descrição é tirada antes de traduzir",
-    /description: undefined/.test(clique));
-  verdade("e devolvida crua depois", /description: cartao\.description/.test(clique));
+  verdade("o 🌐 usa o mesmo cartão das salas de idioma (marcação fora do tradutor)",
+    /acao === "idioma"[^]{0,600}cargaNaLingua\(/.test(clique));
 
   /* Ligar votação e apagar são do líder, e a checagem é no clique. */
   verdade("mexer no evento exige o cargo",
