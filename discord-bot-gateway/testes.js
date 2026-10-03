@@ -4580,6 +4580,35 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("o analítico também", /embeds\[0\]\.fields\.push\(\.\.\.await camposDasCotasDoAnalitico\(agora\)\)/.test(idx));
   }
 
+  /* ---- o dono vê o painel de qualquer servidor ---- */
+  {
+    globalThis.client = { guilds: { cache: new Map([["g-top", { id: "g-top" }]]) } };
+    let pedido = null;
+    globalThis.montarPainel = async (g, srv, idioma, aba) => { pedido = { g: g.id, idioma, aba };
+      return { embed: { title: `⚙️ CYRON · ${aba}`, fields: [{ name: "x", value: "y" }] }, extras: [{ title: "g", image: { url: "u" } }], componentes: [] }; };
+    const V = carregar(["ABAS_DO_PAINEL", "botoesDaFicha", "painelDeOutroServidor"]);
+    const top = { id: "s-top", guild_id: "g-top", nome: "[TOP]Best Alliance Kingshot", nivel: "alianca" };
+    verdade("a ficha tem o botão de ver o painel deles",
+      V.botoesDaFicha(top).flatMap((l) => l.components).some((b) => b.custom_id === "cli:painel:s-top"));
+    conferirCartao("os botões da ficha", { title: "ficha" }, V.botoesDaFicha(top));
+    const visto = await V.painelDeOutroServidor(top);
+    ok("abre na aba Uso, em português", pedido, { g: "g-top", idioma: "", aba: "uso" });
+    ok("com os gráficos extras", visto.embeds.length, 2);
+    ok("e um menu de abas próprio, sem os botões de agir do painel deles",
+      visto.components.flatMap((l) => l.components).map((c) => c.custom_id), ["cli:aba:s-top"]);
+    await V.painelDeOutroServidor(top, "plano");
+    ok("trocar de aba", pedido.aba, "plano");
+    await V.painelDeOutroServidor(top, "inventada");
+    ok("aba inventada volta para Uso", pedido.aba, "uso");
+    verdade("servidor de onde saí: avisa, sem quebrar",
+      /Não estou nesse servidor/.test((await V.painelDeOutroServidor({ ...top, guild_id: "sumiu" })).content));
+    const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+    const ficha = idx.slice(idx.indexOf("async function cliqueDaFicha"));
+    verdade("trocar de aba edita a própria visão (antes do deferReply)",
+      ficha.indexOf('acao === "aba"') > 0 && ficha.indexOf('acao === "aba"') < ficha.indexOf("await inter.deferReply"));
+    verdade("e só o dono chega aqui", /async function cliqueDaFicha[\s\S]{0,120}ehDono\(inter\.user\.id\)/.test(idx));
+  }
+
   /* ---- não buscar a mensagem fixada quando nada mudou ---- */
   {
     const M = carregar(["desenhadoPorUltimo", "CONFERIR_DE_VERDADE", "jaDesenhado", "marcarDesenhado"]);
