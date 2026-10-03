@@ -4253,6 +4253,95 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("a memória tem teto", C.traducoesNaMemoria.size <= C.MAX_NA_MEMORIA);
   }
 
+  /* ---- a Azure: uma chamada para todos os idiomas da mesma frase ---- */
+  {
+    globalThis.AZURE_IDIOMA = { "zh-CN": "zh-Hans" };
+    const Z = carregar(["JANELA_DA_AZURE", "filaDaAzure", "azureJunto"]);
+    const pedidos = [];
+    const mandar = async (texto, alvos) => { pedidos.push(alvos); return new Map(alvos.map((a) => [a, `${a}:${texto}`])); };
+    const cfg = { chave: "k", regiao: "brazilsouth" };
+    const saiu = await Promise.all(["en", "es", "de", "en"].map((a) => Z.azureJunto("oi", a, cfg, mandar)));
+    ok("cada idioma recebe a sua tradução", saiu, ["en:oi", "es:oi", "de:oi", "en:oi"]);
+    ok("e foi UM pedido só, sem idioma repetido", pedidos, [["en", "es", "de"]]);
+    await Promise.all([Z.azureJunto("a", "en", cfg, mandar), Z.azureJunto("b", "en", cfg, mandar)]);
+    ok("frases diferentes não se misturam", pedidos.length, 3);
+    const falha = async () => { throw new Error("azure 429"); };
+    const erros = await Promise.all(["en", "es"].map((a) => Z.azureJunto("x", a, cfg, falha).then(() => "ok", (e) => e.message)));
+    ok("se o pedido falha, todos ficam sabendo (e cada um vai para a reserva)", erros, ["azure 429", "azure 429"]);
+    ok("a fila esvazia", Z.filaDaAzure.size, 0);
+    const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+    verdade("o motor da Azure passa pela fila", /return await azureJunto\(texto, alvo, cfg\);/.test(idx));
+  }
+
+  /* ---- avisos no privado do dono do servidor ---- */
+  {
+    const V = carregar(["AVISO_DE_VENCIMENTO", "vencimentoParaAvisar"]);
+    const agora = Date.parse("2026-10-03T12:00:00Z");
+    const em = (d) => new Date(agora + d * 864e5).toISOString();
+    ok("plano que vence em 2 dias: avisa", V.vencimentoParaAvisar({ pago_ate: em(2) }, agora)?.tipo, "plano");
+    ok("teste que acaba amanhã: avisa", V.vencimentoParaAvisar({ teste_ate: em(1) }, agora)?.tipo, "teste");
+    ok("vence em 10 dias: ainda não", V.vencimentoParaAvisar({ pago_ate: em(10) }, agora), null);
+    ok("já venceu: não", V.vencimentoParaAvisar({ pago_ate: em(-1) }, agora), null);
+    ok("assinatura da Stripe renova sozinha: não", V.vencimentoParaAvisar({ pago_ate: em(2), stripe_assinatura: "sub" }, agora), null);
+    ok("quem saiu: não", V.vencimentoParaAvisar({ pago_ate: em(2), saiu_em: em(-1) }, agora), null);
+    ok("a marca é a própria data: renovou, avisa de novo no próximo vencimento",
+      V.vencimentoParaAvisar({ pago_ate: em(2) }, agora)?.marca, em(2));
+
+    globalThis.COR = 1;
+    globalThis.LINK_PRO_VIVO = "https://pague.exemplo/pro";
+    globalThis.LINK_PAGAMENTO_VIVO = "https://pague.exemplo/alianca";
+    globalThis.botaoDeSuporte = () => ({ type: 2, style: 5, label: "Suporte", url: "https://discord.gg/x" });
+    globalThis.falaFixa = () => async (molde, ...v) => molde.replace(/\{(\d+)\}/g, (_, i) => String(v[i]));
+    globalThis.portaDoIdioma = async () => "c-porta";
+    const P = carregar(["cartaoDeVencimento", "cartaoDoPrimeiroPasso"]);
+    const guild = { id: "g", name: "Aliança TOP", ownerId: "dono" };
+    const venc = { tipo: "plano", ate: agora + 2 * 864e5, marca: em(2) };
+    const cv = await P.cartaoDeVencimento(guild, { id: "s1" }, venc, "pt");
+    conferirCartao("o aviso de vencimento", cv.embeds[0], cv.components);
+    verdade("o link de pagar leva o id do servidor", cv.components[0].components.every((b) => !b.url.includes("pague") || b.url.endsWith("client_reference_id=s1")));
+    verdade("e diz que nada é apagado", /Nada é apagado/.test(cv.embeds[0].description));
+    const pp = await P.cartaoDoPrimeiroPasso(guild, { id: "s1" }, "pt");
+    conferirCartao("o guia do primeiro passo", pp.embeds[0], pp.components);
+    verdade("o guia aponta a sala de idioma do servidor", /<#c-porta>/.test(pp.embeds[0].description));
+
+    /* O fluxo inteiro: uma vez só, e privado fechado não vira insistência. */
+    const marcas = {};
+    const enviados = [];
+    const avisos = [];
+    let fechado = false;
+    globalThis.ajustes = async () => ({ ...marcas });
+    globalThis.porAjuste = async (k, v) => { marcas[k] = v; };
+    globalThis.avisarNoPainel = async (_, t) => { avisos.push(t); };
+    globalThis.CANAL_PAGAMENTOS = "pag";
+    globalThis.ehOPainel = async () => false;
+    globalThis.idiomaEscolhido = async () => "";
+    globalThis.idiomaDoAplicativo = () => "pt";
+    const servidores = [
+      { id: "vence", guild_id: "g1", criado_em: em(-60), pago_ate: em(2) },
+      { id: "parado", guild_id: "g2", criado_em: em(-3) },
+      { id: "ativo", guild_id: "g3", criado_em: em(-3) },
+    ];
+    globalThis.sb = async (rota) => rota.startsWith("cyron_servidor") ? servidores
+      : rota.includes("servidor_id=eq.ativo") ? [{ dia: "x" }] : [];
+    globalThis.client = {
+      guilds: { cache: new Map(["g1", "g2", "g3"].map((g) => [g, { id: g, name: g, ownerId: `dono-${g}` }])) },
+      users: { fetch: async (id) => ({ id, send: async (x) => { if (fechado) throw new Error("dm fechada"); enviados.push([id, x]); return {}; } }) },
+    };
+    const F = carregar(["AVISO_DE_VENCIMENTO", "linguaDoDono", "vencimentoParaAvisar", "cartaoDeVencimento",
+      "cartaoDoPrimeiroPasso", "falarComOsDonos"]);
+    await F.falarComOsDonos(agora);
+    ok("avisou quem vence e guiou quem nunca traduziu", enviados.map(([id]) => id).sort(), ["dono-g1", "dono-g2"]);
+    verdade("quem já traduz não recebe guia", !enviados.some(([id]) => id === "dono-g3"));
+    verdade("e o dono do bot fica sabendo do aviso", /avisei o dono/.test(avisos[0] || ""));
+    await F.falarComOsDonos(agora + 3600e3);
+    ok("na hora seguinte, nada de novo", enviados.length, 2);
+    servidores[0].pago_ate = em(1.5);
+    fechado = true;
+    await F.falarComOsDonos(agora + 7200e3);
+    verdade("vencimento novo com privado fechado: anota e conta para o dono do bot",
+      marcas["vence:vence"] === em(1.5) && /privado fechado/.test(avisos.at(-1)));
+  }
+
   /* ---- não buscar a mensagem fixada quando nada mudou ---- */
   {
     const M = carregar(["desenhadoPorUltimo", "CONFERIR_DE_VERDADE", "jaDesenhado", "marcarDesenhado"]);

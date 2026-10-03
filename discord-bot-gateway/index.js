@@ -840,26 +840,72 @@ function decifrar(guardado) {
 const AZURE_IDIOMA = { "zh-CN": "zh-Hans", tl: "fil" };
 const DEEPL_IDIOMA = { pt: "PT-BR", en: "EN-US", "zh-CN": "ZH" };
 
+/* Uma chamada a' Azure para todos os idiomas da mesma frase.
+
+   A fala do chat espelhado vai para sete salas, e as sete traducoes saem ao
+   mesmo tempo (Promise.all). A Azure aceita varios `to` no mesmo pedido, entao
+   em vez de sete pedidos com o mesmo texto vai um so': os que chegam juntos
+   numa janela curta sao agrupados. Menos pedidos, menos chance de bater no
+   limite de pedidos por segundo, e a resposta chega de uma vez.
+
+   NAO baixa a conta de caracteres -- a Azure cobra o texto uma vez por idioma
+   de destino de qualquer jeito. O ganho e' de pedidos e de tempo.
+
+   Se o pedido falha, todos os que esperavam recebem o mesmo erro, e cada um
+   segue para a reserva dele como se tivesse pedido sozinho. */
+const JANELA_DA_AZURE = 25; // ms
+const filaDaAzure = new Map(); // chave|regiao|texto -> { alvos: Map(alvo -> [promessas]) }
+
+function azureJunto(texto, alvo, cfg, mandar = azureDeUmaVez) {
+  const chave = `${cfg.chave}|${cfg.regiao || ""}|${texto}`;
+  return new Promise((resolve, reject) => {
+    let lote = filaDaAzure.get(chave);
+    if (!lote) {
+      lote = { alvos: new Map() };
+      filaDaAzure.set(chave, lote);
+      setTimeout(async () => {
+        filaDaAzure.delete(chave);
+        try {
+          const saiu = await mandar(texto, [...lote.alvos.keys()], cfg);
+          for (const [a, esperando] of lote.alvos) for (const p of esperando) p.resolve(saiu.get(a) || "");
+        } catch (e) {
+          for (const esperando of lote.alvos.values()) for (const p of esperando) p.reject(e);
+        }
+      }, JANELA_DA_AZURE);
+    }
+    const esperando = lote.alvos.get(alvo) || [];
+    esperando.push({ resolve, reject });
+    lote.alvos.set(alvo, esperando);
+  });
+}
+
+async function azureDeUmaVez(texto, alvos, cfg) {
+  const para = alvos.map((a) => `&to=${encodeURIComponent(AZURE_IDIOMA[a] || a)}`).join("");
+  const r = await fetch(
+    `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0${para}`,
+    {
+      method: "POST",
+      headers: {
+        "Ocp-Apim-Subscription-Key": cfg.chave,
+        ...(cfg.regiao ? { "Ocp-Apim-Subscription-Region": cfg.regiao } : {}),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify([{ Text: texto }]),
+      signal: AbortSignal.timeout(8000),
+    });
+  if (!r.ok) throw new Error(`azure ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const j = await r.json();
+  /* A Azure devolve na mesma ordem dos `to`. */
+  const traducoes = j?.[0]?.translations || [];
+  return new Map(alvos.map((a, i) => [a, traducoes[i]?.text || ""]));
+}
+
 const MOTORES = {
   azure: {
     nome: "Azure Translator",
     /* 2 milhoes de caracteres/mes no plano F0, por conta. */
     async traduzir(texto, alvo, cfg) {
-      const r = await fetch(
-        `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=${AZURE_IDIOMA[alvo] || alvo}`,
-        {
-          method: "POST",
-          headers: {
-            "Ocp-Apim-Subscription-Key": cfg.chave,
-            ...(cfg.regiao ? { "Ocp-Apim-Subscription-Region": cfg.regiao } : {}),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify([{ Text: texto }]),
-          signal: AbortSignal.timeout(8000),
-        });
-      if (!r.ok) throw new Error(`azure ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      const j = await r.json();
-      return j?.[0]?.translations?.[0]?.text || "";
+      return await azureJunto(texto, alvo, cfg);
     },
   },
   deepl: {
@@ -7001,6 +7047,21 @@ async function reciboDaSemana(guild, servidor) {
   }
 
   const campos = [];
+  /* Os sete dias da semana em barrinhas, e os eventos marcados: numero e
+     desenho, sem lingua -- o mesmo motivo do resto do cartao. */
+  const porDia = await sb(`cyron_uso_diario?servidor_id=eq.${servidor.id}&dia=gte.${inicioISO}&dia=lt.${fimISO}` +
+    "&select=dia,traducoes").catch(() => null) || [];
+  const sete = Array.from({ length: 7 }, (_, i) => diaISO(fim - (7 - i) * 864e5));
+  const serie = sete.map((d) => porDia.filter((l) => l.dia === d).reduce((a, l) => a + Number(l.traducoes || 0), 0));
+  if (serie.some((v) => v > 0)) {
+    campos.push({ name: "📈 Seg → Dom · Mon → Sun", value: "```\n" + grafiquinho(serie) + "\n```", inline: true });
+  }
+  const eventos = (await sb(`cyron_evento?servidor_id=eq.${servidor.id}` +
+    `&quando=gte.${new Date(fim - SEMANA).toISOString()}&quando=lt.${new Date(fim).toISOString()}&select=id`)
+    .catch(() => null) || []).filter((e) => e?.id);
+  if (eventos.length) {
+    campos.push({ name: "📆 Eventos · Events", value: `**${eventos.length}**`, inline: true });
+  }
   if (leitores.length) {
     campos.push({
       name: `🗣️ Quem lê em cada língua · Who reads what — ${gente}`,
@@ -13517,6 +13578,121 @@ async function conviteDoServidor(g, agora = Date.now()) {
   return url;
 }
 
+/* ---------------- falar com o dono de cada servidor ----------------
+
+   Dois avisos no privado de quem e' dono do servidor, cada um UMA vez (a
+   marca fica no cyron_ajuste, como a do recibo):
+
+   - o plano ou o teste vai vencer em 3 dias. Ate' aqui so' eu ficava sabendo,
+     pelo diario -- e quem decide renovar e' ele.
+   - instalou ha' mais de um dia e nunca traduziu nada. Quase sempre e' porque
+     nao sabe o proximo passo, e quem desiste nessa hora nao volta.
+
+   Na lingua dele: a que ele escolheu no bot, ou a do servidor. */
+const AVISO_DE_VENCIMENTO = 3 * 864e5;
+
+async function linguaDoDono(guild) {
+  return (await idiomaEscolhido(guild.ownerId).catch(() => "")) ||
+    idiomaDoAplicativo(guild.preferredLocale) || "en";
+}
+
+/* O que vence, e quando -- ou nada. Quem assina pela Stripe renova sozinho, e
+   liberado na mao nao tem data: nenhum dos dois precisa de aviso. */
+function vencimentoParaAvisar(servidor, agora = Date.now()) {
+  if (!servidor || servidor.saiu_em || servidor.stripe_assinatura || servidor.plano === "pago") return null;
+  for (const [campo, tipo] of [["pago_ate", "plano"], ["teste_ate", "teste"]]) {
+    const t = servidor[campo] ? Date.parse(servidor[campo]) : 0;
+    if (t > agora && t - agora <= AVISO_DE_VENCIMENTO) return { tipo, ate: t, marca: servidor[campo] };
+  }
+  return null;
+}
+
+async function cartaoDeVencimento(guild, servidor, venc, idioma) {
+  const T = falaFixa(idioma);
+  const t = Math.floor(venc.ate / 1000);
+  const linkCom = (url) => `${url}${url.includes("?") ? "&" : "?"}client_reference_id=${encodeURIComponent(servidor.id)}`;
+  const botoes = [[LINK_PRO_VIVO, "Pro"], [LINK_PAGAMENTO_VIVO, "Aliança"]]
+    .filter(([url]) => url)
+    .map(([url, nome]) => ({ type: 2, style: 5, emoji: { name: "💳" }, label: nome, url: linkCom(url) }));
+  return {
+    embeds: [{
+      color: 0xC9A227,
+      title: venc.tipo === "teste"
+        ? await T("⏰ Seu teste do CYRON termina em breve")
+        : await T("⏰ Seu plano do CYRON vence em breve"),
+      description: [
+        await T("Servidor: **{0}**", guild.name),
+        await T("Vence {0} ({1}).", `<t:${t}:F>`, `<t:${t}:R>`),
+        "",
+        await T("Depois disso o servidor volta ao plano grátis. **Nada é apagado**: o que passar do limite apenas para de crescer."),
+        "",
+        await T("Para continuar, use os botões abaixo, ou abra **/cyron** no servidor → **💳 Plano** (Pix e código também estão lá)."),
+      ].join("\n"),
+    }],
+    components: [{ type: 1, components: [...botoes, botaoDeSuporte()].slice(0, 5) }],
+  };
+}
+
+async function cartaoDoPrimeiroPasso(guild, servidor, idioma) {
+  const T = falaFixa(idioma);
+  const porta = await portaDoIdioma(guild).catch(() => null);
+  return {
+    embeds: [{
+      color: COR,
+      title: await T("👋 Vamos colocar o CYRON para funcionar?"),
+      description: [
+        await T("Vi que o CYRON está em **{0}**, mas ainda não traduziu nenhuma mensagem. São 3 passos:", guild.name),
+        "",
+        await T("**1.** No servidor, escreva **/cyron** e abra a aba **🌐 Tradução**. Marque os canais onde vocês conversam."),
+        porta
+          ? await T("**2.** Cada membro escolhe o idioma dele em {0}, uma vez só.", `<#${porta}>`)
+          : await T("**2.** Cada membro escolhe o idioma dele no canal 🌐, uma vez só."),
+        await T("**3.** Pronto: o que for escrito nos canais marcados aparece traduzido para cada um."),
+        "",
+        await T("Dica: mesmo sem configurar nada, reagir com a bandeira de um país (🇺🇸 🇧🇷 🇪🇸…) numa mensagem manda a tradução no privado."),
+      ].join("\n"),
+    }],
+    components: [{ type: 1, components: [botaoDeSuporte()] }],
+  };
+}
+
+async function falarComOsDonos(agora = Date.now()) {
+  const servidores = await sb("cyron_servidor?saiu_em=is.null&select=*").catch(() => null) || [];
+  const marcas = await ajustes();
+  for (const s of servidores) {
+    try {
+      const guild = client.guilds.cache.get(String(s.guild_id));
+      if (!guild?.ownerId || await ehOPainel(guild.id)) continue;
+
+      const venc = vencimentoParaAvisar(s, agora);
+      if (venc && marcas[`vence:${s.id}`] !== venc.marca) {
+        const dono = await client.users.fetch(guild.ownerId).catch(() => null);
+        const foi = dono && await dono.send(await cartaoDeVencimento(guild, s, venc, await linguaDoDono(guild)))
+          .catch(() => null);
+        /* Privado fechado tambem vira marca: insistir de hora em hora num
+           privado que nao aceita mensagem nao muda nada. Eu fico sabendo. */
+        await porAjuste(`vence:${s.id}`, venc.marca);
+        await avisarNoPainel(CANAL_PAGAMENTOS, `⏰ **${guild.name}**: ${venc.tipo} vence <t:${Math.floor(venc.ate / 1000)}:R> — ` +
+          (foi ? "avisei o dono no privado." : "não consegui falar com o dono (privado fechado)."));
+      }
+
+      const idade = agora - Date.parse(s.criado_em);
+      if (!marcas[`guia:${s.id}`] && idade > 864e5 && idade < 14 * 864e5) {
+        const usou = await sb(`cyron_uso_diario?servidor_id=eq.${s.id}&traducoes=gt.0&select=dia&limit=1`)
+          .catch(() => null);
+        if (usou === null) continue;   // banco fora: tento na proxima hora
+        if (!usou.length) {
+          const dono = await client.users.fetch(guild.ownerId).catch(() => null);
+          if (dono) await dono.send(await cartaoDoPrimeiroPasso(guild, s, await linguaDoDono(guild))).catch(() => null);
+        }
+        await porAjuste(`guia:${s.id}`, usou.length ? "ja-usava" : new Date(agora).toISOString());
+      }
+    } catch (e) {
+      console.error(`donos: falhei no servidor ${s.id}:`, e?.message || e);
+    }
+  }
+}
+
 /* Sair tambem e' informacao.
 
    Sem isto, cliente que desiste some sem deixar rastro: a linha fica no banco
@@ -16909,6 +17085,13 @@ client.once("clientReady", () => {
     setInterval(() => mandarRecibos().catch((e) => console.error("recibo: falhei:", e?.message || e)),
       60 * 60 * 1000);
   }, 60 * 1000);
+  /* Os avisos aos donos, no mesmo ritmo e pelo mesmo motivo: a marca no banco
+     garante uma vez so', e de hora em hora nenhum reinicio perde o dia. */
+  setTimeout(() => {
+    falarComOsDonos().catch((e) => console.error("donos: falhei:", e?.message || e));
+    setInterval(() => falarComOsDonos().catch((e) => console.error("donos: falhei:", e?.message || e)),
+      60 * 60 * 1000);
+  }, 2 * 60 * 1000);
   setInterval(() => {
     sincronizarRecentes().catch((e) => console.error("espelho: passada curta falhou:", e?.message || e));
     descarregarUso().catch((e) => console.error("uso: descarga falhou:", e?.message || e));
