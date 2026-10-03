@@ -4159,7 +4159,8 @@ function conferirCartao(onde, embed, componentes = []) {
     const { cartaoDoDia } = carregar([
       "somaDoDia", "variacao", "ontemISO", "comoEstaACota",
       "DIAS_DE_RITMO", "ritmoDiario", "duracaoDoQueSobra", "emK",
-      "linhaDaCota", "ritmoDaChaveDoDono", "cartaoDoDia"]);
+      "linhaDaCota", "ritmoDaChaveDoDono", "diaISO", "BARRINHAS", "grafiquinho", "venceEm",
+      "destaquesDoDia", "cartaoDoDia"]);
     globalThis.cotaDoDono = new Map();
     globalThis.quandoFoi = () => "há 3 horas";
     globalThis.contar = async () => 1777;
@@ -4192,6 +4193,97 @@ function conferirCartao(onde, embed, componentes = []) {
     globalThis.contar = async () => 0;
     globalThis.sb = async () => [];
     conferirCartao("o cartão de um dia parado", await cartaoDoDia());
+
+    /* Os destaques: quem, e o que pede olho. */
+    const { destaquesDoDia } = carregar(["diaISO", "BARRINHAS", "grafiquinho", "venceEm", "destaquesDoDia"]);
+    const dia = "2026-10-02";
+    const agora = Date.parse("2026-10-03T08:00:00Z");
+    const d = (n) => new Date(Date.parse(`${dia}T00:00:00Z`) - n * 864e5).toISOString().slice(0, 10);
+    const uso = [];
+    for (let i = 1; i <= 7; i++) uso.push({ servidor_id: "parou", dia: d(i), traducoes: 50, motor: "dono-azure" });
+    uso.push({ servidor_id: "forte", dia, traducoes: 300, motor: "dono-azure" });
+    uso.push({ servidor_id: "fraco", dia, traducoes: 12, motor: "auto" });
+    uso.push({ servidor_id: "fraco", dia, traducoes: 99, motor: "sem:tamanho" });
+    const servidores = [
+      { id: "parou", nome: "Aliança Parada", criado_em: "2026-08-01T00:00:00Z" },
+      { id: "forte", nome: "TOP", criado_em: "2026-08-01T00:00:00Z", pago_ate: "2026-10-05T00:00:00Z" },
+      { id: "fraco", nome: "Pequeno", criado_em: "2026-08-01T00:00:00Z" },
+      { id: "novo", nome: "Recém-chegado", criado_em: `${dia}T15:00:00Z` },
+      { id: "mudo", nome: "Instalou e sumiu", criado_em: "2026-09-28T00:00:00Z" },
+      { id: "foi", nome: "Desistiu", criado_em: "2026-08-01T00:00:00Z", saiu_em: `${dia}T20:00:00Z` },
+    ];
+    globalThis.sb = async (rota) => rota.startsWith("cyron_uso_diario") ? uso
+      : rota.startsWith("cyron_servidor") ? servidores
+      : rota.startsWith("cyron_evento") ? [{ servidor_id: "forte" }, { servidor_id: "forte" }] : [];
+    const campos = await destaquesDoDia(dia, agora);
+    conferirCartao("os destaques do dia", { title: "x", fields: campos });
+    const campo = (re) => String(campos.find((c) => re.test(c.name))?.value || "");
+    verdade("o pódio começa por quem mais traduziu", /^🥇 TOP — 300/.test(campo(/mais traduziu/)));
+    verdade("o que não foi traduzido não entra no pódio", /Pequeno — 12/.test(campo(/mais traduziu/)));
+    verdade("quem traduzia e parou aparece", /Aliança Parada\*\* parou/.test(campo(/Para olhar/)));
+    verdade("quem instalou e nunca traduziu aparece", /Instalou e sumiu/.test(campo(/Para olhar/)));
+    verdade("quem vence em 3 dias aparece", /TOP\*\* vence/.test(campo(/Para olhar/)));
+    verdade("quem saiu não é cobrado de nada", !/Desistiu/.test(campo(/Para olhar/)));
+    verdade("entradas e saídas do dia", /➕ Recém-chegado/.test(campo(/Entradas/)) && /➖ Desistiu/.test(campo(/Entradas/)));
+    verdade("o gráfico tem um traço por dia", /[▁▂▃▄▅▆▇█]{14}/.test(campo(/14 dias/)));
+    ok("eventos das próximas 24h", campo(/Eventos/), "2 em 1 servidor(es)");
+    globalThis.sb = async () => { throw new Error("banco fora"); };
+    const semBanco = await destaquesDoDia(dia, agora);
+    verdade("banco fora: só o gráfico vazio, sem estourar", semBanco.length === 1);
+  }
+
+  /* ---- o cache de tradução na memória ---- */
+  {
+    const { createHash } = await import("node:crypto");
+    globalThis.createHash = createHash;
+    globalThis.MAX_CACHE = 400;
+    globalThis.MOTOR_AUTO = { tipo: "auto" };
+    let noBanco = 0, traduziu = 0;
+    globalThis.doCache = async () => { noBanco++; return null; };
+    globalThis.traduzir = async (t) => { traduziu++; return `[${t}]`; };
+    globalThis.sbPost = async () => {};
+    globalThis.anotarUso = () => {};
+    const C = carregar(["MAX_NA_MEMORIA", "traducoesNaMemoria", "lembrarTraducao", "traduzirComCache"]);
+    ok("a primeira vez traduz", await C.traduzirComCache("kkk", "en"), "[kkk]");
+    ok("a segunda sai da memória", await C.traduzirComCache("kkk", "en"), "[kkk]");
+    ok("sem ir ao banco de novo nem ao tradutor", [noBanco, traduziu], [1, 1]);
+    await C.traduzirComCache("kkk", "es");
+    ok("outro idioma é outra frase", traduziu, 2);
+    for (let i = 0; i < C.MAX_NA_MEMORIA + 50; i++) C.lembrarTraducao(`k${i}`, "x");
+    verdade("a memória tem teto", C.traducoesNaMemoria.size <= C.MAX_NA_MEMORIA);
+  }
+
+  /* ---- não buscar a mensagem fixada quando nada mudou ---- */
+  {
+    const M = carregar(["desenhadoPorUltimo", "CONFERIR_DE_VERDADE", "jaDesenhado", "marcarDesenhado"]);
+    verdade("nunca desenhado: busca", !M.jaDesenhado("m1", "a", 1000));
+    M.marcarDesenhado("m1", "a", 1000);
+    verdade("igual ao que desenhei: não busca", M.jaDesenhado("m1", "a", 2000));
+    verdade("mudou: busca", !M.jaDesenhado("m1", "b", 2000));
+    verdade("uma hora depois confere de verdade", !M.jaDesenhado("m1", "a", 1000 + M.CONFERIR_DE_VERDADE));
+    verdade("sem mensagem: busca", !M.jaDesenhado(null, "a", 2000));
+    const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+    verdade("a ficha do cliente pula a busca quando nada mudou",
+      /if \(jaDesenhado\(servidor\.msg_admin, assinatura\)\) return;/.test(idx));
+    verdade("o painel do servidor também",
+      /if \(jaDesenhado\(servidor\.msg_config, assinatura\)\) return;/.test(idx));
+    verdade("o nome do servidor é acompanhado na volta do relógio e na hora",
+      /await acompanharNome\(servidor\);/.test(idx) && /client\.on\("guildUpdate"/.test(idx));
+    verdade("o convite reaproveita o que já existe", /unique: false/.test(idx));
+    globalThis.ChannelType = { GuildText: 0 };
+    globalThis.portaDoIdioma = async () => "porta";
+    const { conviteDoServidor } = carregar(["convitesDosClientes", "conviteDoServidor"]);
+    ok("endereço próprio do servidor primeiro",
+      await conviteDoServidor({ id: "g0", vanityURLCode: "toptop" }), "https://discord.gg/toptop");
+    let criados = 0;
+    const canal = (pode) => ({ type: 0, permissionsFor: () => ({ has: () => pode }),
+      createInvite: async (o) => { criados++; return { url: `https://discord.gg/abc${o.unique ? "-novo" : ""}` }; } });
+    const g = (pode) => ({ id: `g-${pode}`, name: "x", members: { me: {} },
+      channels: { cache: new Map([["porta", canal(pode)]]) } });
+    ok("sem endereço próprio: convite na porta do idioma", await conviteDoServidor(g(true), 1), "https://discord.gg/abc");
+    await conviteDoServidor(g(true), 2);
+    ok("e não pede de novo dentro de 6 horas", criados, 1);
+    ok("sem permissão: sem link, e sem erro", await conviteDoServidor(g(false), 1), "");
   }
 }
 
