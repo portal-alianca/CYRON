@@ -1090,6 +1090,25 @@ async function usoDoMes(servidorId, hoje = hojeISO()) {
 }
 
 
+/* O cache tambem na memoria, na frente do banco.
+
+   Cada fala do chat espelhado pergunta ao banco uma vez POR IDIOMA se aquela
+   frase ja' foi traduzida -- sete idas ao Supabase para um "kkk". As frases
+   que se repetem sao justamente as curtas e as do dia, entao as ultimas tres
+   mil ficam aqui: a repeticao sai na hora, sem rede, e o banco so' e'
+   perguntado pelo que a memoria nao viu. Tres mil traducoes curtas sao menos
+   de um mega. */
+const traducoesNaMemoria = new Map(); // chave -> traducao, a mais recente por ultimo
+const MAX_NA_MEMORIA = 3000;
+
+function lembrarTraducao(chave, traduzido) {
+  traducoesNaMemoria.delete(chave);
+  traducoesNaMemoria.set(chave, traduzido);
+  while (traducoesNaMemoria.size > MAX_NA_MEMORIA) {
+    traducoesNaMemoria.delete(traducoesNaMemoria.keys().next().value);
+  }
+}
+
 async function traduzirComCache(texto, alvo, motor = MOTOR_AUTO) {
   if (texto.length > MAX_CACHE) return await traduzir(texto, alvo, motor);
 
@@ -1100,14 +1119,22 @@ async function traduzirComCache(texto, alvo, motor = MOTOR_AUTO) {
      pra outro servidor. Barato e desonesto: a pessoa contratou a qualidade do
      motor que escolheu, nao a de quem passou ali antes. */
   const chave = createHash("sha256").update(`${motor.tipo} ${alvo} ${texto}`).digest("hex").slice(0, 40);
+  const lembrado = traducoesNaMemoria.get(chave);
+  if (lembrado) {
+    lembrarTraducao(chave, lembrado);
+    anotarUso(motor.servidorId, motor.tipo, { cache: 1 });
+    return lembrado;
+  }
   const guardado = await doCache(chave);
   if (guardado) {
+    lembrarTraducao(chave, guardado);
     anotarUso(motor.servidorId, motor.tipo, { cache: 1 });
     return guardado;
   }
 
   const novo = await traduzir(texto, alvo, motor);
   if (novo) {
+    lembrarTraducao(chave, novo);
     /* Sem await: a conversa nao espera o banco pra seguir. */
     sbPost("discord_traducao_cache", { chave, idioma: alvo, traduzido: novo, motor: motor.tipo })
       .catch(() => { /* ja traduzido; guardar e' bonus */ });
@@ -6390,6 +6417,25 @@ function corDoPainel(cheio, esperando) {
    nao mostra -- um canal criado, um renomeado, um que virou copia minha --, e
    sem elas na assinatura o menu ficaria oferecendo a lista velha ate' que
    alguma outra coisa mudasse. */
+/* O que eu desenhei por ultimo em cada mensagem fixada.
+
+   A volta do relogio redesenha o painel de cada servidor e a ficha de cada
+   cliente -- e para comparar ia ao Discord buscar a mensagem, toda vez, mesmo
+   quando nada tinha mudado (que e' quase sempre). Lembrando o que eu mesmo
+   escrevi, a busca so' acontece quando ha' o que mudar. Uma vez por hora
+   confiro de verdade: alguem pode ter apagado a mensagem na mao. */
+const desenhadoPorUltimo = new Map(); // msgId -> { assinatura, t }
+const CONFERIR_DE_VERDADE = 60 * 60 * 1000;
+
+function jaDesenhado(msgId, assinatura, agora = Date.now()) {
+  const u = msgId && desenhadoPorUltimo.get(msgId);
+  return !!u && u.assinatura === assinatura && agora - u.t < CONFERIR_DE_VERDADE;
+}
+
+function marcarDesenhado(msgId, assinatura, agora = Date.now()) {
+  if (msgId) desenhadoPorUltimo.set(msgId, { assinatura, t: agora });
+}
+
 function assinaturaDoCartao(embed, componentes) {
   return JSON.stringify([
     embed.description,
@@ -10100,6 +10146,8 @@ async function cartaoDeConfig(guild, servidor) {
   if (!canal) return;
 
   const { embed, componentes } = await montarPainel(guild, servidor);
+  const assinatura = assinaturaDoCartao(embed, componentes);
+  if (jaDesenhado(servidor.msg_config, assinatura)) return;
 
   if (servidor.msg_config) {
     const antiga = await canal.messages.fetch(servidor.msg_config).catch(() => null);
@@ -10107,9 +10155,10 @@ async function cartaoDeConfig(guild, servidor) {
       const antes = antiga.embeds?.[0]
         ? assinaturaDoCartao(antiga.embeds[0].toJSON(), (antiga.components || []).map((l) => l.toJSON()))
         : null;
-      if (antes !== assinaturaDoCartao(embed, componentes)) {
+      if (antes !== assinatura) {
         await antiga.edit({ content: null, embeds: [embed], components: componentes });
       }
+      marcarDesenhado(servidor.msg_config, assinatura);
       return;
     }
   }
@@ -11738,7 +11787,17 @@ async function garantirWebhookDePagamentos(guild) {
 async function topicoDoCliente(guild, canal, servidor) {
   if (servidor.canal_admin) {
     const achado = await guild.channels.fetch(servidor.canal_admin).catch(() => null);
-    if (achado) return achado;
+    if (achado) {
+      /* O servidor mudou de nome: o topico muda junto. Topico arquivado nao
+         aceita edicao, entao desarquivar vai na mesma chamada -- e ele volta a
+         arquivar sozinho na semana sem movimento. */
+      const esperado = nomeDeCanal(servidor.nome, servidor.guild_id).slice(0, 90);
+      if (achado.name !== esperado) {
+        await achado.edit({ name: esperado, archived: false }, "o servidor mudou de nome")
+          .catch((e) => console.error("painel: nao consegui renomear o tópico:", e?.message || e));
+      }
+      return achado;
+    }
   }
   const topico = await canal.threads.create({
     name: nomeDeCanal(servidor.nome, servidor.guild_id).slice(0, 90),
@@ -11802,6 +11861,11 @@ async function cartaoDoCliente(guild, servidor) {
   const cliente = client.guilds.cache.get(String(servidor.guild_id));
   const plano = planoDe(servidor);
   const faixa = faixaDe(servidor);
+  /* Quem e' o dono e como entrar: e' o que se precisa na hora de atender.
+     O nome de usuario vem junto da mencao porque mencao de quem nao esta' no
+     painel aparece como usuario desconhecido. */
+  const dono = cliente?.ownerId ? await client.users.fetch(cliente.ownerId).catch(() => null) : null;
+  const convite = cliente && !servidor.saiu_em ? await conviteDoServidor(cliente) : "";
 
   const embed = {
     color: servidor.saiu_em ? 0x8A3A33 : plano === "pago" ? 0x2E8B7A : 0xB08A2E,
@@ -11817,6 +11881,8 @@ async function cartaoDoCliente(guild, servidor) {
       { name: "7 dias", value: `${soma.t} traduções\n${(soma.c / 1000).toFixed(1)}k caracteres`, inline: true },
       { name: "Motor", value: servidor.tradutor_motor && servidor.tradutor_motor !== "auto"
           ? `🔑 ${servidor.tradutor_motor}` : "⚪ google grátis", inline: true },
+      { name: "👑 Dono", value: dono ? `<@${dono.id}> · ${dono.username}` : "—", inline: true },
+      { name: "🔗 Servidor", value: convite || (cliente ? "_sem permissão para criar convite_" : "—"), inline: true },
       /* O problema do cliente aparece na ficha DELE, e nao no canal de erros
          do dono. Aqui ele e' contexto -- "por isso este servidor tem idioma e
          nao tem gente nas categorias" --, e nao um chamado. */
@@ -11829,20 +11895,23 @@ async function cartaoDoCliente(guild, servidor) {
     footer: { text: `guild ${servidor.guild_id} · instalado em ${new Date(servidor.criado_em).toLocaleDateString("pt-BR")}` },
   };
 
+  const botoes = botoesDaFicha(servidor);
+  const assinatura = assinaturaDoCartao(embed, botoes);
+  if (jaDesenhado(servidor.msg_admin, assinatura)) return;
   if (servidor.msg_admin) {
     const antiga = await canal.messages.fetch(servidor.msg_admin).catch(() => null);
     if (antiga) {
-      const botoes = botoesDaFicha(servidor);
       const antes = antiga.embeds?.[0]
         ? assinaturaDoCartao(antiga.embeds[0].toJSON(), (antiga.components || []).map((l) => l.toJSON()))
         : null;
-      if (antes === assinaturaDoCartao(embed, botoes)) return;   // nada mudou
+      if (antes === assinatura) { marcarDesenhado(servidor.msg_admin, assinatura); return; }   // nada mudou
 
       /* Desarquiva SO' quando ha' o que escrever. Desarquivar a cada volta do
          relogio deixaria todos os topicos sempre ativos, e a barra lateral
          voltaria a ser a parede que o topico veio evitar. */
       if (canal.archived) await canal.setArchived(false, "ficha mudou").catch(() => {});
       await antiga.edit({ embeds: [embed], components: botoes });
+      marcarDesenhado(servidor.msg_admin, assinatura);
       return;
     }
   }
@@ -11897,6 +11966,7 @@ async function montarPainelDoDonoAgora() {
   for (const servidor of todos) {
     if (String(servidor.guild_id) === gid) continue;   // o painel nao e' cliente
     try {
+      await acompanharNome(servidor);
       const topico = await topicoDoCliente(guild, sala, servidor);
       if (topico) await cartaoDoCliente(guild, servidor);
     } catch (e) {
@@ -13038,6 +13108,89 @@ async function contar(caminho) {
   }
 }
 
+/* O que o diario conta alem dos numeros: quem, e o que pede olho.
+
+   Numero sozinho diz que o dia foi bom ou ruim; nao diz ONDE. Aqui sai o
+   ranking do dia, quem entrou e saiu, quem vence logo, e principalmente os
+   dois sinais que nao chegam sozinhos: o servidor que traduzia todo dia e
+   parou (bot travado la', ou cliente desistindo), e o que instalou e nunca
+   traduziu nada (precisa de ajuda para comecar). */
+async function destaquesDoDia(dia, agora = Date.now()) {
+  const inicio = Date.parse(`${dia}T00:00:00Z`);
+  const desde = diaISO(inicio - 13 * 864e5);
+  const [uso, servidores, eventos] = await Promise.all([
+    sb(`cyron_uso_diario?dia=gte.${desde}&dia=lte.${dia}&select=servidor_id,dia,traducoes,motor`).catch(() => null),
+    sb("cyron_servidor?select=id,nome,pago_ate,teste_ate,saiu_em,criado_em").catch(() => null),
+    sb(`cyron_evento?quando=gte.${new Date(agora).toISOString()}` +
+      `&quando=lt.${new Date(agora + 864e5).toISOString()}&select=servidor_id`).catch(() => null),
+  ]);
+  const lista = Array.isArray(servidores) ? servidores.filter((s) => s && s.id) : [];
+  const nome = (id) => String(lista.find((s) => s.id === id)?.nome || "sem nome").slice(0, 40);
+
+  const dias = Array.from({ length: 14 }, (_, i) => diaISO(inicio - (13 - i) * 864e5));
+  const porDia = new Map(dias.map((d) => [d, 0]));
+  const noDia = new Map();
+  const naSemana = new Map();
+  const comUso = new Set();
+  const semanaComeca = diaISO(inicio - 7 * 864e5);
+  for (const l of Array.isArray(uso) ? uso : []) {
+    if (String(l.motor || "").startsWith("sem:")) continue;
+    const t = Number(l.traducoes || 0);
+    if (!t) continue;
+    comUso.add(l.servidor_id);
+    if (porDia.has(l.dia)) porDia.set(l.dia, porDia.get(l.dia) + t);
+    if (l.dia === dia) noDia.set(l.servidor_id, (noDia.get(l.servidor_id) || 0) + t);
+    else if (l.dia >= semanaComeca) naSemana.set(l.servidor_id, (naSemana.get(l.servidor_id) || 0) + t);
+  }
+
+  const campos = [{ name: "📈 Traduções em 14 dias",
+    value: "```\n" + grafiquinho([...porDia.values()]) + "\n```" }];
+
+  const podio = [...noDia].sort((a, b) => b[1] - a[1]).slice(0, 3);
+  if (podio.length) {
+    campos.push({ name: "🏆 Quem mais traduziu",
+      value: podio.map(([id, t], i) => `${["🥇", "🥈", "🥉"][i]} ${nome(id)} — ${t}`).join("\n") });
+  }
+
+  const fimDoDia = inicio + 864e5;
+  const entraram = lista.filter((s) => { const t = Date.parse(s.criado_em); return t >= inicio && t < fimDoDia; });
+  const sairam = lista.filter((s) => { const t = Date.parse(s.saiu_em); return t >= inicio && t < fimDoDia; });
+  if (entraram.length || sairam.length) {
+    campos.push({ name: "👋 Entradas e saídas", value: [
+      ...entraram.map((s) => `➕ ${nome(s.id)}`), ...sairam.map((s) => `➖ ${nome(s.id)}`),
+    ].slice(0, 12).join("\n") });
+  }
+
+  const olhar = [];
+  for (const [id, t] of naSemana) {
+    const media = t / 7;
+    if (media >= 20 && !noDia.get(id) && !lista.find((s) => s.id === id)?.saiu_em) {
+      olhar.push(`🔇 **${nome(id)}** parou: ~${Math.round(media)} por dia, e nenhuma neste dia`);
+    }
+  }
+  for (const s of lista) {
+    const idade = agora - Date.parse(s.criado_em);
+    if (!s.saiu_em && idade > 864e5 && idade < 15 * 864e5 && !comUso.has(s.id)) {
+      olhar.push(`🧩 **${nome(s.id)}** instalou e ainda não traduziu nada`);
+    }
+  }
+  for (const s of lista) {
+    if (s.saiu_em) continue;
+    const ate = venceEm(s.pago_ate) || venceEm(s.teste_ate);
+    if (ate && ate - agora <= 3 * 864e5) {
+      olhar.push(`⏰ **${nome(s.id)}** vence ${quandoFoi(ate, "R")}${venceEm(s.pago_ate) ? "" : " _(teste)_"}`);
+    }
+  }
+  if (olhar.length) campos.push({ name: "🚩 Para olhar", value: olhar.slice(0, 10).join("\n").slice(0, 1024) });
+
+  const evs = Array.isArray(eventos) ? eventos : [];
+  if (evs.length) {
+    campos.push({ name: "📆 Eventos nas próximas 24h", inline: true,
+      value: `${evs.length} em ${new Set(evs.map((e) => e.servidor_id)).size} servidor(es)` });
+  }
+  return campos;
+}
+
 async function cartaoDoDia() {
   const dia = ontemISO();
   const anterior = new Date(Date.parse(dia) - 24 * 3600 * 1000).toISOString().slice(0, 10);
@@ -13093,13 +13246,15 @@ async function cartaoDoDia() {
       { name: "Mensagens espelhadas", inline: true,
         value: copias == null ? "_não consegui contar_" : `**${copias}** cópias entregues` },
       { name: "Traduções", inline: true,
-        value: `**${hoje.t}**${variacao(hoje.t, ontem.t)}\n${hoje.k} vieram do cache` },
+        value: `**${hoje.t}**${variacao(hoje.t, ontem.t)}\n${hoje.k} vieram do cache` +
+          (hoje.t + hoje.k ? ` (${Math.round((hoje.k / (hoje.t + hoje.k)) * 100)}% sem custo)` : "") },
       { name: "Caracteres", inline: true,
         value: `**${(hoje.c / 1000).toFixed(1)}k**${variacao(hoje.c, ontem.c)}` },
       { name: "Quem traduziu", value: motores },
       ...(totalPerdidas ? [{ name: "Sem tradução",
         value: `**${totalPerdidas}** traduções não aconteceram\n${detalhePerdidas}` }] : []),
       ...(cota ? [{ name: "Cota do mês", value: cota }] : []),
+      ...(await destaquesDoDia(dia).catch(() => [])),
       { name: "Servidores ativos", inline: true, value: servidores == null ? "—" : String(servidores) },
       { name: "De pé desde", inline: true, value: quandoFoi(Date.now() - process.uptime() * 1000, "R") },
     ],
@@ -13297,6 +13452,69 @@ async function atualizarArenas() {
       console.error("arena: nao consegui desenhar em", guild.name, e?.message || e);
     }
   }
+}
+
+/* O nome do servidor no banco acompanha o do Discord.
+
+   Ele so' era gravado na instalacao: o cliente renomeava o servidor e o
+   painel, o /admin e o diario continuavam chamando pelo nome velho -- e quem
+   procurava pelo nome novo nao achava. */
+async function acompanharNome(servidor) {
+  const g = client.guilds.cache.get(String(servidor.guild_id));
+  const novo = String(g?.name || "").trim();
+  if (!novo || novo === servidor.nome) return false;
+  await sbPatch(`cyron_servidor?id=eq.${encodeURIComponent(servidor.id)}`, { nome: novo });
+  console.log(`painel: ${servidor.nome} agora se chama ${novo}`);
+  servidor.nome = novo;
+  cacheServidor.delete(String(servidor.guild_id));
+  return true;
+}
+
+/* Na hora, e nao so' na proxima volta do relogio. */
+client.on("guildUpdate", async (antes, depois) => {
+  try {
+    if (antes?.name === depois?.name) return;
+    const servidor = await servidorDoGuild(depois.id);
+    if (!servidor || !await acompanharNome(servidor)) return;
+    await refazerFicha(servidor.id);
+  } catch (e) {
+    console.error("painel: nao consegui acompanhar o nome novo:", e?.message || e);
+  }
+});
+
+/* O link de um servidor cliente, para o dono poder entrar e atender.
+
+   O endereco proprio (discord.gg/nome) primeiro, quando o servidor tem. Sem
+   ele, um convite permanente na sala de escolher idioma -- a porta de entrada
+   que todo mundo enxerga. Com unique false o Discord devolve o convite que eu
+   ja' criei ali em vez de abrir outro, entao reiniciar o bot nao espalha
+   convites pelo servidor do cliente. Sem a permissao de criar convite, fica
+   sem link: nao peco permissao a mais so' para isto. */
+const convitesDosClientes = new Map(); // guildId -> { url, t }
+
+async function conviteDoServidor(g, agora = Date.now()) {
+  if (!g) return "";
+  if (g.vanityURLCode) return "https:" + "//discord.gg/" + g.vanityURLCode;
+  const guardado = convitesDosClientes.get(g.id);
+  if (guardado && agora - guardado.t < 6 * 3600 * 1000) return guardado.url;
+  let url = "";
+  try {
+    const eu = g.members?.me;
+    const porta = await portaDoIdioma(g).catch(() => null);
+    const candidatos = [porta && g.channels.cache.get(porta), g.systemChannel, g.rulesChannel,
+      ...g.channels.cache.values()];
+    const canal = candidatos.find((c) => c && c.type === ChannelType.GuildText
+      && c.permissionsFor?.(eu)?.has(PermissionFlagsBits.CreateInstantInvite));
+    if (canal) {
+      const convite = await canal.createInvite({ maxAge: 0, maxUses: 0, unique: false,
+        reason: "link para o suporte do CYRON atender este servidor" });
+      url = convite?.url || "";
+    }
+  } catch (e) {
+    console.error("painel: nao consegui o convite de", g.name, e?.message || e);
+  }
+  convitesDosClientes.set(g.id, { url, t: agora });
+  return url;
 }
 
 /* Sair tambem e' informacao.
