@@ -3999,7 +3999,8 @@ function conferirCartao(onde, embed, componentes = []) {
   {
     const { embedDeUso, embedDeErros, embedDeSaude, COTA_DE } = carregar([
       "quandoFoi", "DIAS_DE_RITMO", "ritmoDiario", "ritmoDaChaveDoDono",
-      "duracaoDoQueSobra", "emK", "barraDeCota", "MOTORES", "COTA_DE", "camposDeCota",
+      "duracaoDoQueSobra", "emK", "barraDeCota", "MOTORES", "COTA_DE",
+      "TETOS_DO_F0", "primeiroDoMes", "cotasDosRecursos", "linhaDoRecurso", "camposDeCota",
       "TETO_MEMORIA", "mensagensGuardadas",
       "errosAgrupados", "embedDeUso", "embedDeErros", "embedDeSaude"]);
 
@@ -4012,6 +4013,9 @@ function conferirCartao(onde, embed, componentes = []) {
     globalThis.ultimaPassada = { quando: Date.now() - 60000, quanto: 1200, servidores: 1 };
     globalThis.tradutorFalhas = { erros: 0, quedas: 0, ultimoErro: "" };
     globalThis.cotaDoDono = new Map();
+    globalThis.visaoDoDono = null;
+    globalThis.falaDoDono = null;
+    globalThis.ajustes = globalThis.ajustes || (async () => ({}));
     globalThis.errosRecentes = [];
     globalThis.sb = async (rota) => rota.includes("cyron_uso_diario")
       ? [{ dia: "2026-08-31", caracteres: 91234, traducoes: 812, do_cache: 90, motor: "dono-azure", servidor_id: "s1" }]
@@ -4170,7 +4174,7 @@ function conferirCartao(onde, embed, componentes = []) {
       "somaDoDia", "variacao", "ontemISO", "comoEstaACota",
       "DIAS_DE_RITMO", "ritmoDiario", "duracaoDoQueSobra", "emK",
       "linhaDaCota", "ritmoDaChaveDoDono", "diaISO", "BARRINHAS", "grafiquinho", "venceEm",
-      "destaquesDoDia", "cartaoDoDia"]);
+      "TETOS_DO_F0", "primeiroDoMes", "cotasDosRecursos", "destaquesDoDia", "cartaoDoDia"]);
     globalThis.cotaDoDono = new Map();
     globalThis.quandoFoi = () => "há 3 horas";
     globalThis.contar = async () => 1777;
@@ -4528,6 +4532,52 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("mas só depois de o banco confirmar a coluna (senão a linha inteira seria recusada)",
       /\.\.\.\(autorId && colunaDoAutor \? \{ autor_id: String\(autorId\) \} : \{\}\)/.test(idx));
     verdade("as abas mandam os gráficos extras", (idx.match(/embeds: \[embed, \.\.\.extras\]/g) || []).length >= 2);
+  }
+
+  /* ---- as cotas de todos os recursos ---- */
+  {
+    const agora = Date.parse("2026-10-10T12:00:00Z");   // dia 10: ritmo = uso / 10
+    globalThis.motoresDoDono = () => [{ tipo: "azure", chave: "k" }, { tipo: "deepl", chave: "k:fx" }];
+    globalThis.visaoDoDono = { endpoint: "https://v", chave: "k" };
+    globalThis.falaDoDono = { endpoint: "https://f", chave: "k" };
+    globalThis.ajustes = async () => ({ teto_visao: "" });
+    globalThis.sb = async (rota) => rota.startsWith("cyron_uso_diario") ? [{ caracteres: 600000 }, { caracteres: 400000 }]
+      : rota.startsWith("cyron_uso_recurso") ? [{ quantidade: 4800 }]
+      : rota.startsWith("cyron_uso_audio") ? [{ segundos: 1800 }, { segundos: 1800 }] : [];
+    const R = carregar(["TETOS_DO_F0", "primeiroDoMes", "emK", "cotasDosRecursos", "linhaDoRecurso",
+      "AVISOS_DE_COTA", "faixaDaCota", "precisaAvisar", "faixaDoRecurso", "vigiarRecursos"]);
+    const cotas = await R.cotasDosRecursos(agora);
+    ok("os três recursos da Azure aparecem", cotas.map((c) => c.id), ["azure", "visao", "audio"]);
+    ok("o tradutor da Azure pela nossa conta, de 2 milhões", [cotas[0].usado, cotas[0].teto], [1000000, 2000000]);
+    ok("o áudio em minutos, de 300", [cotas[2].usado, cotas[2].teto], [60, 300]);
+    const linha = R.linhaDoRecurso(cotas[1]);
+    verdade("a imagem mostra a barra e a porcentagem", /█{10}/.test(linha) && /\*\*96%\*\* 🔴/.test(linha));
+    verdade("e por quantos dias o resto dura", /200 de|4\.8k de 5\.0k imagens · sobra para ~0 dias/.test(linha));
+    verdade("a do tradutor projeta pelo ritmo do mês", /sobra para ~10 dias/.test(R.linhaDoRecurso(cotas[0])));
+    ok("recurso desligado não aparece", (globalThis.falaDoDono = null, (await R.cotasDosRecursos(agora)).map((c) => c.id)), ["azure", "visao"]);
+    globalThis.ajustes = async () => ({ teto_visao: "10000" });
+    ok("o teto muda pelo /admin para quem pagar a Azure", (await R.cotasDosRecursos(agora))[1].teto, 10000);
+    globalThis.sb = async () => { throw new Error("fora"); };
+    verdade("banco fora: diz que não conseguiu, sem inventar zero",
+      /não consegui/.test(R.linhaDoRecurso((await R.cotasDosRecursos(agora))[0])));
+
+    const avisos = [];
+    globalThis.avisarNoPainel = async (_, t) => { avisos.push(t); };
+    globalThis.CANAL_PAGAMENTOS = "pag";
+    globalThis.ajustes = async () => ({});
+    globalThis.sb = async (rota) => rota.startsWith("cyron_uso_recurso") ? [{ quantidade: 4300 }] : [];
+    await R.vigiarRecursos(agora);
+    await R.vigiarRecursos(agora);
+    ok("passou de 85%: avisa uma vez só", avisos.length, 1);
+    verdade("dizendo qual recurso", /Leitura de imagem\*\* passou de 85%/.test(avisos[0]));
+
+    const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+    verdade("cada leitura de imagem conta na cota", /somarRecurso\("visao", guildId\)/.test(idx));
+    verdade("os três lugares que leem imagem dizem de que servidor",
+      (idx.match(/lerImagemDaMensagem\(img, (buscar|fetch), (guildId|inter\.guildId)\)/g) || []).length === 3);
+    verdade("a vigia das cotas roda de hora em hora", /await vigiarRecursos\(\)\.catch/.test(idx));
+    verdade("a Saúde mostra os recursos", /for \(const c of await cotasDosRecursos\(\)/.test(idx));
+    verdade("o analítico também", /embeds\[0\]\.fields\.push\(\.\.\.await camposDasCotasDoAnalitico\(agora\)\)/.test(idx));
   }
 
   /* ---- não buscar a mensagem fixada quando nada mudou ---- */

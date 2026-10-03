@@ -2761,12 +2761,15 @@ function botaoDeLerImagem(idioma) {
 
    So' o que deu certo vai para a memoria: guardar uma falha faria um
    tropeco de rede virar "essa imagem nao tem texto" para sempre. */
-async function lerImagemDaMensagem(img, buscar = fetch) {
+async function lerImagemDaMensagem(img, buscar = fetch, guildId = null) {
   const guardada = textoDasImagens.get(img.id);
   if (guardada !== undefined) return guardada;
   const r = await buscar(img.url, { signal: AbortSignal.timeout(15000) });
   if (!r.ok) throw new Error(`baixar a imagem deu HTTP ${r.status}`);
   const leitura = await lerImagem(Buffer.from(await r.arrayBuffer()), visaoDoDono, buscar);
+  /* Cada leitura que chegou a' Azure conta na cota do mes (a da memoria,
+     acima, nao gasta nada e nao conta). */
+  Promise.resolve().then(() => somarRecurso("visao", guildId)).catch(() => {});
   textoDasImagens.set(img.id, leitura);
   while (textoDasImagens.size > MAX_IMAGENS_LEMBRADAS) {
     textoDasImagens.delete(textoDasImagens.keys().next().value);
@@ -2812,7 +2815,7 @@ async function explicarImagem(msg, idioma, guildId, buscar = fetch) {
   let leitura = textoDasImagens.get(img.id);
   if (leitura === undefined) {
     try {
-      leitura = await lerImagemDaMensagem(img, buscar);
+      leitura = await lerImagemDaMensagem(img, buscar, guildId);
     } catch (e) {
       return aviso(falhaDeLeitura(e));
     }
@@ -8519,7 +8522,7 @@ async function lerEventoDaMensagem(inter) {
   let leuImagem = false;
   if (img && visaoDoDono) {
     try {
-      const leitura = await lerImagemDaMensagem(img);
+      const leitura = await lerImagemDaMensagem(img, fetch, inter.guildId);
       if (leitura?.texto) { texto += "\n" + leitura.texto; leuImagem = true; }
     } catch (e) {
       if (!texto.trim()) {
@@ -13351,6 +13354,89 @@ const tradutorFalhas = { erros: 0, quedas: 0, ultimoErro: "" };
    aviso. Quem le e' o mesmo COTA_DE que a vigia usa -- havia duas funcoes
    perguntando a mesma coisa ao DeepL, e duas envelhecem em direcoes
    diferentes. */
+/* ---------------- as cotas de TODOS os recursos ----------------
+
+   So' a cota da DeepL aparecia, porque e' a unica que a propria conta
+   informa. A Azure nao informa nada no plano gratis -- e o bot usa tres
+   recursos dela: o tradutor, a leitura de imagem e a transcricao de audio.
+   Cada um tem teto mensal rigido, e estourar e' o recurso parar ate' o mes
+   virar.
+
+   A conta deles vem dos NOSSOS contadores (o que o bot mandou para la'), e
+   diz isso: e' uma estimativa honesta, nao a leitura do portal. Os tetos sao
+   os do plano gratuito F0 e mudam pelo /admin (ajustes teto_azure,
+   teto_visao, teto_audio_min) para quem passar a um plano pago. */
+const TETOS_DO_F0 = { azure: 2000000, visao: 5000, audioMin: 300 };
+
+function primeiroDoMes(agora = Date.now()) {
+  return `${new Date(agora).toISOString().slice(0, 7)}-01`;
+}
+
+/* Soma um uso no mes, pelo banco (dois cliques juntos nao perdem nenhum). */
+async function somarRecurso(recurso, guildId = null, quantidade = 1, agora = Date.now()) {
+  const servidor = guildId ? await servidorDoGuild(guildId).catch(() => null) : null;
+  await rpc("cyron_somar_recurso", { p_recurso: recurso, p_servidor: servidor?.id || "",
+    p_mes: primeiroDoMes(agora), p_quantidade: quantidade })
+    .catch((e) => console.log(`recurso: nao consegui somar ${recurso}:`, e?.message || e));
+}
+
+/* O retrato do mes de cada recurso: quanto foi, de quanto, e o ritmo. */
+async function cotasDosRecursos(agora = Date.now()) {
+  const a = await ajustes().catch(() => ({}));
+  const mes = primeiroDoMes(agora);
+  const diaDoMes = new Date(agora).getUTCDate();
+  const [tradutor, visao, audio] = await Promise.all([
+    sb(`cyron_uso_diario?dia=gte.${mes}&motor=eq.dono-azure&select=caracteres`).catch(() => null),
+    sb(`cyron_uso_recurso?recurso=eq.visao&mes=eq.${mes}&select=quantidade`).catch(() => null),
+    sb(`cyron_uso_audio?mes=eq.${mes}&select=segundos`).catch(() => null),
+  ]);
+  const soma = (linhas, campo) => (linhas || []).reduce((x, l) => x + Number(l[campo] || 0), 0);
+  const cotas = [];
+  if (motoresDoDono().some((m) => m.tipo === "azure")) {
+    cotas.push({ id: "azure", nome: "Azure Tradutor", unidade: "caracteres",
+      usado: soma(tradutor, "caracteres"), teto: Number(a.teto_azure) || TETOS_DO_F0.azure, lido: tradutor !== null });
+  }
+  if (visaoDoDono) {
+    cotas.push({ id: "visao", nome: "Leitura de imagem", unidade: "imagens",
+      usado: soma(visao, "quantidade"), teto: Number(a.teto_visao) || TETOS_DO_F0.visao, lido: visao !== null });
+  }
+  if (falaDoDono) {
+    cotas.push({ id: "audio", nome: "Transcrição de áudio", unidade: "minutos",
+      usado: Math.round(soma(audio, "segundos") / 60), teto: Number(a.teto_audio_min) || TETOS_DO_F0.audioMin, lido: audio !== null });
+  }
+  return cotas.map((c) => ({ ...c, porDia: diaDoMes ? c.usado / diaDoMes : 0 }));
+}
+
+/* Uma linha: barra, quanto de quanto, e por quantos dias o resto dura. */
+function linhaDoRecurso(c) {
+  if (!c.lido) return `_não consegui somar ${c.nome.toLowerCase()} agora_`;
+  const pct = c.teto ? Math.round((c.usado / c.teto) * 100) : 0;
+  const cheios = Math.min(10, Math.round(pct / 10));
+  const alerta = pct >= 95 ? " 🔴" : pct >= 85 ? " 🟠" : pct >= 70 ? " 🟡" : "";
+  const sobra = Math.max(0, c.teto - c.usado);
+  const dias = c.porDia > 0 ? Math.floor(sobra / c.porDia) : null;
+  const fim = sobra <= 0 ? " · **acabou**"
+    : dias === null ? "" : ` · sobra para ~${dias} dia${dias === 1 ? "" : "s"}`;
+  return `\`${"█".repeat(cheios)}${"░".repeat(10 - cheios)}\` **${pct}%**${alerta}\n` +
+    `${emK(c.usado)} de ${emK(c.teto)} ${c.unidade}${fim}`;
+}
+
+/* Aviso no painel ao passar de 70, 85 e 95% -- uma vez por faixa, igual ao
+   da DeepL. */
+const faixaDoRecurso = new Map();
+
+async function vigiarRecursos(agora = Date.now()) {
+  for (const c of await cotasDosRecursos(agora)) {
+    if (!c.lido || !c.teto) continue;
+    const pct = Math.round((c.usado / c.teto) * 100);
+    const faixa = precisaAvisar(pct, faixaDoRecurso.get(c.id) || 0);
+    faixaDoRecurso.set(c.id, faixaDaCota(pct));
+    if (!faixa) continue;
+    await avisarNoPainel(CANAL_PAGAMENTOS, `${faixa >= 95 ? "🔴" : faixa >= 85 ? "🟠" : "🟡"} **${c.nome}** passou de ${faixa}% da cota do mês — ` +
+      `${emK(c.usado)} de ${emK(c.teto)} ${c.unidade}.`);
+  }
+}
+
 async function camposDeCota() {
   const campos = [];
   /* Uma leitura so' para todas as chaves: o ritmo e' da CONTA, nao de cada
@@ -13359,8 +13445,7 @@ async function camposDeCota() {
   for (const reserva of motoresDoDono()) {
     const nome = MOTORES[reserva.tipo]?.nome || reserva.tipo;
     if (!COTA_DE[reserva.tipo]) {
-      campos.push({ name: `Cota da ${nome}`, value: "_ela não informa por aqui — veja no portal.azure.com_" });
-      continue;
+      continue;   // a Azure entra pelos recursos, logo abaixo, pela nossa conta
     }
     try {
       const c = await COTA_DE[reserva.tipo](reserva);
@@ -13369,6 +13454,9 @@ async function camposDeCota() {
       campos.push({ name: `Cota da ${nome} neste mês`,
         value: `_não consegui perguntar: ${String(e.message || e).slice(0, 60)}_` });
     }
+  }
+  for (const c of await cotasDosRecursos().catch(() => [])) {
+    campos.push({ name: `${{ azure: "🌐", visao: "📝", audio: "🎧" }[c.id] || "📦"} ${c.nome} neste mês`, value: linhaDoRecurso(c) });
   }
   return campos;
 }
@@ -13574,7 +13662,14 @@ async function cartaoDoDia() {
      -- que e' a conta que tem teto. Se a leitura falhar, a linha ainda diz
      quanto sobra; so' nao projeta. */
   const ritmoDono = await ritmoDaChaveDoDono().catch(() => 0);
-  const cota = comoEstaACota().map((c) => linhaDaCota(c, ritmoDono)).join(" · ");
+  const recursos = await cotasDosRecursos().catch(() => []);
+  const cota = [
+    ...comoEstaACota().map((c) => linhaDaCota(c, ritmoDono)),
+    ...recursos.filter((c) => c.lido).map((c) => {
+      const pct = c.teto ? Math.round((c.usado / c.teto) * 100) : 0;
+      return `**${c.nome}** ${emK(c.usado)} de ${emK(c.teto)} ${c.unidade} (${pct}%)`;
+    }),
+  ].join("\n");
   const parado = !hoje.t && !copias;
 
   return {
@@ -13850,6 +13945,28 @@ function idiomaNoGrafico(cod, quemLe = "") {
 
 const graficosDoServidor = new Map();   // servidorId|idioma -> { t, urls }
 
+/* O que este servidor gastou de audio e de imagem no mes, com o teto dele. */
+async function recursosDoServidor(servidor, T, agora = Date.now()) {
+  const mes = primeiroDoMes(agora);
+  const [audio, visao] = await Promise.all([
+    sb(`cyron_uso_audio?servidor_id=eq.${servidor.id}&mes=eq.${mes}&select=segundos,transcricoes`).catch(() => null),
+    sb(`cyron_uso_recurso?recurso=eq.visao&servidor_id=eq.${servidor.id}&mes=eq.${mes}&select=quantidade`).catch(() => null),
+  ]);
+  const linhas = [];
+  if (falaDoDono) {
+    const teto = minutosDeAudioPorServidor * (PLANOS[faixaDe(servidor)]?.audio || 0);
+    const min = Math.round(Number(audio?.[0]?.segundos || 0) / 60);
+    linhas.push(teto
+      ? await T("🎧 Áudio: **{0}** de {1} minutos", min, teto)
+      : await T("🎧 Áudio: do plano Pro"));
+  }
+  if (visaoDoDono) {
+    linhas.push(await T("📝 Imagens lidas: **{0}**", Number(visao?.[0]?.quantidade || 0)));
+  }
+  if (!linhas.length) return null;
+  return { name: await T("📦 Neste mês"), value: linhas.join("\n"), inline: true };
+}
+
 async function estatisticasDoServidor(guild, servidor, T, idioma = "", agora = Date.now()) {
   const desde14 = new Date(agora - 14 * 864e5).toISOString();
   const [uso, falas, salas] = await Promise.all([
@@ -13861,6 +13978,7 @@ async function estatisticasDoServidor(guild, servidor, T, idioma = "", agora = D
   ]);
   const a = agregarDoServidor({ uso, falas, salas }, agora);
   const leitores = leitoresPorIdioma(guild, salas || []);
+  const recursos = await recursosDoServidor(servidor, T, agora).catch(() => null);
 
   /* As imagens valem dez minutos: quem abre a aba duas vezes seguidas nao
      paga tres desenhos de novo. */
@@ -13902,11 +14020,19 @@ async function estatisticasDoServidor(guild, servidor, T, idioma = "", agora = D
         ? a.autores.map(([id, n], i) => `${medalha(i)} <@${id}> — ${n}`).join("\n")
         : "_" + await T("começa a contar a partir de agora") + "_" }] : []),
   ];
+  if (recursos) campos.push(recursos);
   const extras = [
     urls.horas && { color: COR, title: await T("🕐 Quando o servidor conversa"), image: { url: urls.horas } },
     urls.leem && { color: COR, title: await T("🌐 Quem lê cada língua"), image: { url: urls.leem } },
   ].filter(Boolean);
   return { campos, imagem: urls.dias || "", extras };
+}
+
+async function camposDasCotasDoAnalitico(agora = Date.now()) {
+  const recursos = await cotasDosRecursos(agora).catch(() => []);
+  const deepl = comoEstaACota().map((c) => linhaDaCota(c));
+  const linhas = [...deepl, ...recursos.map((c) => `**${c.nome}**\n${linhaDoRecurso(c)}`)];
+  return linhas.length ? [{ name: "📦 Cotas do mês", value: linhas.join("\n").slice(0, 1024) }] : [];
 }
 
 async function publicarAnalitico(agora = Date.now()) {
@@ -13928,6 +14054,7 @@ async function publicarAnalitico(agora = Date.now()) {
   for (const [k, cfg] of Object.entries(configs)) urls[k] = await urlDoGrafico(cfg, k === "idiomas" ? 420 : 360);
   ultimosGraficos = urls;
   const embeds = cartoesDoAnalitico(a, urls, agora);
+  embeds[0].fields.push(...await camposDasCotasDoAnalitico(agora));
 
   const guardado = (await ajustes()).analitico_msg;
   const velha = guardado ? await canal.messages.fetch(guardado).catch(() => null) : null;
@@ -14684,7 +14811,7 @@ async function cliqueVerNaImagem(inter, buscar = fetch) {
   if (!sharp) return aviso({ title: "❌ Não deu", description: "Não consegui montar a imagem agora." });
 
   let leitura;
-  try { leitura = await lerImagemDaMensagem(img, buscar); } catch (e) { return aviso(falhaDeLeitura(e)); }
+  try { leitura = await lerImagemDaMensagem(img, buscar, inter.guildId); } catch (e) { return aviso(falhaDeLeitura(e)); }
   const paragrafos = paragrafosDaLeitura(leitura);
   if (!paragrafos.length) {
     return aviso({ title: "🖼️ Não achei texto nessa imagem", description: "Não tem nada escrito que eu consiga ler aqui." });
@@ -17360,6 +17487,7 @@ async function deHoraEmHora() {
   if (Date.now() - ultimaHora < 60 * 60 * 1000) return;
   ultimaHora = Date.now();
   await olharAsCotas().catch((e) => console.error("cota: passada falhou:", e?.message || e));
+  await vigiarRecursos().catch((e) => console.log("recurso: vigia falhou:", e?.message || e));
   await talvezOCartaoDoDia().catch((e) => console.error("diário: cartão falhou:", e?.message || e));
   await publicarAnalitico().catch((e) => console.error("analitico: falhou:", e?.message || e));
   /* console.log, e nao console.error: falhar aqui viraria um erro sobre o
