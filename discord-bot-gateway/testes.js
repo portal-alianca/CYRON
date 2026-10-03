@@ -5226,7 +5226,7 @@ function conferirCartao(onde, embed, componentes = []) {
   globalThis.client = { user: { id: "bot" } };
   const m = carregar(["EVENTO_SOBREVIVE", "TIPO_AGENDA", "ROTULO_INSCREVER", "textoDaRepeticao",
     "CRONOMETRO_FINO", "cronometro", "PALAVRAS_DO_CARTAO", "COR_PERTO", "COR_COMECOU", "PERTO", "corDoEvento", "nomeLimpo", "cartaoDoEvento", "botoesDoEvento", "eventoDoCartao", "traducoesDaAgenda", "traduzirPara", "palavrasNaLingua", "cargaNaLingua", "AVISO_FICA", "emOrdem", "ehAvisoDeInicio", "pintarSala", "avisoDeInicio",
-    "ultimaCargaDaCopia", "desenharNasCopias"]);
+    "ultimaCargaDaCopia", "apagarAvisosDeAntes", "desenharNasCopias"]);
   const AGORA = Date.UTC(2026, 9, 2, 12);
   const ev = { id: 7, titulo: "Armadilha de Caça 1", detalhes: "Cavalaria", quando: new Date(AGORA + 3600000).toISOString() };
 
@@ -5300,7 +5300,23 @@ function conferirCartao(onde, embed, componentes = []) {
     content: "🔔 **Armadilha**", createdTimestamp: AGORA - 3 * 3600000 }]);
   globalThis.salasDaAgenda = async () => [{ canal: comAviso.canal, idioma: "pt" }];
   await m.desenharNasCopias({}, { id: "s" }, [ev], null, AGORA);
-  ok("o aviso de início some duas horas depois", comAviso.apagados, ["900"]);
+  ok("o aviso de início some meia hora depois", comAviso.apagados, ["900"]);
+
+  /* 15 min antes: o aviso na sala, marcando; no início ele sai e o "Começou!" entra. */
+  const antes = sala("pt", [cartaoDe("950", 7)]);
+  globalThis.salasDaAgenda = async () => [{ canal: antes.canal, idioma: "pt" }];
+  await m.desenharNasCopias({}, { id: "s" }, [ev],
+    { ev, antes: 15, aviso: { content: "🔔 **Armadilha** <@1>", allowedMentions: { parse: [], users: ["1"], roles: [] } } }, AGORA);
+  const avisoAntes = antes.enviados.at(-1);
+  verdade("15 min antes sai um aviso na sala, marcando", avisoAntes?.allowedMentions.users[0] === "1" &&
+    /Começa em 15 min/.test(avisoAntes?.embeds?.[0]?.description) && avisoAntes.embeds[0].title.startsWith("⏰"));
+  const naHora = sala("pt", [cartaoDe("960", 7), { id: "970", author: { id: "bot" }, components: [],
+    content: "🔔 **Armadilha**", createdTimestamp: AGORA - 15 * 60000, embeds: [{ title: "⏰ Armadilha" }] }]);
+  globalThis.salasDaAgenda = async () => [{ canal: naHora.canal, idioma: "pt" }];
+  await m.desenharNasCopias({}, { id: "s" }, [ev],
+    { ev, aviso: { content: "🔔 **Armadilha** <@1>", allowedMentions: { parse: [], users: ["1"], roles: [] } } }, AGORA);
+  verdade("na hora, o aviso de antes sai e o Começou! entra", naHora.apagados.includes("970") &&
+    /Começou/.test(naHora.enviados.at(-1)?.embeds?.[0]?.description));
 }
 
 {
@@ -5319,7 +5335,8 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o lembrete é marcado como feito ANTES de mandar",
     /lembrete_feito: true \}\);[^]{0,200}lembrarInscritos/.test(ronda));
   verdade("o aviso também", /aviso_feito: true \}\);[^]{0,300}avisarNaHora/.test(ronda));
-  verdade("lembrete só antes do início", /if \(agora < t\) await lembrarInscritos/.test(ronda));
+  verdade("lembrete só antes do início", /if \(agora < t\) \{[^}]*lembrarInscritos/.test(ronda));
+  verdade("e o lembrete também avisa na sala, não só no privado", /if \(agora < t\) \{[^}]*avisarAntes\(guild, ev, inscritos/.test(ronda));
   verdade("muito atrasado não marca ninguém", /agora - t <= AVISO_ATRASADO/.test(ronda));
   verdade("a ronda não roda duas vezes por cima de si mesma", /if \(agendaRodando\) return/.test(ronda));
   verdade("e roda de minuto em minuto",
@@ -5327,7 +5344,7 @@ function conferirCartao(onde, embed, componentes = []) {
 
   const aviso = f.slice(f.indexOf("async function avisarNaHora"), f.indexOf("async function rodarAgendaDeEventos"));
   verdade("na hora sai um aviso NOVO marcando (editar não faz o celular apitar)",
-    /if \(marcar\) \{\s*await canal\.send\(avisoDeInicio\(ev, aviso\)\)/.test(aviso));
+    /if \(marcar\) \{\s*await apagarAvisosDeAntes\(canal\);\s*await canal\.send\(avisoDeInicio\(ev, aviso\)\)/.test(aviso));
   verdade("repetir renova o prazo da privacidade do evento e das inscrições",
     /criado_em: hoje[^]{0,200}cyron_evento_presenca\?evento_id=eq\.\$\{ev\.id\}`, \{ criado_em: hoje \}/.test(aviso));
 
