@@ -3944,7 +3944,7 @@ function conferirCartao(onde, embed, componentes = []) {
       "quandoFoi", "DIAS_DE_RITMO", "ritmoDiario", "ritmoDaChaveDoDono",
       "duracaoDoQueSobra", "emK", "barraDeCota", "MOTORES", "COTA_DE", "camposDeCota",
       "TETO_MEMORIA", "mensagensGuardadas",
-      "embedDeUso", "embedDeErros", "embedDeSaude"]);
+      "errosAgrupados", "embedDeUso", "embedDeErros", "embedDeSaude"]);
 
     globalThis.INTERVALO_SINCRONIA = globalThis.INTERVALO_SINCRONIA ?? 60000;
     globalThis.duracaoPassada = globalThis.duracaoPassada ?? 60000;
@@ -3955,6 +3955,7 @@ function conferirCartao(onde, embed, componentes = []) {
     globalThis.ultimaPassada = { quando: Date.now() - 60000, quanto: 1200, servidores: 1 };
     globalThis.tradutorFalhas = { erros: 0, quedas: 0, ultimoErro: "" };
     globalThis.cotaDoDono = new Map();
+    globalThis.errosRecentes = [];
     globalThis.sb = async (rota) => rota.includes("cyron_uso_diario")
       ? [{ dia: "2026-08-31", caracteres: 91234, traducoes: 812, do_cache: 90, motor: "dono-azure", servidor_id: "s1" }]
       : [{ id: "s1", nome: "Servidor de teste", plano: "gratis", criado_em: "2026-08-01T00:00:00Z" }];
@@ -4012,6 +4013,97 @@ function conferirCartao(onde, embed, componentes = []) {
       onde: `lugar-${i}`, porque: "algo deu errado ".repeat(20), quando: Date.now() - i * 60000,
     }));
     conferirCartao("o cartão de erros, cheio", embedDeErros());
+  }
+
+  /* ---- as abas do /admin ---- */
+  {
+    globalThis.linkDeConvite = () => "https://discord.com/oauth2/authorize?client_id=1";
+    globalThis.BETA = false; globalThis.BETA_ATE = "";
+    globalThis.errosRecentes = [];
+    globalThis.tradutorFalhas = { erros: 0, quedas: 0, ultimoErro: "" };
+    globalThis.cargoAcimaDeMim = new Map();
+    globalThis.motoresDoDono = () => [{ tipo: "deepl", chave: "k" }];
+    const A = carregar(["quandoFoi", "emK", "diaISO", "hojeISO", "ontemISO", "venceEm", "nomeDaFaixa",
+      "nomeDoIdioma", "planoDe", "ABAS_DO_ADMIN", "ABA_DO_BOTAO", "abaDoAdmin", "linhasDoAdmin",
+      "PRECO_MENSAL", "reais", "situacaoDoPagamento", "faixaPaga", "BARRINHAS", "grafiquinho",
+      "variacaoEmTexto", "embedDoResumo", "embedDoDinheiro", "embedDoCrescimento",
+      "embedDosServidores", "embedDasFerramentas", "errosAgrupados"]);
+
+    const dia = 864e5;
+    const futuro = (d) => new Date(Date.now() + d * dia).toISOString();
+    const servidores = Array.from({ length: 40 }, (_, i) => ({
+      id: `s${i}`, guild_id: `g${i}`, nome: `Aliança com um nome bem comprido número ${i}`,
+      plano: i === 3 ? "pago" : "gratis", nivel: i % 2 ? "pro" : "alianca",
+      pago_ate: i < 12 ? futuro(i < 4 ? 3 : 20) : i < 15 ? futuro(-5) : null,
+      teste_ate: i === 20 ? futuro(2) : null,
+      saiu_em: i > 36 ? futuro(-1) : null, criado_em: futuro(-(i % 10)),
+    }));
+    globalThis.sb = async (rota) => rota.startsWith("cyron_uso_diario")
+      ? Array.from({ length: 14 }, (_, i) => ({ dia: A.diaISO(Date.now() - i * dia), servidor_id: `s${i}`,
+          caracteres: 1000 * (i + 1), traducoes: 10 * (14 - i), do_cache: 2 }))
+      : rota.startsWith("cyron_codigo") ? [{ usado_em: null }, { usado_em: futuro(-2) }]
+      : rota.startsWith("discord_idioma_jogador") ? [{ idioma: "pt" }, { idioma: "en" }, { idioma: "pt" }]
+      : servidores;
+
+    for (const a of A.ABAS_DO_ADMIN) {
+      const linhas = A.linhasDoAdmin(a.valor, a.valor === "servidores" ? servidores : []);
+      conferirCartao(`a aba ${a.nome}: botões`, { title: a.nome }, linhas);
+      verdade(`a aba ${a.nome} vem marcada no menu`,
+        linhas[0].components[0].options.find((o) => o.default)?.value === a.valor);
+      const ids = linhas.flatMap((l) => l.components.map((c) => c.custom_id).filter(Boolean));
+      ok(`a aba ${a.nome}: nenhum id repetido`, new Set(ids).size, ids.length);
+    }
+    /* Os botões de antes continuam todos em algum lugar: sumir um deles seria
+       perder o caminho para um formulário que ainda existe. */
+    const todosOsIds = new Set(A.ABAS_DO_ADMIN.flatMap((a) =>
+      A.linhasDoAdmin(a.valor, servidores).flatMap((l) => l.components.map((c) => c.custom_id))));
+    for (const id of ["codigos", "chaves", "visao", "fala", "ajustes", "busca", "suporte",
+      "comandos", "novocomando", "remontar", "uso", "erros", "saude", "resumo"]) {
+      verdade(`o botão admin:${id} continua em alguma aba`, todosOsIds.has(`admin:${id}`));
+    }
+    ok("Erros fica na aba Saúde", A.abaDoAdmin("erros"), "saude");
+    ok("Quem usa mais fica em Crescimento", A.abaDoAdmin("uso"), "crescimento");
+    ok("botão desconhecido cai na visão geral", A.abaDoAdmin("qualquer"), "resumo");
+
+    ok("pagamento em dia", A.situacaoDoPagamento({ pago_ate: futuro(3) }), "pago");
+    ok("liberado na mão não é pagamento", A.situacaoDoPagamento({ plano: "pago" }), "liberado");
+    ok("teste", A.situacaoDoPagamento({ teste_ate: futuro(1) }), "teste");
+    ok("vencido volta a grátis", A.situacaoDoPagamento({ pago_ate: futuro(-1) }), "gratis");
+    ok("quem saiu é quem saiu", A.situacaoDoPagamento({ pago_ate: futuro(3), saiu_em: futuro(-1) }), "saiu");
+    ok("reais com vírgula", A.reais(108.8), "R$ 108,80");
+    ok("barrinhas de 0 ao máximo", A.grafiquinho([0, 5, 10]), "▁▅█");
+    ok("tudo zero não divide por zero", A.grafiquinho([0, 0]), "▁▁");
+    ok("subiu", A.variacaoEmTexto(150, 100), "▲ 50%");
+    ok("caiu", A.variacaoEmTexto(50, 100), "▼ 50%");
+    ok("sem base é novo", A.variacaoEmTexto(5, 0), "novo");
+
+    const resumo = await A.embedDoResumo();
+    conferirCartao("a visão geral", resumo);
+    verdade("a visão geral diz o que pede atenção",
+      /vencem em 7 dias/.test(resumo.fields.find((f) => /atenção/.test(f.name))?.value || ""));
+    const dinheiro = await A.embedDoDinheiro();
+    conferirCartao("a aba Dinheiro", dinheiro);
+    /* 12 com pago_ate no futuro, menos os 3 que saíram não entram... 0..11 todos dentro. */
+    verdade("a receita soma Pro e Aliança", /R\$ \d+,\d\d/.test(dinheiro.fields[0].value));
+    verdade("quem não renovou aparece", /venceu/.test(dinheiro.fields.find((f) => /renovaram/.test(f.name)).value));
+    conferirCartao("a aba Crescimento", await A.embedDoCrescimento());
+    const { embed, servidores: lista } = await A.embedDosServidores();
+    conferirCartao("a aba Servidores", embed, A.linhasDoAdmin("servidores", lista));
+    ok("quem saiu não entra na lista", lista.length, 37);
+    conferirCartao("a aba Ferramentas", await A.embedDasFerramentas());
+
+    globalThis.errosRecentes = Array.from({ length: 30 }, (_, i) => ({
+      onde: i % 3 ? "espelho" : `lugar-${i}`, porque: "algo deu errado ".repeat(20), quando: Date.now() - i * 60000 }));
+    const agrupado = A.errosAgrupados();
+    verdade("o erro repetido vira um número", /\*\*espelho\*\* ×20/.test(agrupado));
+    verdade("os erros agrupados cabem num campo", agrupado.length <= 1024);
+    globalThis.errosRecentes = [];
+
+    const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+    verdade("o menu de abas é atendido",
+      /telaDoAdmin\(acao === "aba" \? inter\.values\?\.\[0\] : acao\)/.test(idx));
+    verdade("escolher um servidor abre a ficha antes do deferUpdate",
+      idx.indexOf('acao === "ficha"') > 0 && idx.indexOf('acao === "ficha"') < idx.indexOf("await inter.deferUpdate();\n\n  if (acao === \"aqui\")"));
   }
 
   /* ---- o cartão do dia, no painel do dono ---- */
