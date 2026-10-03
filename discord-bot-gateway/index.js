@@ -7390,44 +7390,72 @@ function cronometro(faltam) {
   return `${m}m`;
 }
 
-function cartaoDoEvento(ev, presencas = [], agora = Date.now()) {
-  const s = Math.floor(new Date(ev.quando).getTime() / 1000);
-  const passou = new Date(ev.quando).getTime() <= agora;
+/* As palavras do cartao. Em portugues aqui; a sala de cada lingua manda as
+   suas (cargaNaLingua traduz este objeto uma vez por lingua). */
+const PALAVRAS_DO_CARTAO = {
+  jogo: "Jogo (UTC)", seu: "Seu horário", falta: "Falta", comecou: "Começou!",
+  repete: "Repete a cada", aviso: "Aviso no privado", antes: "min antes",
+  inscritos: "Inscritos", marca: "Marca", inscrever: "Me inscrever",
+};
 
-  /* O <t:R> anda sozinho na tela de quem le: "em 2 horas", "em 5 minutos".
-     E' o cronometro do cartao, e nao custa uma edicao sequer. */
-  /* Duas horas, e as duas importam: a do JOGO (UTC, a que aparece na tela do
-     jogo e no lembrete dele) e a de quem le (<t:F>, no relogio do pais de
-     cada um). Com as duas lado a lado ninguem precisa fazer conta de fuso. */
-  const d = new Date(ev.quando);
+const COR_PERTO = 0x2ECC71;    // menos de 1 hora: hora de se preparar
+const COR_COMECOU = 0xE74C3C;  // na primeira hora depois do inicio
+const PERTO = 3600000;
+
+function corDoEvento(t, agora) {
+  if (t <= agora) return agora - t <= PERTO ? COR_COMECOU : 0x9aa0a6;
+  return t - agora <= PERTO ? COR_PERTO : COR;
+}
+
+/* Nome limpo: "Armadilha  1 " vira "Armadilha 1". O mesmo nome com espaco a
+   mais seria outro evento para quem procura pelo nome. */
+function nomeLimpo(t) {
+  return String(t || "").replace(/\s+/g, " ").trim();
+}
+
+function cartaoDoEvento(ev, presencas = [], agora = Date.now(), P = PALAVRAS_DO_CARTAO) {
+  const t = new Date(ev.quando).getTime();
+  const s = Math.floor(t / 1000);
+  const passou = t <= agora;
+  const d = new Date(t);
   const z = (n) => String(n).padStart(2, "0");
-  const doJogo = `🎮 **${z(d.getUTCDate())}/${z(d.getUTCMonth() + 1)} ${z(d.getUTCHours())}:${z(d.getUTCMinutes())} UTC**`;
-  const partes = [doJogo, `🕒 <t:${s}:F>`, passou ? "🔴" : `⏳ **${cronometro(new Date(ev.quando).getTime() - agora)}**`];
+
+  /* Tres caixinhas lado a lado: a hora do JOGO (a da tela, em UTC), a de
+     quem le (o Discord desenha no relogio do pais de cada um) e quanto falta.
+     Com as tres juntas ninguem precisa fazer conta de fuso. */
+  const campos = [
+    { name: `🎮 ${P.jogo}`, value: `**${z(d.getUTCDate())}/${z(d.getUTCMonth() + 1)} ${z(d.getUTCHours())}:${z(d.getUTCMinutes())}**`, inline: true },
+    { name: `🕒 ${P.seu}`, value: `<t:${s}:d> <t:${s}:t>`, inline: true },
+    { name: `⏳ ${P.falta}`, value: passou ? `🔴 **${P.comecou}**` : `**${cronometro(t - agora)}**`, inline: true },
+  ];
+
+  const linhas = [];
   const extras = [];
-  if (Number(ev.repetir_min) > 0) extras.push(`🔁 ${textoDaRepeticao(ev.repetir_min)}`);
-  if (Number(ev.lembrete_min) > 0) extras.push(`⏰ −${ev.lembrete_min}m ✉️`);
-  if (/^\d{5,25}$/.test(String(ev.cargo_id || ""))) extras.push(`📣 <@&${ev.cargo_id}>`);
-  if (extras.length) partes.push(extras.join(" · "));
-  if (ev.detalhes) partes.push("", String(ev.detalhes));
+  if (Number(ev.repetir_min) > 0) extras.push(`🔁 ${P.repete} **${textoDaRepeticao(ev.repetir_min)}**`);
+  if (Number(ev.lembrete_min) > 0) extras.push(`⏰ ${P.aviso}: **${ev.lembrete_min} ${P.antes}**`);
+  if (extras.length) linhas.push(extras.join(" · "));
+  if (/^\d{5,25}$/.test(String(ev.cargo_id || ""))) linhas.push(`📣 ${P.marca}: <@&${ev.cargo_id}>`);
+  if (ev.detalhes) linhas.push("", String(ev.detalhes));
 
   /* Inscricao e' quem disse "vou" -- a mesma linha da votacao de antes, por
-     isso os cartoes antigos continuam contando certo. Os "nao vou" antigos
-     simplesmente nao aparecem mais. */
+     isso os cartoes antigos continuam contando certo. Mencao, e nao texto:
+     nao tem lingua e o Discord desenha o apelido de cada um sozinho. */
   const inscritos = presencas.filter((p) => p.vai);
-  /* Nomes em mencao, e nao em texto: mencao nao tem lingua, cabe em poucos
-     caracteres e o Discord desenha o apelido de cada servidor sozinho. */
-  const lista = inscritos.length
-    ? inscritos.slice(0, 20).map((p) => `<@${p.discord_user_id}>`).join(" ") +
-      (inscritos.length > 20 ? ` +${inscritos.length - 20}` : "")
-    : "—";
+  campos.push({
+    name: `🔔 ${P.inscritos} (${inscritos.length})`,
+    value: inscritos.length
+      ? inscritos.slice(0, 20).map((p) => `<@${p.discord_user_id}>`).join(" ") +
+        (inscritos.length > 20 ? ` +${inscritos.length - 20}` : "")
+      : "—",
+    inline: false,
+  });
 
   return {
-    color: passou ? 0x9aa0a6 : COR,
-    title: `${passou ? "✔️" : "📅"} ${String(ev.titulo).slice(0, 240)}`,
-    description: partes.join("\n"),
-    fields: [{ name: `🔔 ${inscritos.length}`, value: lista, inline: false }],
-    ...(ev.gif_url ? { image: { url: String(ev.gif_url) } } : {}),
-    footer: { text: "🔔 subscribe: DM reminder + ping · 🌐 read this in your language · time shown in your clock" },
+    color: corDoEvento(t, agora),
+    title: `${passou ? "🔴" : "📅"} ${nomeLimpo(ev.titulo).slice(0, 240)}`,
+    ...(linhas.length ? { description: linhas.join("\n") } : {}),
+    fields: campos,
+    ...(ev.gif_url ? { thumbnail: { url: String(ev.gif_url) } } : {}),
   };
 }
 
@@ -7436,16 +7464,19 @@ function cartaoDoEvento(ev, presencas = [], agora = Date.now()) {
    Estava lendo Date.now() aqui dentro, e com isso a função não tinha como ser
    testada num instante escolhido -- o teste do evento passado passava por
    acidente, porque a data inventada ainda era futura no relógio de verdade. */
-function botoesDoEvento(ev, agora = Date.now()) {
+function botoesDoEvento(ev, agora = Date.now(), quantos = 0, rotulo = "Subscribe", comIdioma = true) {
   const linha = [];
   if (new Date(ev.quando).getTime() > agora) {
-    /* Um botao so': tocar inscreve, tocar de novo sai. Dois botoes (vou / nao
-       vou) pediam uma decisao a quem so' queria ser lembrado. */
-    linha.push({ type: 2, custom_id: `evento:vou:${ev.id}`, style: 3, emoji: { name: "🔔" }, label: "Subscribe" });
+    /* Um botao so': tocar inscreve, tocar de novo sai. O numero de inscritos
+       vai no proprio botao. */
+    linha.push({ type: 2, custom_id: `evento:vou:${ev.id}`, style: 3, emoji: { name: "🔔" },
+      label: `${rotulo} · ${quantos}`.slice(0, 80) });
   }
-  linha.push({ type: 2, custom_id: `evento:idioma:${ev.id}`, style: 2,
-    emoji: { name: "🌐" }, label: "My language" });
-  return [{ type: 1, components: linha }];
+  if (comIdioma) {
+    linha.push({ type: 2, custom_id: `evento:idioma:${ev.id}`, style: 2,
+      emoji: { name: "🌐" }, label: "My language" });
+  }
+  return linha.length ? [{ type: 1, components: linha }] : [];
 }
 
 /* Tudo abaixo e' tolerante a tabela que ainda nao existe: leitura que falha
@@ -7472,35 +7503,100 @@ async function presencasDoEvento(id) {
    morre. Por isso cada um guarda o proprio msg_id -- e por isso a varredura
    tambem APAGA, senao a sala vira mural de coisa que ja passou e a proxima
    chamada se perde no meio. */
+/* ---------------- a ordem da sala ----------------
+
+   O proximo evento fica EMBAIXO, perto da caixa de escrever, que e' onde o
+   olho cai no Discord. Mensagem nao muda de lugar, entao quando a ordem sai
+   errada (evento novo, evento que repetiu e foi para o fim da fila) os
+   cartoes daquela sala sao apagados e postados de novo, do mais longe ao mais
+   perto. Inscricao mora no banco: nada se perde.
+
+   O aviso de inicio e' uma mensagem SEPARADA, embaixo de tudo, com as
+   marcacoes. Assim o cartao pode se reorganizar sem apagar o sino de
+   ninguem; o aviso some sozinho duas horas depois. */
+const AVISO_FICA = 2 * 3600000;
+
+function emOrdem(msgs) {
+  if (msgs.some((m) => !m)) return false;
+  for (let i = 1; i < msgs.length; i++) {
+    if (BigInt(msgs[i].id) <= BigInt(msgs[i - 1].id)) return false;
+  }
+  return true;
+}
+
+function ehAvisoDeInicio(m) {
+  return m?.author?.id === client.user?.id && !eventoDoCartao(m) &&
+    String(m?.content || "").startsWith("🔔 **");
+}
+
+/* `cargaDe(ev)` monta o cartao daquela sala; `aoPostar(ev, msg)` e' chamado
+   quando um cartao nasce (a sala original guarda o msg_id). */
+async function pintarSala(canal, eventos, cargaDe, aoPostar = null, agora = Date.now()) {
+  const recentes = await canal.messages.fetch({ limit: 50 }).catch(() => null);
+  const vivos = new Set(eventos.map((e) => String(e.id)));
+  const meus = new Map();
+  for (const m of [...(recentes?.values?.() || [])].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1))) {
+    if (m.author?.id !== client.user?.id) continue;
+    if (ehAvisoDeInicio(m)) {
+      if (agora - Number(m.createdTimestamp || agora) > AVISO_FICA) await m.delete().catch(() => {});
+      continue;
+    }
+    const id = eventoDoCartao(m);
+    if (!id) continue;
+    if (!vivos.has(id) || meus.has(id)) { await m.delete().catch(() => {}); continue; }
+    meus.set(id, m);
+  }
+
+  /* Do mais longe ao mais perto: o mais perto sai por ultimo, embaixo. */
+  const ordem = [...eventos].sort((a, b) => new Date(b.quando) - new Date(a.quando));
+  const msgs = ordem.map((ev) => meus.get(String(ev.id)) || null);
+
+  if (emOrdem(msgs)) {
+    for (let i = 0; i < ordem.length; i++) {
+      const carga = await cargaDe(ordem[i]);
+      const json = JSON.stringify(carga);
+      if (ultimaCargaDaCopia.get(msgs[i].id) === json) continue;
+      await msgs[i].edit(carga).then(() => ultimaCargaDaCopia.set(msgs[i].id, json))
+        .catch((e) => console.error("eventos: nao consegui editar o cartão:", e?.message || e));
+    }
+    return;
+  }
+  for (const m of msgs) if (m) await m.delete().catch(() => {});
+  for (const ev of ordem) {
+    const carga = await cargaDe(ev);
+    const nova = await canal.send(carga)
+      .catch((e) => { console.error("eventos: nao consegui postar o cartão:", e?.message || e); return null; });
+    if (!nova) continue;
+    ultimaCargaDaCopia.set(nova.id, JSON.stringify(carga));
+    if (aoPostar) await aoPostar(ev, nova);
+  }
+}
+
+/* O aviso de inicio, na lingua da sala. */
+function avisoDeInicio(ev, aviso, P = PALAVRAS_DO_CARTAO, titulo = ev.titulo) {
+  return {
+    content: aviso.content,
+    embeds: [{ color: COR_COMECOU, title: `🔴 ${nomeLimpo(titulo).slice(0, 240)}`, description: `**${P.comecou}**`,
+      ...(ev.gif_url ? { thumbnail: { url: String(ev.gif_url) } } : {}) }],
+    allowedMentions: aviso.allowedMentions,
+  };
+}
+
 async function desenharEventos(guild, servidor) {
   const canal = canalDaAgenda(guild);
   if (!canal) return;
 
   const eventos = await eventosDoServidor(servidor.id);
-  for (const ev of eventos) {
-    const carga = {
-      embeds: [cartaoDoEvento(ev, await presencasDoEvento(ev.id))],
-      components: botoesDoEvento(ev),
+  await pintarSala(canal, eventos, async (ev) => {
+    const presencas = await presencasDoEvento(ev.id);
+    return {
+      embeds: [cartaoDoEvento(ev, presencas)],
+      components: botoesDoEvento(ev, Date.now(), presencas.filter((p) => p.vai).length),
       allowedMentions: { parse: [] },
     };
-    if (ev.msg_id) {
-      const antiga = await canal.messages.fetch(ev.msg_id).catch(() => null);
-      if (antiga) {
-        /* Com o cronometro, esta passada roda de minuto em minuto: so' edita
-           o que mudou de verdade. */
-        const json = JSON.stringify(carga);
-        if (ultimaCargaDaCopia.get(antiga.id) === json) continue;
-        await antiga.edit(carga).then(() => ultimaCargaDaCopia.set(antiga.id, json)).catch((e) =>
-          console.error("eventos: nao consegui editar o cartão:", e?.message || e));
-        continue;
-      }
-    }
-    const nova = await canal.send(carga).catch((e) => {
-      console.error("eventos: nao consegui postar o cartão:", e?.message || e);
-      return null;
-    });
-    if (nova) await sbPatch(`cyron_evento?id=eq.${ev.id}`, { msg_id: nova.id }).catch(() => {});
-  }
+  }, async (ev, nova) => {
+    await sbPatch(`cyron_evento?id=eq.${ev.id}`, { msg_id: nova.id }).catch(() => {});
+  }).catch((e) => console.error("eventos: a agenda falhou:", e?.message || e));
 
   /* O que ja passou do prazo sai da sala E do banco. */
   /* O que repete nunca "passou": ele anda para a proxima data na ronda da
@@ -7542,7 +7638,6 @@ const ROTULO_INSCREVER = {
   ru: "Записаться", uk: "Записатися", tr: "Kaydol", pl: "Zapisz się", id: "Daftar", vi: "Đăng ký",
   th: "ลงชื่อ", ja: "参加登録", ko: "참가 신청", "zh-CN": "报名", ar: "اشترك",
 };
-const RODAPE_AGENDA = "🔔 inscreva-se: lembrete no privado e marcação na hora · horário no seu relógio";
 
 /* O id do evento que um cartao meu carrega, ou null. */
 function eventoDoCartao(msg) {
@@ -7571,18 +7666,29 @@ async function traduzirPara(texto, idioma, motor) {
   return t || texto;
 }
 
+/* As palavras do cartao numa lingua, traduzidas uma vez (traduzirPara ja'
+   guarda na memoria). */
+async function palavrasNaLingua(idioma, motor) {
+  if (!idioma || idioma === "pt") return PALAVRAS_DO_CARTAO;
+  const fora = {};
+  for (const [k, v] of Object.entries(PALAVRAS_DO_CARTAO)) fora[k] = await traduzirPara(v, idioma, motor);
+  const base = String(idioma).split("-")[0];
+  fora.inscrever = ROTULO_INSCREVER[idioma] || ROTULO_INSCREVER[base] || fora.inscrever;
+  return fora;
+}
+
 async function cargaNaLingua(ev, presencas, idioma, motor, agora = Date.now()) {
-  const [titulo, detalhes, rodape] = await Promise.all([
-    traduzirPara(ev.titulo, idioma, motor), traduzirPara(ev.detalhes, idioma, motor),
-    traduzirPara(RODAPE_AGENDA, idioma, motor)]);
-  const cartao = cartaoDoEvento({ ...ev, titulo, detalhes }, presencas, agora);
-  cartao.footer = { text: rodape };
-  const base = String(idioma || "").split("-")[0];
-  const rotulo = ROTULO_INSCREVER[idioma] || ROTULO_INSCREVER[base] || ROTULO_INSCREVER.en;
-  /* Na sala da lingua o 🌐 nao faz sentido: o cartao ja' esta' nela. */
-  const botoes = new Date(ev.quando).getTime() > agora
-    ? [{ type: 1, components: [{ type: 2, custom_id: `evento:vou:${ev.id}`, style: 3, emoji: { name: "🔔" }, label: rotulo }] }]
-    : [];
+  const [titulo, detalhes, P] = await Promise.all([
+    traduzirPara(nomeLimpo(ev.titulo), idioma, motor), traduzirPara(ev.detalhes, idioma, motor),
+    palavrasNaLingua(idioma, motor)]);
+  const cartao = cartaoDoEvento({ ...ev, titulo, detalhes }, presencas, agora, P);
+  const quantos = presencas.filter((p) => p.vai).length;
+  /* Na sala da lingua o 🌐 nao faz sentido: o cartao ja' esta' nela. O
+     botao fica mesmo depois do inicio (desligado): e' por ele que a sala
+     reconhece o proprio cartao na passada seguinte. */
+  const passou = new Date(ev.quando).getTime() <= agora;
+  const botoes = [{ type: 1, components: [{ type: 2, custom_id: `evento:vou:${ev.id}`, style: 3,
+    emoji: { name: "🔔" }, label: `${P.inscrever} · ${quantos}`.slice(0, 80), disabled: passou }] }];
   return { embeds: [cartao], components: botoes, allowedMentions: { parse: [] } };
 }
 
@@ -7617,47 +7723,24 @@ const ultimaCargaDaCopia = new Map(); // msgId -> json, para nao editar o que na
 
 /* `reenviar`: { id, content, allowedMentions } -- o evento que comecou agora
    e' apagado e postado de novo em cada sala, marcando. */
-async function desenharNasCopias(guild, servidor, eventos, reenviar = null, agora = Date.now()) {
+/* `aviso`: { ev, aviso } -- o evento que comecou agora ganha, em cada sala, o
+   aviso de inicio na lingua dela, com as mesmas marcacoes. */
+async function desenharNasCopias(guild, servidor, eventos, aviso = null, agora = Date.now()) {
   const salas = await salasDaAgenda(guild, servidor.id, canalDaAgenda(guild));
   if (!salas.length) return;
   const motor = motorDe(servidor);
   const presencas = new Map();
   for (const ev of eventos) presencas.set(String(ev.id), await presencasDoEvento(ev.id));
-  const vivos = new Set(eventos.map((e) => String(e.id)));
 
   for (const { canal, idioma } of salas) {
     try {
-      const recentes = await canal.messages.fetch({ limit: 50 }).catch(() => null);
-      const meus = new Map();
-      for (const m of recentes?.values?.() || []) {
-        if (m.author?.id !== client.user?.id) continue;
-        const id = eventoDoCartao(m);
-        if (!id) continue;
-        if (!vivos.has(id)) { await m.delete().catch(() => {}); continue; }   // evento que acabou
-        if (meus.has(id)) { await m.delete().catch(() => {}); continue; }     // duplicata
-        meus.set(id, m);
-      }
-      for (const ev of eventos) {
-        const id = String(ev.id);
-        const carga = await cargaNaLingua(ev, presencas.get(id), idioma, motor, agora);
-        const velha = meus.get(id);
-        if (reenviar && String(reenviar.id) === id) {
-          if (velha) await velha.delete().catch(() => {});
-          const nova = await canal.send({ ...carga, content: reenviar.content, allowedMentions: reenviar.allowedMentions })
-            .catch((e) => { console.error(`eventos: nao consegui avisar em ${idioma}:`, e?.message || e); return null; });
-          if (nova) ultimaCargaDaCopia.set(nova.id, JSON.stringify(carga));
-          continue;
-        }
-        const json = JSON.stringify(carga);
-        if (velha) {
-          if (ultimaCargaDaCopia.get(velha.id) === json) continue;
-          await velha.edit(carga).then(() => ultimaCargaDaCopia.set(velha.id, json))
-            .catch((e) => console.error(`eventos: nao consegui editar o cartão em ${idioma}:`, e?.message || e));
-        } else {
-          const nova = await canal.send(carga)
-            .catch((e) => { console.error(`eventos: nao consegui postar o cartão em ${idioma}:`, e?.message || e); return null; });
-          if (nova) ultimaCargaDaCopia.set(nova.id, json);
-        }
+      await pintarSala(canal, eventos,
+        (ev) => cargaNaLingua(ev, presencas.get(String(ev.id)) || [], idioma, motor, agora), null, agora);
+      if (aviso) {
+        const P = await palavrasNaLingua(idioma, motor);
+        const titulo = await traduzirPara(nomeLimpo(aviso.ev.titulo), idioma, motor);
+        await canal.send(avisoDeInicio(aviso.ev, aviso.aviso, P, titulo)).catch((e) =>
+          console.error(`eventos: nao consegui avisar em ${idioma}:`, e?.message || e));
       }
     } catch (e) {
       console.error(`eventos: a sala de ${idioma} falhou:`, e?.message || e);
@@ -7712,6 +7795,7 @@ const NAO_GRAVEI_EVENTO = "Não consegui guardar o evento. Se isto continuar, a 
    /evento e para o leitor automatico: duas copias desta conta divergiriam no
    dia em que uma ganhasse um campo e a outra nao. */
 async function gravarEvento(guild, servidor, userId, { titulo, detalhes, quando, repetir, lembrete, cargoId, gif }) {
+  titulo = nomeLimpo(titulo);
   const campos = {
     titulo, detalhes: detalhes || null, quando: new Date(quando).toISOString(),
     repetir_min: repetir || null,
@@ -7990,7 +8074,7 @@ async function criarEvento(inter) {
   const servidor = await servidorDoGuild(inter.guildId);
   if (!servidor) return inter.editReply({ content: (await nalingua(idioma, inter.guildId, "Ainda não terminei de me instalar aqui."))[0] });
 
-  const titulo = inter.options.getString("o-que").trim();
+  const titulo = nomeLimpo(inter.options.getString("o-que"));
   const bruto = (inter.options.getString("quando") || "").trim();
   const detalhes = (inter.options.getString("detalhes") || "").trim();
   const fusoEscolhido = fusoDoCampo(inter.options.getString("fuso"));
@@ -8354,15 +8438,10 @@ async function cliqueEvento(inter) {
     await inter.deferReply({ flags: 64 });
     const escolhido = await idiomaEscolhido(inter.user.id);
     const idioma = escolhido || idiomaDoAplicativo(inter.locale) || "en";
-    const presencas = ev.votacao ? await presencasDoEvento(ev.id) : [];
-    const cartao = cartaoDoEvento(ev, presencas);
-    /* O horário sai do tradutor: <t:...> não é texto, é marcação, e traduzir
-       marcação a quebra. Ele já está no fuso de quem lê de qualquer jeito. */
-    return inter.editReply({
-      embeds: [{ color: cartao.color, ...(await traduzirEmbed(
-        { ...cartao, description: undefined }, idioma, await motorDoGuild(inter.guildId))),
-        description: cartao.description }],
-    });
+    /* O mesmo cartao das salas de idioma: palavras traduzidas, horario e
+       marcacoes fora do tradutor (<t:...> e' marcacao, e traduzir a quebra). */
+    const carga = await cargaNaLingua(ev, await presencasDoEvento(ev.id), idioma, await motorDoGuild(inter.guildId));
+    return inter.editReply({ embeds: carga.embeds, allowedMentions: { parse: [] } });
   }
 
   /* Presença. Um upsert por pessoa: dois cliques no mesmo instante não
@@ -8485,28 +8564,21 @@ async function avisarNaHora(guild, servidor, ev, inscritos, marcar, agora = Date
   }
   if (!canal) return;
 
-  if (ev.msg_id) {
-    const velha = await canal.messages.fetch(ev.msg_id).catch(() => null);
-    if (velha) await velha.delete().catch(() => {});
+  /* O cartao se reorganiza sozinho (desenharEventos); o sino e' uma mensagem
+     propria, embaixo de tudo. */
+  if (marcar) {
+    await canal.send(avisoDeInicio(ev, aviso)).catch((e) =>
+      console.error("eventos: nao consegui avisar na hora:", e?.message || e));
   }
-  const presencas = await presencasDoEvento(ev.id);
-  const nova = await canal.send({
-    ...(marcar ? { content: aviso.content } : {}),
-    embeds: [cartaoDoEvento(proximo, presencas, agora)],
-    components: botoesDoEvento(proximo, agora),
-    allowedMentions: marcar ? aviso.allowedMentions : { parse: [] },
-  }).catch((e) => {
-    console.error("eventos: nao consegui avisar na hora:", e?.message || e);
-    return null;
-  });
-  if (nova) await sbPatch(`cyron_evento?id=eq.${ev.id}`, { msg_id: nova.id }).catch(() => {});
+  await desenharEventos(guild, servidor).catch(() => {});
 
   /* As salas de idioma: o mesmo reenvio, com o mesmo chamado. Quem so'
      enxerga a sala da lingua dele e' marcado la' -- o Discord nao avisa quem
      nao ve o canal, entao ninguem leva dois sinos. */
-  await desenharNasCopias(guild, servidor, await eventosDoServidor(servidor.id),
-    marcar ? { id: ev.id, content: aviso.content, allowedMentions: aviso.allowedMentions } : null, agora)
-    .catch((e) => console.error("eventos: o aviso nas salas de idioma falhou:", e?.message || e));
+  if (marcar) {
+    await desenharNasCopias(guild, servidor, await eventosDoServidor(servidor.id), { ev, aviso }, agora)
+      .catch((e) => console.error("eventos: o aviso nas salas de idioma falhou:", e?.message || e));
+  }
 }
 
 async function rodarAgendaDeEventos(agora = Date.now()) {
