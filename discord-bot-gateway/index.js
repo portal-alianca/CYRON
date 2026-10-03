@@ -11633,6 +11633,254 @@ function quandoFoi(ms = Date.now(), estilo = "T") {
   return `<t:${Math.floor(ms / 1000)}:${estilo}>`;
 }
 
+/* ---------------- os erros que se organizam sozinhos ----------------
+
+   O canal de erros era uma fila de mensagens: cada aviso uma nova, e o mesmo
+   problema aparecia dez vezes espalhado no meio de outros. Para saber o que
+   estava aberto era preciso ler tudo.
+
+   Agora cada TIPO de erro tem UM cartao, editado no lugar: quantas vezes,
+   desde quando, a ultima, e em que pe' esta' -- aberto, consertando,
+   resolvido ou silenciado. Quando e' hora de chamar atencao (primeira vez,
+   ou o recuo do aviso liberou), o cartao desce para o fim do canal; no resto
+   do tempo ele so' muda o numero, calado. Um quadro fixado no topo lista o
+   que esta' aberto.
+
+   A ficha mora tambem no banco (cyron_erro), e e' ela a fila de conserto:
+   quem consertar muda o status la', e o cartao acompanha na proxima hora.
+   Erro que passa 24 horas sem aparecer fecha sozinho; se voltar, reabre e
+   desce de novo. */
+const fichasDeErro = new Map();   // id -> { chave, onde, porque, explicado, precisa, novas, base, destacar }
+const statusDesenhado = new Map();   // id -> status que o cartao mostra
+const ERRO_FECHA_SOZINHO = 24 * 60 * 60 * 1000;
+let descargaDeErros = null;
+
+function idDoErro(chave) {
+  return createHash("sha1").update(String(chave)).digest("hex").slice(0, 16);
+}
+
+function contarErro(chave, { onde, porque, explicacao, agora = Date.now() }) {
+  const id = idDoErro(chave);
+  const f = fichasDeErro.get(id) || { id, chave, novas: 0, base: null, destacar: false };
+  f.titulo = explicacao?.titulo || `${onde}: ${String(porque).slice(0, 80)}`;
+  f.onde = String(onde).slice(0, 120);
+  f.porque = String(porque || "").slice(0, 500);
+  f.explicado = !!explicacao;
+  f.precisa = !!explicacao?.precisaDeVoce;
+  f.novas += 1;
+  f.ultimo = agora;
+  fichasDeErro.set(id, f);
+  agendarDescargaDeErros();
+}
+
+/* O cartao que o anotarErro montou, e o pedido de descer para o fim. */
+function mostrarErro(chave, corpo) {
+  const f = fichasDeErro.get(idDoErro(chave));
+  if (!f) return;
+  f.base = corpo?.embeds?.[0] || f.base;
+  f.destacar = true;
+  agendarDescargaDeErros();
+}
+
+/* Junta as ocorrencias de meio minuto numa ida so' ao banco e ao Discord:
+   a queda do Supabase que gera trinta linhas vira uma edicao. */
+function agendarDescargaDeErros(espera = 30 * 1000) {
+  if (descargaDeErros) return;
+  descargaDeErros = setTimeout(() => {
+    descargaDeErros = null;
+    descarregarErros().catch((e) => console.log("erros: descarga falhou:", e?.message || e));
+  }, espera);
+}
+
+const STATUS_DO_ERRO = {
+  aberto:      { emoji: "🔴", nome: "Aberto", cor: null },
+  consertando: { emoji: "🔧", nome: "Consertando", cor: 0xC9A227 },
+  resolvido:   { emoji: "✅", nome: "Resolvido", cor: 0x2E8B7A },
+  silenciado:  { emoji: "🔇", nome: "Silenciado", cor: 0x6B7280 },
+};
+const CAMPOS_DA_FICHA = ["📊 Ocorrências", "📋 Status"];
+
+/* O cartao de um erro: o que o anotarErro explicou, mais a ficha. Os dois
+   campos da ficha sao trocados, nunca empilhados, entao da' para redesenhar a
+   partir do cartao que ja' esta' no canal depois de um reinicio. */
+function cartaoDoErro(base, linha, agora = Date.now()) {
+  const st = STATUS_DO_ERRO[linha.status] || STATUS_DO_ERRO.aberto;
+  const campos = (base?.fields || []).filter((c) => !CAMPOS_DA_FICHA.includes(c.name));
+  const t = (iso) => Math.floor(Date.parse(iso) / 1000);
+  const estado = linha.status === "silenciado" && linha.silencio_ate
+    ? `${st.emoji} **${st.nome}** até <t:${t(linha.silencio_ate)}:f>`
+    : `${st.emoji} **${st.nome}**`;
+  return {
+    ...(base || { title: `❔ ${String(linha.titulo || linha.onde).slice(0, 200)}`,
+      fields: [{ name: "O que aconteceu", value: `\`\`\`\n${String(linha.onde)}: ${String(linha.porque).slice(0, 900)}\n\`\`\`` }] }),
+    ...(st.cor ? { color: st.cor } : {}),
+    fields: [
+      ...campos.slice(0, 20),
+      { name: CAMPOS_DA_FICHA[0], inline: true,
+        value: `**${linha.vezes}x** · desde <t:${t(linha.primeiro_em)}:d>\núltima <t:${t(linha.ultimo_em)}:R>` },
+      { name: CAMPOS_DA_FICHA[1], inline: true,
+        value: (estado + (linha.nota ? `\n${String(linha.nota).slice(0, 300)}` : "")).slice(0, 1024) },
+    ],
+    footer: { text: `${String(linha.onde).slice(0, 100)} · ficha ${linha.chave}` },
+    timestamp: new Date(agora).toISOString(),
+  };
+}
+
+function botoesDoErro(linha) {
+  const b = (acao, emoji, label, style = 2) =>
+    ({ type: 2, custom_id: `erro:${acao}:${linha.chave}`, style, emoji: { name: emoji }, label });
+  if (linha.status === "resolvido" || linha.status === "silenciado") {
+    return [{ type: 1, components: [b("reabrir", "↩️", "Reabrir")] }];
+  }
+  return [{ type: 1, components: [
+    b("resolvido", "✅", "Resolvido", 3),
+    b("consertando", "🔧", "Estou consertando"),
+    b("silenciar", "🔇", "Silenciar 7 dias"),
+  ] }];
+}
+
+async function canalDeErros() {
+  const gid = await guildDoPainel();
+  const guild = gid && client.guilds.cache.get(gid);
+  return guild?.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === CANAL_ERROS) || null;
+}
+
+async function linhaDoErro(id) {
+  return (await sb(`cyron_erro?chave=eq.${id}&select=*`).catch(() => null))?.[0] || null;
+}
+
+/* O que muda na ficha com as ocorrencias novas. Sem rede: entra a linha do
+   banco (ou nada), sai a linha nova e se o cartao desce. */
+function proximaFicha(antes, f, agora = Date.now()) {
+  const linha = { ...(antes || {
+    chave: f.id, status: "aberto", vezes: 0, primeiro_em: new Date(f.ultimo || agora).toISOString(),
+  }) };
+  linha.titulo = f.titulo; linha.onde = f.onde; linha.porque = f.porque;
+  linha.explicado = f.explicado; linha.precisa_de_voce = f.precisa;
+  linha.vezes = Number(linha.vezes || 0) + f.novas;
+  linha.ultimo_em = new Date(f.ultimo || agora).toISOString();
+  let destacar = f.destacar || !antes || !antes.msg_id;
+  if (linha.status === "resolvido") {
+    linha.status = "aberto";
+    linha.nota = "voltou a acontecer depois de resolvido";
+    destacar = true;
+  }
+  if (linha.status === "silenciado") {
+    if (linha.silencio_ate && Date.parse(linha.silencio_ate) > agora) destacar = false;
+    else { linha.status = "aberto"; linha.silencio_ate = null; linha.nota = "o silêncio acabou e ele continua"; }
+  }
+  return { linha, destacar };
+}
+
+async function descarregarErros(agora = Date.now()) {
+  const canal = await canalDeErros();
+  for (const f of [...fichasDeErro.values()]) {
+    if (!f.novas && !f.destacar) continue;
+    /* A memoria segura o cartao quando o banco nao responde (ou a tabela
+       ainda nao existe): sem ela, cada descarga postaria um cartao novo. */
+    const { linha, destacar } = proximaFicha((await linhaDoErro(f.id)) || f.linha || null, f, agora);
+    f.novas = 0; f.destacar = false;
+    if (canal) {
+      const cartao = { embeds: [cartaoDoErro(f.base, linha, agora)], components: botoesDoErro(linha) };
+      const velha = linha.msg_id ? await canal.messages.fetch(linha.msg_id).catch(() => null) : null;
+      if (velha && !destacar) {
+        await velha.edit(cartao).catch(() => {});
+      } else {
+        const nova = await canal.send({ ...cartao, allowedMentions: { parse: [] } }).catch(() => null);
+        if (nova) {
+          await velha?.delete().catch(() => {});
+          linha.msg_id = nova.id;
+        }
+      }
+    }
+    f.linha = linha;
+    statusDesenhado.set(linha.chave, `${linha.status}|${linha.nota || ""}`);
+    await sbPost("cyron_erro", linha, "resolution=merge-duplicates")
+      .catch((e) => console.log("erros: nao consegui guardar a ficha:", e?.message || e));
+  }
+  await desenharQuadroDeErros(canal, agora).catch(() => {});
+}
+
+/* O quadro fixado: o que esta' aberto, do mais repetido ao menos, com o
+   atalho para cada cartao. */
+async function desenharQuadroDeErros(canal, agora = Date.now()) {
+  if (!canal) return;
+  const linhas = await sb("cyron_erro?status=in.(aberto,consertando)&select=*&order=vezes.desc&limit=20")
+    .catch(() => null);
+  if (!linhas) return;
+  const link = (l) => (l.msg_id ? ` · [ver](https:` + `//discord.com/channels/${canal.guild.id}/${canal.id}/${l.msg_id})` : "");
+  const embed = {
+    color: linhas.some((l) => l.precisa_de_voce) ? 0xE03E3E : linhas.length ? 0xC9A227 : 0x2E8B7A,
+    title: `📋 Quadro de erros — ${linhas.length} em aberto`,
+    description: linhas.length
+      ? linhas.map((l) => `${(STATUS_DO_ERRO[l.status] || STATUS_DO_ERRO.aberto).emoji} **${String(l.titulo).slice(0, 70)}** ` +
+          `×${l.vezes} · <t:${Math.floor(Date.parse(l.ultimo_em) / 1000)}:R>${link(l)}`).join("\n").slice(0, 4000)
+      : "✅ Nada em aberto.",
+    footer: { text: "cada erro tem um cartão só, editado no lugar · fecha sozinho depois de 24h sem aparecer" },
+    timestamp: new Date(agora).toISOString(),
+  };
+  const guardado = (await ajustes()).erros_quadro_msg;
+  const velho = guardado ? await canal.messages.fetch(guardado).catch(() => null) : null;
+  if (velho) return void await velho.edit({ embeds: [embed] }).catch(() => {});
+  const novo = await canal.send({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => null);
+  if (!novo) return;
+  await novo.pin("quadro de erros").catch(() => {});
+  await apagarAvisoDeFixado(canal, novo.id);
+  await porAjuste("erros_quadro_msg", novo.id);
+}
+
+/* De hora em hora: fecha o que parou de acontecer e redesenha o cartao de
+   quem mudou de status por fora (quem consertou mexeu no banco). */
+function revisaoDoErro(linha, agora = Date.now()) {
+  if (linha.status === "aberto" && agora - Date.parse(linha.ultimo_em) > ERRO_FECHA_SOZINHO) {
+    return { ...linha, status: "resolvido", nota: "parou de acontecer sozinho (24h sem aparecer)" };
+  }
+  if (linha.status === "silenciado" && linha.silencio_ate && Date.parse(linha.silencio_ate) <= agora) {
+    return { ...linha, status: "resolvido", silencio_ate: null, nota: "o silêncio acabou sem ele voltar" };
+  }
+  return linha;
+}
+
+async function revisarErros(agora = Date.now()) {
+  const canal = await canalDeErros();
+  const linhas = await sb("cyron_erro?status=neq.resolvido&select=*").catch(() => null) || [];
+  const recentes = await sb(`cyron_erro?status=eq.resolvido&ultimo_em=gte.${new Date(agora - 7 * 864e5).toISOString()}&select=*`)
+    .catch(() => null) || [];
+  for (const antes of [...linhas, ...recentes]) {
+    const linha = revisaoDoErro(antes, agora);
+    if (linha !== antes) await sbPatch(`cyron_erro?chave=eq.${linha.chave}`, { status: linha.status, nota: linha.nota, silencio_ate: linha.silencio_ate ?? null }).catch(() => {});
+    if (statusDesenhado.get(linha.chave) === `${linha.status}|${linha.nota || ""}`) continue;
+    statusDesenhado.set(linha.chave, `${linha.status}|${linha.nota || ""}`);
+    const msg = canal && linha.msg_id ? await canal.messages.fetch(linha.msg_id).catch(() => null) : null;
+    if (!msg) continue;
+    const base = fichasDeErro.get(linha.chave)?.base || msg.embeds?.[0]?.toJSON?.() || null;
+    await msg.edit({ embeds: [cartaoDoErro(base, linha, agora)], components: botoesDoErro(linha) }).catch(() => {});
+  }
+  await desenharQuadroDeErros(canal, agora).catch(() => {});
+}
+
+/* Os botoes do cartao. So' o dono do bot. */
+async function cliqueDoErro(inter) {
+  if (!await ehDono(inter.user.id)) return inter.reply({ flags: 64, content: "Não conheço esse comando." });
+  const [, acao, chave] = inter.customId.split(":");
+  const agora = Date.now();
+  const mudanca = {
+    resolvido: { status: "resolvido", nota: `marcado como resolvido por ${inter.user.username}` },
+    consertando: { status: "consertando", nota: `${inter.user.username} está consertando` },
+    silenciar: { status: "silenciado", silencio_ate: new Date(agora + 7 * 864e5).toISOString(), nota: null },
+    reabrir: { status: "aberto", silencio_ate: null, nota: `reaberto por ${inter.user.username}` },
+  }[acao];
+  if (!mudanca || !/^[0-9a-f]{16}$/.test(chave || "")) return inter.reply({ flags: 64, content: "Botão velho." });
+  await inter.deferUpdate();
+  await sbPatch(`cyron_erro?chave=eq.${chave}`, mudanca).catch(() => {});
+  const linha = await linhaDoErro(chave);
+  if (!linha) return;
+  statusDesenhado.set(chave, `${linha.status}|${linha.nota || ""}`);
+  const base = fichasDeErro.get(chave)?.base || inter.message?.embeds?.[0]?.toJSON?.() || null;
+  await inter.editReply({ embeds: [cartaoDoErro(base, linha, agora)], components: botoesDoErro(linha) }).catch(() => {});
+  await desenharQuadroDeErros(await canalDeErros(), agora).catch(() => {});
+}
+
 function anotarErro(onde, porque) {
   errosRecentes.push({ quando: Date.now(), onde, porque: String(porque || "").slice(0, 300) });
   if (errosRecentes.length > MAX_ERROS) errosRecentes.shift();
@@ -11652,6 +11900,9 @@ function anotarErro(onde, porque) {
   const chave = explicacao ? `explicado|${explicacao.titulo}` : `${onde}|${String(porque).slice(0, 60)}`;
   const agora = Date.now();
   const hist = registrarOcorrencia(historicoDoAviso, chave, agora);
+  /* Toda ocorrencia conta na ficha do erro, mesmo quando nao e' hora de
+     falar: o cartao se atualiza calado, e o numero nunca mente. */
+  contarErro(chave, { onde, porque, explicacao, agora });
   const plano = planoDoAviso(hist, agora);
   if (!plano.falar) return;
   hist.avisos += 1;
@@ -11672,7 +11923,7 @@ function anotarErro(onde, porque) {
     /* Erro que eu ainda nao sei explicar. Aparece cru e ASSUMIDO como cru --
        fingir gravidade que eu nao sei medir seria pedir preocupacao no
        escuro. */
-    avisarNoPainel(CANAL_ERROS, {
+    mostrarErro(chave, {
       embeds: [{
         color: 0x9aa0a6,
         title: "❔ Um erro que eu ainda não sei explicar",
@@ -11710,7 +11961,7 @@ function anotarErro(onde, porque) {
         },
       ];
 
-  avisarNoPainel(CANAL_ERROS, {
+  mostrarErro(chave, {
     embeds: [{
       color: urgente ? 0xE03E3E : 0x9aa0a6,
       title: `${desmentida ? "🔁" : urgente ? "🔴" : "⚪"} ${explicacao.titulo}`,
@@ -15217,6 +15468,9 @@ client.on("interactionCreate", async (inter) => {
     if (inter.isButton() && inter.customId.startsWith(PREFIXO_LER)) {
       return await cliqueSuporte(inter);
     }
+    if (inter.isButton() && inter.customId.startsWith("erro:")) {
+      return await cliqueDoErro(inter);
+    }
     if (inter.isMessageComponent() && inter.customId.startsWith("cli:")) {
       return await cliqueDaFicha(inter);
     }
@@ -16962,6 +17216,9 @@ async function deHoraEmHora() {
   await olharAsCotas().catch((e) => console.error("cota: passada falhou:", e?.message || e));
   await talvezOCartaoDoDia().catch((e) => console.error("diário: cartão falhou:", e?.message || e));
   await publicarAnalitico().catch((e) => console.error("analitico: falhou:", e?.message || e));
+  /* console.log, e nao console.error: falhar aqui viraria um erro sobre o
+     canal de erros, que tentaria se anotar nele mesmo. */
+  await revisarErros().catch((e) => console.log("erros: revisao falhou:", e?.message || e));
 }
 
 /* Morrer não pode ser silencioso.
