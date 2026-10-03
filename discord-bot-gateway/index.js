@@ -7420,16 +7420,15 @@ function cartaoDoEvento(ev, presencas = [], agora = Date.now(), P = PALAVRAS_DO_
   const d = new Date(t);
   const z = (n) => String(n).padStart(2, "0");
 
-  /* Tres caixinhas lado a lado: a hora do JOGO (a da tela, em UTC), a de
-     quem le (o Discord desenha no relogio do pais de cada um) e quanto falta.
-     Com as tres juntas ninguem precisa fazer conta de fuso. */
-  const campos = [
-    { name: `🎮 ${P.jogo}`, value: `**${z(d.getUTCDate())}/${z(d.getUTCMonth() + 1)} ${z(d.getUTCHours())}:${z(d.getUTCMinutes())}**`, inline: true },
-    { name: `🕒 ${P.seu}`, value: `<t:${s}:d> <t:${s}:t>`, inline: true },
-    { name: `⏳ ${P.falta}`, value: passou ? `🔴 **${P.comecou}**` : `**${cronometro(t - agora)}**`, inline: true },
+  /* Poucas linhas, e nao caixinhas: no celular o Discord empilha campo
+     "lado a lado" um embaixo do outro, e o cartao virava uma coluna comprida.
+     A hora do JOGO (UTC, a da tela) e quanto falta na mesma linha; a de quem
+     le embaixo, no relogio do pais dele. */
+  const falta = passou ? `🔴 **${P.comecou}**` : `⏳ **${cronometro(t - agora)}**`;
+  const linhas = [
+    `🎮 **${z(d.getUTCDate())}/${z(d.getUTCMonth() + 1)} ${z(d.getUTCHours())}:${z(d.getUTCMinutes())} UTC**  ·  ${falta}`,
+    `🕒 ${P.seu}: <t:${s}:F>`,
   ];
-
-  const linhas = [];
   const extras = [];
   if (Number(ev.repetir_min) > 0) extras.push(`🔁 ${P.repete} **${textoDaRepeticao(ev.repetir_min)}**`);
   if (Number(ev.lembrete_min) > 0) extras.push(`⏰ ${P.aviso}: **${ev.lembrete_min} ${P.antes}**`);
@@ -7437,23 +7436,24 @@ function cartaoDoEvento(ev, presencas = [], agora = Date.now(), P = PALAVRAS_DO_
   if (/^\d{5,25}$/.test(String(ev.cargo_id || ""))) linhas.push(`📣 ${P.marca}: <@&${ev.cargo_id}>`);
   if (ev.detalhes) linhas.push("", String(ev.detalhes));
 
-  /* Inscricao e' quem disse "vou" -- a mesma linha da votacao de antes, por
-     isso os cartoes antigos continuam contando certo. Mencao, e nao texto:
-     nao tem lingua e o Discord desenha o apelido de cada um sozinho. */
+  /* Inscricao e' quem disse "vou". Com nome quando ha' (presencasComNomes),
+     mencao quando nao ha'. Nome passa por escape: um "*" no apelido nao pode
+     virar negrito no cartao inteiro. */
   const inscritos = presencas.filter((p) => p.vai);
-  campos.push({
+  const quem = (p) => p.nome ? String(p.nome).replace(/([*_`~|>\\])/g, "\\$1") : `<@${p.discord_user_id}>`;
+  const campos = [{
     name: `🔔 ${P.inscritos} (${inscritos.length})`,
     value: inscritos.length
-      ? inscritos.slice(0, 20).map((p) => `<@${p.discord_user_id}>`).join(" ") +
-        (inscritos.length > 20 ? ` +${inscritos.length - 20}` : "")
+      ? inscritos.slice(0, 25).map(quem).join(" · ").slice(0, 1000) +
+        (inscritos.length > 25 ? ` +${inscritos.length - 25}` : "")
       : "—",
     inline: false,
-  });
+  }];
 
   return {
     color: corDoEvento(t, agora),
     title: `${passou ? "🔴" : "📅"} ${nomeLimpo(ev.titulo).slice(0, 240)}`,
-    ...(linhas.length ? { description: linhas.join("\n") } : {}),
+    description: linhas.join("\n"),
     fields: campos,
     ...(ev.gif_url ? { thumbnail: { url: String(ev.gif_url) } } : {}),
   };
@@ -7490,6 +7490,23 @@ async function eventosDoServidor(servidorId) {
        a agenda inteira sumir da sala. */
     "&select=*&order=quando.asc")
     .catch(() => null) || [];
+}
+
+/* Com o servidor na mao, cada inscrito ganha o NOME (apelido daqui), e quem
+   nao e' membro sai da lista. Mencao dentro de cartao vira "<@123...>" cru
+   no celular quando o Discord nao carregou aquele membro -- e sempre, para
+   quem saiu do servidor. Nome e' texto: aparece igual em qualquer tela. */
+async function presencasComNomes(id, guild) {
+  const todas = await presencasDoEvento(id);
+  if (!guild?.members) return todas;
+  const fora = [];
+  for (const p of todas) {
+    if (!p.vai) continue;
+    const m = guild.members.cache?.get(String(p.discord_user_id)) ||
+      await guild.members.fetch(String(p.discord_user_id)).catch(() => null);
+    if (m) fora.push({ ...p, nome: m.displayName || m.user?.username || "" });
+  }
+  return fora;
 }
 
 async function presencasDoEvento(id) {
@@ -7588,7 +7605,7 @@ async function desenharEventos(guild, servidor) {
 
   const eventos = await eventosDoServidor(servidor.id);
   await pintarSala(canal, eventos, async (ev) => {
-    const presencas = await presencasDoEvento(ev.id);
+    const presencas = await presencasComNomes(ev.id, guild);
     return {
       embeds: [cartaoDoEvento(ev, presencas)],
       components: botoesDoEvento(ev, Date.now(), presencas.filter((p) => p.vai).length),
@@ -7730,7 +7747,7 @@ async function desenharNasCopias(guild, servidor, eventos, aviso = null, agora =
   if (!salas.length) return;
   const motor = motorDe(servidor);
   const presencas = new Map();
-  for (const ev of eventos) presencas.set(String(ev.id), await presencasDoEvento(ev.id));
+  for (const ev of eventos) presencas.set(String(ev.id), await presencasComNomes(ev.id, guild));
 
   for (const { canal, idioma } of salas) {
     try {
@@ -8440,7 +8457,7 @@ async function cliqueEvento(inter) {
     const idioma = escolhido || idiomaDoAplicativo(inter.locale) || "en";
     /* O mesmo cartao das salas de idioma: palavras traduzidas, horario e
        marcacoes fora do tradutor (<t:...> e' marcacao, e traduzir a quebra). */
-    const carga = await cargaNaLingua(ev, await presencasDoEvento(ev.id), idioma, await motorDoGuild(inter.guildId));
+    const carga = await cargaNaLingua(ev, await presencasComNomes(ev.id, inter.guild), idioma, await motorDoGuild(inter.guildId));
     return inter.editReply({ embeds: carga.embeds, allowedMentions: { parse: [] } });
   }
 

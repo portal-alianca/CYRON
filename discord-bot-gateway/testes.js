@@ -4159,15 +4159,11 @@ function conferirCartao(onde, embed, componentes = []) {
      ver o horário de Brasília escrito por extenso. */
   const cartao = cartaoDoEvento(base, [], AGORA);
   const s = Math.floor((AGORA + 3 * 3600000) / 1000);
-  const campo = (c, ini) => c.fields.find((f) => f.name.startsWith(ini));
-  verdade("três caixinhas lado a lado: jogo, seu horário, falta",
-    ["🎮", "🕒", "⏳"].every((e) => campo(cartao, e)?.inline === true));
-  verdade("a hora de quem lê vai como marcação do Discord, no fuso dele",
-    campo(cartao, "🕒").value === `<t:${s}:d> <t:${s}:t>`);
-  ok("o cronômetro exato, sem o arredondamento do Discord", campo(cartao, "⏳").value, "**3h 00m**");
-  /* A única hora escrita por mim é a do JOGO, em UTC. */
-  ok("a hora do jogo, como aparece na tela dele (UTC)", campo(cartao, "🎮").value, "**15/09 15:00**");
-  ok("o nome da caixinha diz que é UTC", campo(cartao, "🎮").name, "🎮 Jogo (UTC)");
+  const linha1 = cartao.description.split("\n")[0];
+  /* Poucas linhas: no celular campos "lado a lado" viram uma coluna. */
+  ok("a primeira linha: a hora do JOGO (UTC) e quanto falta, exato", linha1, "🎮 **15/09 15:00 UTC**  ·  ⏳ **3h 00m**");
+  ok("a segunda: a hora de quem lê, no relógio do país dele", cartao.description.split("\n")[1], `🕒 Seu horário: <t:${s}:F>`);
+  ok("só os inscritos ficam em campo", cartao.fields.length, 1);
   verdade("o título do líder aparece como ele escreveu", cartao.title.includes("Urso · Bear Trap"));
   verdade("os detalhes também", cartao.description.includes("Cavalaria nível 5."));
   ok("o nome sai limpo, sem espaço sobrando", cartaoDoEvento({ ...base, titulo: "Armadilha  1 " }, [], AGORA).title, "📅 Armadilha 1");
@@ -4188,6 +4184,9 @@ function conferirCartao(onde, embed, componentes = []) {
   const votado = cartaoDoEvento(comVoto, gente, AGORA);
   const ins = votado.fields.find((f) => f.name.startsWith("🔔"));
   ok("conta quem se inscreveu", ins.name, "🔔 Inscritos (2)");
+  const comNome = cartaoDoEvento(comVoto, [{ discord_user_id: "1", vai: true, nome: "Tiago*" }], AGORA)
+    .fields.find((f) => f.name.startsWith("🔔"));
+  ok("com o servidor na mão, aparece o NOME (mencão vira <@123> cru no celular)", comNome.value, "Tiago\\*");
   verdade("e o \"não vou\" antigo não conta como inscrito", !ins.value.includes("<@3>"));
   verdade("as pessoas aparecem como menção, que não tem língua", ins.value.includes("<@1>"));
   ok("o botão mostra quantos", botoesDoEvento(comVoto, AGORA, 2)[0].components[0].label, "Subscribe · 2");
@@ -4455,6 +4454,17 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("ninguém mais procura a sala pelo nome cru", !/c\.name === CANAL_EVENTOS\)/.test(f.replace(/function canalDaAgenda[^]*?\n}\n/, "")));
 }
 
+/* ============ inscritos com nome, e só quem é do servidor ============ */
+{
+  globalThis.presencasDoEvento = async () => [
+    { discord_user_id: "1", vai: true }, { discord_user_id: "2", vai: true }, { discord_user_id: "3", vai: false }];
+  const m = carregar(["presencasComNomes"]);
+  const guild = { members: { cache: new Map([["1", { displayName: "Tiago" }]]),
+    fetch: async (id) => { if (id === "2") throw new Error("Unknown Member"); return null; } } };
+  ok("quem é do servidor ganha o nome; quem saiu some da lista",
+    await m.presencasComNomes(7, guild), [{ discord_user_id: "1", vai: true, nome: "Tiago" }]);
+}
+
 /* ============ o cronômetro ============ */
 {
   const m = carregar(["CRONOMETRO_FINO", "cronometro"]);
@@ -4479,6 +4489,7 @@ function conferirCartao(onde, embed, componentes = []) {
   globalThis.COR = 0xF5A623;
   globalThis.traduzirComCache = async (t, idioma) => `[${idioma}] ${t}`;
   globalThis.presencasDoEvento = async () => [{ discord_user_id: "1", vai: true }];
+  globalThis.presencasComNomes = async (id) => globalThis.presencasDoEvento(id);
   globalThis.motorDe = () => ({ tipo: "auto" });
   globalThis.client = { user: { id: "bot" } };
   const m = carregar(["EVENTO_SOBREVIVE", "TIPO_AGENDA", "ROTULO_INSCREVER", "textoDaRepeticao",
@@ -4493,9 +4504,9 @@ function conferirCartao(onde, embed, componentes = []) {
   const c = await m.cargaNaLingua(ev, [], "ko", { tipo: "auto" }, AGORA);
   verdade("o título sai na língua da sala", c.embeds[0].title.includes("[ko] Armadilha de Caça 1"));
   verdade("os detalhes também", c.embeds[0].description.includes("[ko] Cavalaria"));
-  verdade("as palavras das caixinhas também", c.embeds[0].fields[0].name === "🎮 [ko] Jogo (UTC)");
-  ok("a hora continua marcação do Discord, sem passar pelo tradutor",
-    c.embeds[0].fields[1].value, `<t:${(AGORA + 3600000) / 1000}:d> <t:${(AGORA + 3600000) / 1000}:t>`);
+  verdade("as palavras do cartão também", c.embeds[0].description.includes("🕒 [ko] Seu horário:"));
+  verdade("a hora continua marcação do Discord, sem passar pelo tradutor",
+    c.embeds[0].description.includes(`<t:${(AGORA + 3600000) / 1000}:F>`));
   ok("o botão 🔔 vem com o rótulo da língua e o número", c.components[0].components[0].label, "참가 신청 · 0");
   ok("e é o mesmo botão do original (o clique cai no mesmo evento)", c.components[0].components[0].custom_id, "evento:vou:7");
   ok("na sala da língua não há 🌐", c.components[0].components.length, 1);
