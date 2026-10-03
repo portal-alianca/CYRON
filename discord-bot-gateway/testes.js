@@ -4144,7 +4144,7 @@ function conferirCartao(onde, embed, componentes = []) {
 /* ============ o cartão do evento ============ */
 {
   const { cartaoDoEvento, botoesDoEvento } = carregar([
-    "EVENTO_SOBREVIVE", "cartaoDoEvento", "botoesDoEvento"]);
+    "EVENTO_SOBREVIVE", "CRONOMETRO_FINO", "cronometro", "cartaoDoEvento", "botoesDoEvento"]);
   globalThis.COR = 0xF5A623;
 
   const AGORA = Date.UTC(2026, 8, 15, 12, 0);
@@ -4161,7 +4161,7 @@ function conferirCartao(onde, embed, componentes = []) {
   const s = Math.floor((AGORA + 3 * 3600000) / 1000);
   verdade("a hora vai como marcação do Discord, no fuso de quem lê",
     cartao.description.includes(`<t:${s}:F>`));
-  verdade("e a contagem regressiva também", cartao.description.includes(`<t:${s}:R>`));
+  verdade("e o cronômetro exato, sem o arredondamento do Discord", cartao.description.includes("⏳ **−3h 00m**"));
   verdade("nenhuma hora é escrita por mim, em fuso nenhum",
     !/\b\d{1,2}:\d{2}\b/.test(cartao.description));
   verdade("o título do líder aparece como ele escreveu", cartao.title.includes("Urso · Bear Trap"));
@@ -4213,7 +4213,7 @@ function conferirCartao(onde, embed, componentes = []) {
 {
   const m = carregar(["REPETIR_MIN", "REPETIR_MAX", "LEMBRETES", "MENCOES_MAX", "EVENTO_SOBREVIVE",
     "repetirDoTexto", "textoDaRepeticao", "proximaVez", "mencoesDoAviso",
-    "cartaoDoEvento", "botoesDoEvento"]);
+    "CRONOMETRO_FINO", "cronometro", "cartaoDoEvento", "botoesDoEvento"]);
   globalThis.COR = 0xF5A623;
 
   /* ---- repetir ---- */
@@ -4432,6 +4432,25 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("ninguém mais procura a sala pelo nome cru", !/c\.name === CANAL_EVENTOS\)/.test(f.replace(/function canalDaAgenda[^]*?\n}\n/, "")));
 }
 
+/* ============ o cronômetro ============ */
+{
+  const m = carregar(["CRONOMETRO_FINO", "cronometro"]);
+  const H = 3600000, M = 60000;
+  ok("o caso do print: 1d 10h 09m", m.cronometro(34 * H + 9 * M + 30000), "1d 10h 09m");
+  ok('37 horas não viram "2 dias"', m.cronometro(37 * H), "1d 13h 00m");
+  ok("menos de um dia", m.cronometro(5 * H + 7 * M), "5h 07m");
+  ok("menos de uma hora", m.cronometro(42 * M), "42m");
+  ok("longe: só dias e horas (o cartão muda de 10 em 10 minutos ali)", m.cronometro(3 * 24 * H + 4 * H + 12 * M), "3d 4h");
+  ok("passou: zero", m.cronometro(-1), "0m");
+}
+{
+  const f = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+  verdade("o cronômetro anda de minuto em minuto nas últimas 48 horas",
+    /async function rodarAgendaDeEventos[^]*?CRONOMETRO_FINO[^]{0,600}desenharEventos\(guild, servidor\)/.test(f));
+  verdade("e o cartão original só é editado quando mudou",
+    /ultimaCargaDaCopia\.get\(antiga\.id\) === json\) continue/.test(f));
+}
+
 /* ============ o cartão em cada sala de idioma ============ */
 {
   globalThis.COR = 0xF5A623;
@@ -4440,7 +4459,7 @@ function conferirCartao(onde, embed, componentes = []) {
   globalThis.motorDe = () => ({ tipo: "auto" });
   globalThis.client = { user: { id: "bot" } };
   const m = carregar(["EVENTO_SOBREVIVE", "TIPO_AGENDA", "ROTULO_INSCREVER", "RODAPE_AGENDA", "textoDaRepeticao",
-    "cartaoDoEvento", "botoesDoEvento", "eventoDoCartao", "traduzirPara", "cargaNaLingua",
+    "CRONOMETRO_FINO", "cronometro", "cartaoDoEvento", "botoesDoEvento", "eventoDoCartao", "traducoesDaAgenda", "traduzirPara", "cargaNaLingua",
     "ultimaCargaDaCopia", "desenharNasCopias"]);
   const AGORA = Date.UTC(2026, 9, 2, 12);
   const ev = { id: 7, titulo: "Armadilha de Caça 1", detalhes: "Cavalaria", quando: new Date(AGORA + 3600000).toISOString() };

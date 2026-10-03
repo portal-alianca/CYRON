@@ -7356,13 +7356,33 @@ function fusoDoTexto(bruto) {
    pessoal aqui, de graca, porque <t:unix:F> o Discord desenha no relogio de
    quem le. Metade do trabalho de traduzir um evento e' o fuso, e essa metade
    nao custa nada. */
+/* O cronometro do cartao: "1d 10h 09m", exato.
+
+   O <t:R> do Discord arredonda -- 37 horas viram "em 2 dias", e quem compara
+   com o relogio do jogo acha que o bot errou. Aqui a conta e' minha e o
+   cartao e' reescrito de minuto em minuto nas ultimas 48 horas. Antes disso
+   o cartao so' muda de dez em dez minutos, entao os minutos saem da conta:
+   "3d 4h" nao mente por estar dez minutos atrasado. */
+const CRONOMETRO_FINO = 48 * 3600000;
+
+function cronometro(faltam) {
+  if (!(faltam > 0)) return "0m";
+  const min = Math.floor(faltam / 60000);
+  const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
+  const z = (n) => String(n).padStart(2, "0");
+  if (faltam >= CRONOMETRO_FINO) return `${d}d ${h}h`;
+  if (d) return `${d}d ${h}h ${z(m)}m`;
+  if (h) return `${h}h ${z(m)}m`;
+  return `${m}m`;
+}
+
 function cartaoDoEvento(ev, presencas = [], agora = Date.now()) {
   const s = Math.floor(new Date(ev.quando).getTime() / 1000);
   const passou = new Date(ev.quando).getTime() <= agora;
 
   /* O <t:R> anda sozinho na tela de quem le: "em 2 horas", "em 5 minutos".
      E' o cronometro do cartao, e nao custa uma edicao sequer. */
-  const partes = [`🕒 <t:${s}:F>`, `⏳ <t:${s}:R>`];
+  const partes = [`🕒 <t:${s}:F>`, passou ? "🔴" : `⏳ **−${cronometro(new Date(ev.quando).getTime() - agora)}**`];
   const extras = [];
   if (Number(ev.repetir_min) > 0) extras.push(`🔁 ${textoDaRepeticao(ev.repetir_min)}`);
   if (Number(ev.lembrete_min) > 0) extras.push(`⏰ −${ev.lembrete_min}m ✉️`);
@@ -7446,7 +7466,11 @@ async function desenharEventos(guild, servidor) {
     if (ev.msg_id) {
       const antiga = await canal.messages.fetch(ev.msg_id).catch(() => null);
       if (antiga) {
-        await antiga.edit(carga).catch((e) =>
+        /* Com o cronometro, esta passada roda de minuto em minuto: so' edita
+           o que mudou de verdade. */
+        const json = JSON.stringify(carga);
+        if (ultimaCargaDaCopia.get(antiga.id) === json) continue;
+        await antiga.edit(carga).then(() => ultimaCargaDaCopia.set(antiga.id, json)).catch((e) =>
           console.error("eventos: nao consegui editar o cartão:", e?.message || e));
         continue;
       }
@@ -7511,9 +7535,20 @@ function eventoDoCartao(msg) {
   return null;
 }
 
+/* Na memoria tambem: o cartao e' redesenhado de minuto em minuto, e o titulo
+   nao muda -- ir ao cache do banco a cada minuto, em cada lingua, seria
+   trabalho jogado fora. */
+const traducoesDaAgenda = new Map();
 async function traduzirPara(texto, idioma, motor) {
   if (!texto || !/\p{L}/u.test(texto)) return texto;
-  return (await traduzirComCache(String(texto), idioma, motor).catch(() => null)) || texto;
+  const chave = `${motor?.tipo || ""}|${idioma}|${texto}`;
+  if (traducoesDaAgenda.has(chave)) return traducoesDaAgenda.get(chave);
+  const t = await traduzirComCache(String(texto), idioma, motor).catch(() => null);
+  if (t) {
+    traducoesDaAgenda.set(chave, t);
+    if (traducoesDaAgenda.size > 1000) traducoesDaAgenda.delete(traducoesDaAgenda.keys().next().value);
+  }
+  return t || texto;
 }
 
 async function cargaNaLingua(ev, presencas, idioma, motor, agora = Date.now()) {
@@ -8484,6 +8519,18 @@ async function rodarAgendaDeEventos(agora = Date.now()) {
       } catch (e) {
         console.error(`eventos: a agenda falhou no evento ${ev.id}:`, e?.message || e);
       }
+    }
+
+    /* O cronometro anda: os servidores com evento nas proximas 48 horas tem
+       os cartoes reescritos agora (o que nao mudou nao e' editado). */
+    const breve = await sb(`cyron_evento?quando=gte.${new Date(agora - 60000).toISOString()}` +
+      `&quando=lte.${new Date(agora + CRONOMETRO_FINO).toISOString()}&select=guild_id&limit=500`).catch(() => null) || [];
+    for (const gid of new Set(breve.map((e) => String(e.guild_id)))) {
+      const guild = client.guilds.cache.get(gid);
+      if (!guild) continue;
+      const servidor = await servidorDoGuild(gid).catch(() => null);
+      if (servidor) await desenharEventos(guild, servidor).catch((e) =>
+        console.error("eventos: o cronômetro falhou em", guild.name, e?.message || e));
     }
   } finally {
     agendaRodando = false;
