@@ -7396,7 +7396,13 @@ function cartaoDoEvento(ev, presencas = [], agora = Date.now()) {
 
   /* O <t:R> anda sozinho na tela de quem le: "em 2 horas", "em 5 minutos".
      E' o cronometro do cartao, e nao custa uma edicao sequer. */
-  const partes = [`🕒 <t:${s}:F>`, passou ? "🔴" : `⏳ **${cronometro(new Date(ev.quando).getTime() - agora)}**`];
+  /* Duas horas, e as duas importam: a do JOGO (UTC, a que aparece na tela do
+     jogo e no lembrete dele) e a de quem le (<t:F>, no relogio do pais de
+     cada um). Com as duas lado a lado ninguem precisa fazer conta de fuso. */
+  const d = new Date(ev.quando);
+  const z = (n) => String(n).padStart(2, "0");
+  const doJogo = `🎮 **${z(d.getUTCDate())}/${z(d.getUTCMonth() + 1)} ${z(d.getUTCHours())}:${z(d.getUTCMinutes())} UTC**`;
+  const partes = [doJogo, `🕒 <t:${s}:F>`, passou ? "🔴" : `⏳ **${cronometro(new Date(ev.quando).getTime() - agora)}**`];
   const extras = [];
   if (Number(ev.repetir_min) > 0) extras.push(`🔁 ${textoDaRepeticao(ev.repetir_min)}`);
   if (Number(ev.lembrete_min) > 0) extras.push(`⏰ −${ev.lembrete_min}m ✉️`);
@@ -7901,7 +7907,7 @@ async function painelDoRascunho(token, p, idioma, agora = Date.now()) {
       color: passou ? 0xE74C3C : COR,
       title: `📅 ${String(p.titulo || "—").slice(0, 200)}`,
       description: explica + "\n\n" +
-        `🌍 **${textoDoFuso(p.fuso)}** ${z(pt.dia)}/${z(pt.mes)}/${pt.ano} ${z(pt.hora)}:${z(pt.min)}\n` +
+        `${p.fuso === 0 ? "🎮" : "🌍"} **${textoDoFuso(p.fuso)}** ${z(pt.dia)}/${z(pt.mes)}/${pt.ano} ${z(pt.hora)}:${z(pt.min)}\n` +
         `🕒 <t:${s}:F> · ⏳ <t:${s}:R>\n` +
         `${rotuloDaRepeticao(p.repetir)} · ${p.lembrete ? `⏰ −${p.lembrete}m ✉️` : "🔕"}` +
         (p.cargoId ? ` · 📣 <@&${p.cargoId}>` : "") +
@@ -7997,7 +8003,10 @@ async function criarEvento(inter) {
 
   /* UTC e' o padrao, porque e' o relogio do jogo. Quem ja escolheu outro
      uma vez fica com o dele. */
-  const fuso = fusoEscolhido ?? (Number((await ajustes())[`fuso:${inter.user.id}`]) || 0);
+  /* UTC sempre, a menos que se escolha outro NESTE comando: e' o relogio do
+     jogo, o que esta' escrito na tela. Lembrar o fuso de antes confundia --
+     a pessoa digitava a hora do jogo e o bot lia em Brasilia. */
+  const fuso = fusoEscolhido ?? 0;
   if (fusoEscolhido !== null) await porAjuste(`fuso:${inter.user.id}`, String(fusoEscolhido)).catch(() => {});
 
   let gif = null;
@@ -8214,8 +8223,8 @@ async function lerEventoDaMensagem(inter) {
       : "🤔 Essa mensagem não tem texto nem imagem para eu ler.");
   }
 
-  const fusoPadrao = Number((await ajustes())[`fuso:${inter.user.id}`]) || 0;
-  const achado = extrairEvento(texto, Date.now(), fusoPadrao);
+  /* Texto sem fuso escrito vale UTC, o relogio do jogo. */
+  const achado = extrairEvento(texto, Date.now(), 0);
   const p = {
     guildId: inter.guildId, userId: inter.user.id, ...achado,
     repetir: 0, lembrete: 0, cargoId: null, gif: null, detalhes: null,

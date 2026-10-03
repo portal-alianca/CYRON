@@ -4162,8 +4162,10 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("a hora vai como marcação do Discord, no fuso de quem lê",
     cartao.description.includes(`<t:${s}:F>`));
   verdade("e o cronômetro exato, sem o arredondamento do Discord", cartao.description.includes("⏳ **3h 00m**"));
-  verdade("nenhuma hora é escrita por mim, em fuso nenhum",
-    !/\b\d{1,2}:\d{2}\b/.test(cartao.description));
+  /* A única hora escrita por mim é a do JOGO, em UTC e dizendo que é UTC. */
+  verdade("a hora do jogo aparece em UTC", cartao.description.includes("🎮 **15/09 15:00 UTC**"));
+  verdade("e nenhuma outra hora é escrita por mim, em fuso nenhum",
+    !/\b\d{1,2}:\d{2}\b/.test(cartao.description.replace(/🎮[^\n]*/, "")));
   verdade("o título do líder aparece como ele escreveu", cartao.title.includes("Urso · Bear Trap"));
   verdade("os detalhes também", cartao.description.includes("Cavalaria nível 5."));
 
@@ -4306,7 +4308,7 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o Urso aparece como 🐻 47h30m", painel.components[3].components[0].options.some((o) => o.default && o.label === "🐻 47h30m"));
   ok("a última fileira tem 5 botões, o máximo do Discord", painel.components[4].components.length, 5);
   verdade("cada pessoa vê o horário no próprio relógio", painel.embeds[0].description.includes(`<t:${t / 1000}:F>`));
-  verdade("e o fuso escolhido aparece", painel.embeds[0].description.includes("🌍 **UTC**"));
+  verdade("e o fuso escolhido aparece, com 🎮 quando é o UTC do jogo", painel.embeds[0].description.includes("🎮 **UTC**"));
 
   const minutoQuebrado = await m.painelDoRascunho("abc", { ...p, quando: t + 14 * 60000 }, "pt", AGORA);
   verdade("minuto lido de um contador (11:44) entra na lista", minutoQuebrado.components[2].components[0].options.some((o) => o.default && o.value === "44"));
