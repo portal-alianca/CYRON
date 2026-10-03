@@ -4408,6 +4408,85 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("e o canal nasce com o painel", /CANAL_DIARIO, CANAL_ANALITICO\]/.test(idx));
   }
 
+  /* ---- os erros que se organizam sozinhos ---- */
+  {
+    const { createHash } = await import("node:crypto");
+    globalThis.createHash = createHash;
+    const E = carregar(["fichasDeErro", "statusDesenhado", "ERRO_FECHA_SOZINHO", "idDoErro", "STATUS_DO_ERRO",
+      "CAMPOS_DA_FICHA", "cartaoDoErro", "botoesDoErro", "proximaFicha", "revisaoDoErro"]);
+    const agora = Date.parse("2026-10-03T12:00:00Z");
+    const iso = (h) => new Date(agora + h * 3600e3).toISOString();
+    const f = { id: "abc", titulo: "O Supabase caiu", onde: "uso", porque: "supabase 503", explicado: true,
+      precisa: false, novas: 3, ultimo: agora, destacar: false };
+
+    let { linha, destacar } = E.proximaFicha(null, f, agora);
+    ok("primeira vez: nasce aberto, com as ocorrências", [linha.status, linha.vezes], ["aberto", 3]);
+    verdade("e desce para o fim do canal", destacar);
+    ({ linha, destacar } = E.proximaFicha({ ...linha, msg_id: "m1" }, { ...f, novas: 2 }, agora));
+    ok("depois só soma", linha.vezes, 5);
+    verdade("e edita no lugar, calado", !destacar);
+    ({ linha, destacar } = E.proximaFicha({ ...linha, status: "resolvido", nota: "x" }, { ...f, novas: 1 }, agora));
+    verdade("resolvido que volta reabre e desce", linha.status === "aberto" && destacar && /voltou/.test(linha.nota));
+    ({ linha, destacar } = E.proximaFicha({ ...linha, msg_id: "m1", status: "silenciado", silencio_ate: iso(48) }, { ...f, destacar: true }, agora));
+    verdade("silenciado conta, mas não desce", linha.status === "silenciado" && !destacar && linha.vezes > 5);
+    ({ linha } = E.proximaFicha({ ...linha, status: "silenciado", silencio_ate: iso(-1) }, f, agora));
+    ok("silêncio vencido: volta a aberto", linha.status, "aberto");
+
+    const aberta = { chave: "abc", status: "aberto", ultimo_em: iso(-25), titulo: "t", onde: "o", porque: "p",
+      vezes: 4, primeiro_em: iso(-50) };
+    ok("24h sem aparecer: fecha sozinho", E.revisaoDoErro(aberta, agora).status, "resolvido");
+    verdade("aparecendo: continua aberto", E.revisaoDoErro({ ...aberta, ultimo_em: iso(-2) }, agora).status === "aberto");
+    ok("consertando não fecha sozinho", E.revisaoDoErro({ ...aberta, status: "consertando" }, agora).status, "consertando");
+
+    const base = { title: "⚪ O Supabase caiu", fields: [{ name: "O que aconteceu", value: "caiu" }] };
+    for (const st of ["aberto", "consertando", "resolvido", "silenciado"]) {
+      const l = { ...aberta, status: st, nota: st === "consertando" ? "PR #200" : null, silencio_ate: iso(100) };
+      const c = E.cartaoDoErro(base, l, agora);
+      conferirCartao(`o cartão do erro ${st}`, c, E.botoesDoErro(l));
+      ok(`${st}: a ficha aparece uma vez só`, c.fields.filter((x) => x.name === "📋 Status").length, 1);
+    }
+    const redesenhado = E.cartaoDoErro(E.cartaoDoErro(base, aberta, agora), { ...aberta, vezes: 9 }, agora);
+    ok("redesenhar a partir do cartão do canal troca a ficha, não empilha", redesenhado.fields.length, 3);
+    verdade("e mostra o número novo", /\*\*9x\*\*/.test(redesenhado.fields[1].value));
+    conferirCartao("o cartão de um erro sem explicação", E.cartaoDoErro(null, aberta, agora));
+    ok("aberto oferece resolver, consertar e silenciar", E.botoesDoErro(aberta)[0].components.map((b) => b.custom_id.split(":")[1]),
+      ["resolvido", "consertando", "silenciar"]);
+    ok("resolvido oferece reabrir", E.botoesDoErro({ ...aberta, status: "resolvido" })[0].components.map((b) => b.custom_id.split(":")[1]), ["reabrir"]);
+
+    /* Banco fora (ou tabela ainda não criada): o cartão não pode renascer a
+       cada descarga. */
+    const enviados = [], editados = [];
+    const canal = { id: "c", guild: { id: "g" },
+      send: async (x) => { enviados.push(x); return { id: `m${enviados.length}`, delete: async () => {} }; },
+      messages: { fetch: async (id) => ({ id, edit: async (x) => { editados.push(x); }, delete: async () => {} }) } };
+    globalThis.canalDeErros = async () => canal;
+    globalThis.linhaDoErro = async () => null;
+    globalThis.sbPost = async () => { throw new Error("tabela não existe"); };
+    globalThis.sb = async () => { throw new Error("fora"); };
+    globalThis.desenharQuadroDeErros = async () => {};
+    globalThis.agendarDescargaDeErros = () => {};
+    const D = carregar(["fichasDeErro", "statusDesenhado", "idDoErro", "STATUS_DO_ERRO", "CAMPOS_DA_FICHA", "cartaoDoErro",
+      "botoesDoErro", "proximaFicha", "contarErro", "mostrarErro", "descarregarErros"]);
+    D.contarErro("explicado|Caiu", { onde: "uso", porque: "503", explicacao: { titulo: "Caiu" }, agora });
+    D.mostrarErro("explicado|Caiu", { embeds: [{ title: "⚪ Caiu", fields: [] }] });
+    await D.descarregarErros(agora);
+    D.contarErro("explicado|Caiu", { onde: "uso", porque: "503", explicacao: { titulo: "Caiu" }, agora });
+    await D.descarregarErros(agora);
+    D.contarErro("explicado|Caiu", { onde: "uso", porque: "503", explicacao: { titulo: "Caiu" }, agora });
+    await D.descarregarErros(agora);
+    ok("banco fora: um cartão só", enviados.length, 1);
+    ok("e as ocorrências seguintes editam ele", editados.length, 2);
+    verdade("com a conta certa", /\*\*3x\*\*/.test(String(editados.at(-1)?.embeds?.[0]?.fields?.at(-2)?.value)));
+
+    const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+    const anotar = idx.slice(idx.indexOf("function anotarErro"), idx.indexOf("const CANAL_NOVOS"));
+    verdade("toda ocorrência conta na ficha", /contarErro\(chave, \{ onde, porque, explicacao, agora \}\)/.test(anotar));
+    verdade("e o canal de erros não recebe mais mensagem solta", !/avisarNoPainel\(CANAL_ERROS/.test(anotar));
+    verdade("os botões do cartão chegam", /customId\.startsWith\("erro:"\)\) \{\s*return await cliqueDoErro\(inter\)/.test(idx));
+    verdade("e só o dono mexe", /async function cliqueDoErro[\s\S]{0,120}ehDono\(inter\.user\.id\)/.test(idx));
+    verdade("a revisão roda de hora em hora", /await revisarErros\(\)\.catch/.test(idx));
+  }
+
   /* ---- não buscar a mensagem fixada quando nada mudou ---- */
   {
     const M = carregar(["desenhadoPorUltimo", "CONFERIR_DE_VERDADE", "jaDesenhado", "marcarDesenhado"]);
