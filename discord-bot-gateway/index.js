@@ -10578,9 +10578,38 @@ async function apagarDeOutraSala(guild, canalId, msgId) {
   }
 }
 
+/* A sala de idioma no TOPO do servidor, criada se nao existir.
+
+   A instalacao so' cria a 🌐-idioma-language quando o servidor nao tem lugar
+   nenhum para escolher idioma. O TOP ja' tinha (o portao e convites dentro de
+   "Text Channels") -- e foi isso que deixou o quadro escondido numa categoria
+   fechada. Quem ja' tem idioma ve so' a categoria dele e nao acha onde trocar;
+   quem nao tem, nao acha onde escolher.
+
+   So' leitura, visivel para todos, fora de categoria e logo abaixo do
+   primeiro canal do topo (o welcome, no TOP). */
+async function salaDeIdiomaNoTopo(guild) {
+  const achada = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === CANAL_PORTA);
+  if (achada) return achada;
+  const sala = await canalPorNomeOuCria(guild, CANAL_PORTA,
+    "Pick your language here and the whole server arrives translated for you.");
+  const topo = [...guild.channels.cache.values()]
+    .filter((c) => c.type === ChannelType.GuildText && !c.parentId && c.id !== sala.id)
+    .sort((a, b) => a.rawPosition - b.rawPosition)[0];
+  await sala.setPosition(topo ? topo.rawPosition + 1 : 0)
+    .catch((e) => console.log("idiomas: nao consegui subir a sala:", e?.message || e));
+  console.log(`idiomas: criei #${CANAL_PORTA} no topo de ${guild.name}`);
+  return sala;
+}
+
 async function quadroDeIdiomas(guild, servidor, { forcar = false, agora = Date.now() } = {}) {
   const portas = await sb(`discord_convite_idioma?servidor_id=eq.${servidor.id}&select=canal_id,tipo`).catch(() => null);
-  const canal = salaDoQuadro(guild, portas);
+  if (!portas) return;   // banco fora: nao crio sala nem acuso ninguem
+  const noTopo = await salaDeIdiomaNoTopo(guild).catch((e) => {
+    console.log("idiomas: nao consegui a sala do topo em", guild.name, e?.message || e);
+    return null;
+  });
+  const canal = noTopo?.send ? noTopo : salaDoQuadro(guild, portas);
   if (!canal) return;
   const [cargos, escolhas] = await Promise.all([
     sb(`discord_chat_espelho?servidor_id=eq.${servidor.id}&role_id=not.is.null&select=idioma,role_id`).catch(() => null),

@@ -4697,6 +4697,25 @@ function conferirCartao(onde, embed, componentes = []) {
     ok("sala apagada não conta", S.salaDoQuadro(guild, [{ canal_id: "sumiu", tipo: "portao" }]), null);
     ok("a marca antiga (só o id) ainda é lida", S.lerGuardado("123"), { msg: "123" });
     ok("a nova guarda a sala junto", S.lerGuardado('{"canal":"c","msg":"m"}'), { canal: "c", msg: "m" });
+    {
+      globalThis.CANAL_PORTA = "🌐-idioma-language";
+      globalThis.ChannelType = { GuildText: 0 };
+      const criados = [];
+      let posicao = null;
+      const cache = new Map([["w", { id: "w", type: 0, name: "⛩️welcome⛩️", parentId: null, rawPosition: 0 }],
+        ["t", { id: "t", type: 0, name: "geral", parentId: "cat", rawPosition: 0 }]]);
+      cache.find = (f) => [...cache.values()].find(f);
+      globalThis.canalPorNomeOuCria = async (g, nome) => { const c = { id: "nova", type: 0, name: nome, parentId: null,
+        rawPosition: 9, send: () => {}, setPosition: async (p) => { posicao = p; } }; criados.push(nome); cache.set("nova", c); return c; };
+      const T = carregar(["salaDeIdiomaNoTopo"]);
+      const sala = await T.salaDeIdiomaNoTopo({ name: "TOP", channels: { cache } });
+      ok("sem a sala de idioma, ela é criada", criados, ["🌐-idioma-language"]);
+      ok("logo abaixo do primeiro canal do topo (o welcome)", posicao, 1);
+      await T.salaDeIdiomaNoTopo({ name: "TOP", channels: { cache } });
+      ok("e só uma vez", criados.length, 1);
+      verdade("o quadro usa a sala do topo", sala.id === "nova" &&
+        /const canal = noTopo\?\.send \? noTopo : salaDoQuadro\(guild, portas\)/.test(idx));
+    }
     verdade("mudou de sala: o quadro velho sai de onde estava",
       /if \(guardado\.msg && guardado\.canal !== canal\.id\) \{\s*await apagarDeOutraSala/.test(idx));
     verdade("o suporte e o painel ficam de fora", /ehOPainel\(guild\.id\) \|\| await ehServidorDoSuporte\(guild\.id\)/.test(idx));
