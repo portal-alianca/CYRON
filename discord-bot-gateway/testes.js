@@ -42,6 +42,8 @@ globalThis.CATEGORIAS = CATEGORIAS;
 globalThis.RECURSOS = RECURSOS;
 /* A agenda e' origem por conta propria; varias funcoes do painel a deixam de fora. */
 globalThis.TIPO_AGENDA = "agenda";
+/* O espelho busca GIF em site de GIF; nos testes dele, nenhum site responde. */
+globalThis.gifDoLink = async () => "";
 globalThis.recursosDa = recursosDa;
 globalThis.doCliente = doCliente;
 
@@ -4463,6 +4465,32 @@ function conferirCartao(onde, embed, componentes = []) {
     fetch: async (id) => { if (id === "2") throw new Error("Unknown Member"); return null; } } };
   ok("quem é do servidor ganha o nome; quem saiu some da lista",
     await m.presencasComNomes(7, guild), [{ discord_user_id: "1", vai: true, nome: "Tiago" }]);
+}
+
+/* ============ GIF de link que o Discord não desdobrou ============ */
+{
+  const m = carregar(["SITES_DE_GIF", "gifsDosLinks", "gifDoLink"]);
+  /* A página de verdade do klipy (o print do JayCee), resumida. */
+  const pagina = `<meta property="og:image" content="https://static2.klipy.com/ii/x/35/5e/0D87.webp"/>
+    <meta property="og:image" content="https://static2.klipy.com/ii/x/35/5e/QvbW.gif"/>
+    <meta property="og:video:url" content="https://static2.klipy.com/ii/x/35/5e/zBA4.mp4"/>`;
+  let pedidos = 0;
+  const buscar = async () => { pedidos++; return { ok: true, text: async () => pagina }; };
+  ok("klipy: pega o .gif da página, não o .webp parado",
+    await m.gifDoLink("olha https://klipy.com/gifs/you-damn-straight-straight", buscar),
+    "https://static2.klipy.com/ii/x/35/5e/QvbW.gif");
+  await m.gifDoLink("https://klipy.com/gifs/you-damn-straight-straight", buscar);
+  ok("a mesma página não é buscada duas vezes", pedidos, 1);
+  ok("link direto de .gif não precisa buscar nada",
+    await m.gifDoLink("https://media.tenor.com/abc/x.gif", async () => { throw new Error("não devia buscar"); }),
+    "https://media.tenor.com/abc/x.gif");
+  ok("site que não é de GIF não é visitado",
+    await m.gifDoLink("https://example.com/pagina", async () => { throw new Error("não devia buscar"); }), "");
+  ok("site fora do ar: segue sem imagem, sem erro",
+    await m.gifDoLink("https://tenor.com/view/x-123", async () => { throw new Error("rede caiu"); }), "");
+  const f = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+  verdade("o espelho usa o GIF buscado quando a prévia do Discord não veio",
+    /const midiaLink = midiaDeLink\(msg\) \|\| await gifDoLink\(msg\.content\)/.test(f));
 }
 
 /* ============ o cronômetro ============ */
