@@ -4278,6 +4278,74 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("não há mais o 😴", !m.botoesDoEvento(completo, AG)[0].components.some((b) => b.custom_id.startsWith("evento:nao")));
 }
 
+/* ============ o leitor automático: Apps → Criar evento ============ */
+{
+  const m = carregar(["EVENTO_MAX", "fusoDoTexto", "extrairEvento", "relogioNoFuso", "textoDoFuso", "quandoDoTexto"]);
+  const AGORA = Date.UTC(2026, 9, 2, 9, 8, 34);   // a hora do print do lembrete
+  const H = 3600000;
+
+  /* O print "Lembrete da Reserva", como a leitura de imagem devolve. */
+  const lembrete = "2026-10-02 09:08:34\n[Armadilha de Caça 1] Lembrete da Reserva\n" +
+    "Prezado Governador, o [Armadilha de Caça 1] da sua Aliança estará pronto às UTC 2026-10-04 11:30. " +
+    "Por favor, se lembre de participar.";
+  const r = m.extrairEvento(lembrete, AGORA, -180);
+  ok("o nome sai do colchete", r.titulo, "Armadilha de Caça 1");
+  ok("a data é a do evento, e não a hora em que o print foi tirado", r.quando, Date.UTC(2026, 9, 4, 11, 30));
+  ok("o UTC escrito no print manda, e não o fuso salvo da pessoa", r.fusoAchado, 0);
+  ok("não é ambígua (ano na frente)", r.ambiguo, false);
+
+  /* A tela "Território da Aliança": um contador. */
+  const territorio = "Construção do Evento\nArmadilha de Caça 1\nTempo de recarga: 1d 11:14:06\nIr\n" +
+    "Armadilha de Caça 2\nTempo de recarga: 21:14:06";
+  const c = m.extrairEvento(territorio, AGORA, 0);
+  ok("o contador vira agora + 1 dia, 11h14", c.quando, Math.round((AGORA + (35 * 60 + 14) * 60000 + 6000) / 60000) * 60000);
+  ok("e diz que veio de contador", c.como, "contador");
+  ok("o nome é a primeira linha com cara de título", c.titulo, "Construção do Evento");
+
+  /* Texto solto no chat. */
+  const chat = m.extrairEvento("Urso amanhã! 04/10 20:30 todo mundo online", AGORA, -180);
+  ok("dia/mês com o fuso salvo de quem pediu (Brasília)", chat.quando, Date.UTC(2026, 9, 4, 23, 30));
+  ok("e avisa que o fuso não veio do texto", chat.fusoAchado, null);
+  ok("04/10 é ambíguo: avisa", chat.ambiguo, true);
+  ok("25/10 não é", m.extrairEvento("Rally 25/10 20:30", AGORA, 0).ambiguo, false);
+
+  ok("UTC+8 escrito vale +8", m.extrairEvento("KvK 2026-10-05 12:00 UTC+8", AGORA, 0).quando, Date.UTC(2026, 9, 5, 4, 0));
+  ok("só a hora colada no UTC: hoje, se ainda não passou", m.extrairEvento("Bear 11:30 UTC", AGORA, -180).quando, Date.UTC(2026, 9, 2, 11, 30));
+  ok("e amanhã, se já passou", m.extrairEvento("Bear 08:00 UTC", AGORA, 0).quando, Date.UTC(2026, 9, 3, 8, 0));
+  ok("data que já passou não vira evento", m.extrairEvento("Evento 2026-09-01 10:00 UTC", AGORA, 0).quando, null);
+  ok("texto sem data nenhuma: não chuta", m.extrairEvento("bom dia pessoal", AGORA, 0).quando, null);
+  ok("data que não existe é recusada", m.extrairEvento("2026-02-31 10:00 UTC", AGORA, 0).quando, null);
+  ok("colchete japonês também", m.extrairEvento("【熊狩り】 2026-10-04 11:30 UTC", AGORA, 0).titulo, "熊狩り");
+
+  /* O formulário volta preenchido num formato que o parser aceita de volta. */
+  const volta = m.relogioNoFuso(r.quando, 0);
+  ok("o campo vem como dia/mês/ano hora", volta, "04/10/2026 11:30");
+  ok("e o /evento entende o que o leitor escreveu", m.quandoDoTexto(volta, AGORA, 0), r.quando);
+  ok("UTC se escreve UTC", m.textoDoFuso(0), "UTC");
+  ok("Brasília", m.textoDoFuso(-180), "UTC-3");
+  ok("Índia", m.textoDoFuso(330), "UTC+5:30");
+}
+
+{
+  const f = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+  const ler = f.slice(f.indexOf("async function lerEventoDaMensagem"), f.indexOf("function janelaDaProposta"));
+  verdade("o leitor reconhece antes de ler a imagem", ler.indexOf("deferReply") < ler.indexOf("lerImagemDaMensagem"));
+  const clique = f.slice(f.indexOf("async function cliqueLeitor"), f.indexOf("async function cliqueEvento"));
+  verdade("o rascunho é só de quem pediu e administra",
+    /p\.userId !== inter\.user\.id \|\| !inter\.memberPermissions\?\.has\(PermissionFlagsBits\.ManageGuild\)/.test(clique));
+  verdade("nada é criado sem ✅ ou o formulário", /acao === "criar"/.test(clique) && /acao === "janela"/.test(clique));
+  verdade("o leitor grava pelo mesmo caminho do /evento", /gravarEvento\(/.test(clique));
+  verdade("o menu Apps → Criar evento existe", /type: 3,\s*name: "Criar evento"/.test(f));
+  verdade("e é do líder", /name: "Criar evento",[^]{0,200}ManageGuild/.test(f));
+  verdade("e não é separado como comando do jogo", /COMANDOS_DE_TODOS = new Set\([^)]*"Criar evento"/.test(f));
+  verdade("os botões e o formulário do leitor têm rota",
+    /customId\.startsWith\("leitor:"\)\)[^]{0,40}cliqueLeitor/.test(f));
+  /* O defeito que este teste prende: o /evento ganhou campos e o Discord
+     continuou mostrando os velhos, porque só se criava o que faltava. */
+  const glob = f.slice(f.indexOf("async function garantirComandosGlobais"), f.indexOf("async function garantirComandosGlobais") + 1200);
+  verdade("comando já publicado e diferente é ATUALIZADO", /!publicado\.equals\(def\)[^]{0,40}publicado\.edit\(def\)/.test(glob));
+}
+
 /* ============ a agenda no código: uma vez só, e na ordem certa ============ */
 {
   const f = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
@@ -4300,7 +4368,7 @@ function conferirCartao(onde, embed, componentes = []) {
   const des = f.slice(f.indexOf("async function desenharEventos"), f.indexOf("async function atualizarEventos"));
   verdade("a limpeza das 6 horas não apaga evento que repete", /repetir_min\.is\.null,repetir_min\.eq\.0/.test(des));
 
-  const criar = f.slice(f.indexOf("async function criarEvento"), f.indexOf("async function cliqueEvento"));
+  const criar = f.slice(f.indexOf("async function gravarEvento"), f.indexOf("async function criarEvento"));
   verdade("mesmo nome edita, em vez de criar outro", /titulo=eq\.\$\{encodeURIComponent\(titulo\)\}/.test(criar));
   verdade("o GIF é guardado no nosso balde (anexo do Discord caduca)", /reHospedar/.test(f.slice(f.indexOf("async function gifDoEvento"), f.indexOf("async function criarEvento"))));
   verdade("editar sem GIF novo não apaga o GIF", /\.\.\.\(gif \? \{ gif_url: gif \} : \{\}\)/.test(criar));
