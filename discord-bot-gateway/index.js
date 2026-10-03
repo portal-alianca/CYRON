@@ -4590,7 +4590,21 @@ async function traduzirLongo(texto, alvo, motor = MOTOR_AUTO) {
    do que nao criar o canal. */
 /* No suporte a copia leva o nome na lingua de quem a le ("👋・ようこそ");
    nos clientes, o de sempre ("anuncios-ja"). */
+/* A agenda e' sala minha, entao o nome dela eu sei traduzir: quem le em
+   ingles ve "schedule", e nao uma palavra portuguesa com "-en" no fim. As
+   outras replicas seguem o nome que o dono deu ao canal original. */
+const AGENDA_NA_LINGUA = {
+  en: "schedule", es: "agenda", fr: "agenda", de: "termine", it: "agenda", ru: "расписание",
+  uk: "розклад", tr: "takvim", pl: "terminarz", id: "jadwal", vi: "lịch", th: "ตารางนัด",
+  ja: "予定", ko: "일정", "zh-CN": "日程", ar: "الجدول", pt: "agenda",
+};
+
 function nomeDaSala(modelo, rotulo, idioma, doSuporte) {
+  if (rotulo === TIPO_AGENDA) {
+    const base = String(idioma || "").split("-")[0];
+    const palavra = AGENDA_NA_LINGUA[idioma] || AGENDA_NA_LINGUA[base] || "agenda";
+    return `📆-${palavra}-${idioma}`.toLowerCase().slice(0, 100);
+  }
   return doSuporte && nomeNoIdioma(modelo, idioma) || nomeDaReplica(modelo, rotulo, idioma);
 }
 
