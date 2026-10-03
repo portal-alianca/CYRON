@@ -4391,6 +4391,31 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("comando já publicado e diferente é ATUALIZADO", /!publicado\.equals\(def\)[^]{0,40}publicado\.edit\(def\)/.test(glob));
 }
 
+/* ============ a sala virou agenda ============ */
+{
+  globalThis.ChannelType = globalThis.ChannelType || { GuildText: 0 };
+  const m = carregar(["CANAL_EVENTOS", "CANAIS_EVENTOS_ANTIGOS", "renomeandoAgenda", "canalDaAgenda"]);
+  ok("o nome novo não tem seletor invisível de emoji", /️/.test(m.CANAL_EVENTOS), false);
+  verdade("e não é mais \"eventos\" (não mistura com o canal de eventos do jogo)", !/eventos/.test(m.CANAL_EVENTOS));
+  const renomes = [];
+  const sala = (id, name) => ({ id, name, type: 0, setName: async (n) => { renomes.push(n); } });
+  const guild = (canais) => ({ name: "G", channels: { cache: { find: (f) => canais.find(f) } } });
+
+  const velha = sala("1", "📅-eventos");
+  ok("a sala antiga é achada", m.canalDaAgenda(guild([velha, sala("2", "event-guide")])), velha);
+  ok("e renomeada para o nome novo", renomes, [m.CANAL_EVENTOS]);
+  m.canalDaAgenda(guild([velha]));
+  ok("uma vez só, mesmo chamada de novo antes de o Discord responder", renomes.length, 1);
+  const nova = sala("3", m.CANAL_EVENTOS);
+  ok("a nova é achada pelo nome", m.canalDaAgenda(guild([nova])), nova);
+  ok("servidor sem nenhuma: nada", m.canalDaAgenda(guild([sala("4", "geral")])), null);
+
+  const f = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+  verdade("a instalação não cria uma segunda sala quando a antiga existe",
+    /if \(!canalDaAgenda\(guild\)\) await canalPorNomeOuCria\(guild, CANAL_EVENTOS/.test(f));
+  verdade("ninguém mais procura a sala pelo nome cru", !/c\.name === CANAL_EVENTOS\)/.test(f.replace(/function canalDaAgenda[^]*?\n}\n/, "")));
+}
+
 /* ============ a agenda no código: uma vez só, e na ordem certa ============ */
 {
   const f = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
