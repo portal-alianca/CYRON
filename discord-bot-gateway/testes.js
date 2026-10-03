@@ -4174,8 +4174,8 @@ function conferirCartao(onde, embed, componentes = []) {
     { discord_user_id: "3", vai: false },
   ];
   const votado = cartaoDoEvento(comVoto, gente, AGORA);
-  verdade("conta quem vai", votado.fields.some((f) => f.name === "✋ 2"));
-  verdade("e quem não vai", votado.fields.some((f) => f.name === "😴 1"));
+  verdade("conta quem se inscreveu", votado.fields.some((f) => f.name === "🔔 2"));
+  verdade("e o \"não vou\" antigo não conta como inscrito", !votado.fields[0].value.includes("<@3>"));
   verdade("as pessoas aparecem como menção, que não tem língua",
     votado.fields[0].value.includes("<@1>"));
   conferirCartao("o evento com votação", votado, botoesDoEvento(comVoto));
@@ -4204,6 +4204,110 @@ function conferirCartao(onde, embed, componentes = []) {
   /* ---- os botões carregam o id, senão o clique não sabe de quem é ---- */
   for (const b of botoesDoEvento(comVoto)[0].components) {
     verdade(`"${b.label}" carrega o id do evento`, b.custom_id.endsWith(":7"));
+  }
+}
+
+/* ============ a agenda: repetir, lembrar, avisar ============ */
+{
+  const m = carregar(["REPETIR_MIN", "REPETIR_MAX", "LEMBRETES", "MENCOES_MAX", "EVENTO_SOBREVIVE",
+    "repetirDoTexto", "textoDaRepeticao", "sugestoesDeRepetir", "proximaVez", "mencoesDoAviso",
+    "cartaoDoEvento", "botoesDoEvento"]);
+  globalThis.COR = 0xF5A623;
+
+  /* ---- repetir ---- */
+  ok("vazio: não repete", m.repetirDoTexto(""), 0);
+  ok("\"0\": não repete", m.repetirDoTexto("0"), 0);
+  ok("\"não\": não repete", m.repetirDoTexto("não"), 0);
+  ok("24h", m.repetirDoTexto("24h"), 1440);
+  ok("7d", m.repetirDoTexto("7d"), 10080);
+  ok("o Urso: 47h30m", m.repetirDoTexto("47h30m"), 2850);
+  ok("1d12h", m.repetirDoTexto("1d12h"), 2160);
+  ok("todo dia", m.repetirDoTexto("todo dia"), 1440);
+  ok("semanal", m.repetirDoTexto("semanal"), 10080);
+  ok("a cada 12h", m.repetirDoTexto("a cada 12h"), 720);
+  ok("menos de uma hora é recusado (vira spam)", m.repetirDoTexto("30m"), null);
+  ok("mais de 30 dias é recusado", m.repetirDoTexto("31d"), null);
+  ok("texto sem sentido é recusado, não vira \"não repete\"", m.repetirDoTexto("abacaxi"), null);
+
+  ok("mostra 24h", m.textoDaRepeticao(1440), "24h");
+  ok("mostra 47h30m", m.textoDaRepeticao(2850), "47h30m");
+  ok("mostra 7d", m.textoDaRepeticao(10080), "7d");
+  for (const s of m.sugestoesDeRepetir("")) {
+    verdade(`a sugestão "${s.value}" é aceita pelo próprio parser`, m.repetirDoTexto(s.value) !== null);
+  }
+  verdade("o que se digita aparece primeiro, quando dá para entender",
+    m.sugestoesDeRepetir("47h30m")[0].value === "47h30m");
+
+  /* ---- a próxima vez ---- */
+  const H = 3600000;
+  const T0 = Date.UTC(2026, 9, 4, 11, 30);
+  ok("ainda não chegou: é ela mesma", m.proximaVez(T0, 1440, T0 - H), T0);
+  ok("chegou agora: a do dia seguinte", m.proximaVez(T0, 1440, T0), T0 + 24 * H);
+  ok("o bot ficou fora três dias: pula todas e cai na próxima depois de agora",
+    m.proximaVez(T0, 1440, T0 + 3 * 24 * H + 5 * 60000), T0 + 4 * 24 * H);
+  ok("o Urso anda 47h30m", m.proximaVez(T0, 2850, T0 + 1000), T0 + 2850 * 60000);
+  ok("não repete: nada", m.proximaVez(T0, 0, T0), null);
+
+  /* ---- quem é marcado na hora ---- */
+  const ev = { id: 7, titulo: "Armadilha de Caça 1", quando: new Date(T0).toISOString(), cargo_id: "555555555555555555" };
+  const av = m.mencoesDoAviso(ev, ["111111111111111111", "222222222222222222", "111111111111111111"]);
+  verdade("marca o cargo", av.content.includes("<@&555555555555555555>"));
+  verdade("e cada inscrito, uma vez só", (av.content.match(/<@111111111111111111>/g) || []).length === 1);
+  ok("e só eles podem ser marcados", av.allowedMentions,
+    { parse: [], users: ["111111111111111111", "222222222222222222"], roles: ["555555555555555555"] });
+  verdade("a hora vai como marcação do Discord", av.content.includes(`<t:${T0 / 1000}:t>`));
+  const golpe = m.mencoesDoAviso({ ...ev, titulo: "@everyone corre", cargo_id: "abc" }, ["x"]);
+  ok("@everyone no título não marca ninguém, e lixo não vira menção", golpe.allowedMentions,
+    { parse: [], users: [], roles: [] });
+  const multidao = Array.from({ length: 150 }, (_, i) => String(100000000000000000n + BigInt(i)));
+  const cheio = m.mencoesDoAviso(ev, multidao);
+  verdade("com 150 inscritos a mensagem cabe nas 2000 letras", cheio.content.length <= 2000);
+  verdade("e diz quantos ficaram de fora", cheio.content.includes(`+${150 - m.MENCOES_MAX}`));
+
+  /* ---- o cartão novo ---- */
+  const AG = T0 - 3 * H;
+  const completo = { ...ev, detalhes: "Cavalaria.", repetir_min: 2850, lembrete_min: 10,
+    gif_url: "https://x.supabase.co/storage/v1/object/public/top-midia/urso.gif", votacao: true };
+  const c = m.cartaoDoEvento(completo, [{ discord_user_id: "1", vai: true }], AG);
+  verdade("o GIF vai como imagem do cartão", c.image?.url === completo.gif_url);
+  verdade("a repetição aparece, sem palavra nenhuma", c.description.includes("🔁 47h30m"));
+  verdade("o lembrete também", c.description.includes("⏰ −10m"));
+  verdade("e o cargo", c.description.includes("<@&555555555555555555>"));
+  conferirCartao("o evento completo", c, m.botoesDoEvento(completo, AG));
+  verdade("o botão é de inscrição", m.botoesDoEvento(completo, AG)[0].components[0].custom_id === "evento:vou:7");
+  verdade("não há mais o 😴", !m.botoesDoEvento(completo, AG)[0].components.some((b) => b.custom_id.startsWith("evento:nao")));
+}
+
+/* ============ a agenda no código: uma vez só, e na ordem certa ============ */
+{
+  const f = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+  const ronda = f.slice(f.indexOf("async function rodarAgendaDeEventos"), f.indexOf("async function rodarAgendaDeEventos") + 2500);
+  verdade("o lembrete é marcado como feito ANTES de mandar",
+    /lembrete_feito: true \}\);[^]{0,200}lembrarInscritos/.test(ronda));
+  verdade("o aviso também", /aviso_feito: true \}\);[^]{0,300}avisarNaHora/.test(ronda));
+  verdade("lembrete só antes do início", /if \(agora < t\) await lembrarInscritos/.test(ronda));
+  verdade("muito atrasado não marca ninguém", /agora - t <= AVISO_ATRASADO/.test(ronda));
+  verdade("a ronda não roda duas vezes por cima de si mesma", /if \(agendaRodando\) return/.test(ronda));
+  verdade("e roda de minuto em minuto",
+    /setInterval\(\(\) => \{[^]{0,400}rodarAgendaDeEventos\(\)[^]{0,120}\}, 60 \* 1000\)/.test(f));
+
+  const aviso = f.slice(f.indexOf("async function avisarNaHora"), f.indexOf("async function rodarAgendaDeEventos"));
+  verdade("na hora o cartão é REENVIADO (editar não faz o celular apitar)",
+    /velha\.delete\(\)[^]{0,200}canal\.send\(/.test(aviso));
+  verdade("repetir renova o prazo da privacidade do evento e das inscrições",
+    /criado_em: hoje[^]{0,200}cyron_evento_presenca\?evento_id=eq\.\$\{ev\.id\}`, \{ criado_em: hoje \}/.test(aviso));
+
+  const des = f.slice(f.indexOf("async function desenharEventos"), f.indexOf("async function atualizarEventos"));
+  verdade("a limpeza das 6 horas não apaga evento que repete", /repetir_min\.is\.null,repetir_min\.eq\.0/.test(des));
+
+  const criar = f.slice(f.indexOf("async function criarEvento"), f.indexOf("async function cliqueEvento"));
+  verdade("mesmo nome edita, em vez de criar outro", /titulo=eq\.\$\{encodeURIComponent\(titulo\)\}/.test(criar));
+  verdade("o GIF é guardado no nosso balde (anexo do Discord caduca)", /reHospedar/.test(f.slice(f.indexOf("async function gifDoEvento"), f.indexOf("async function criarEvento"))));
+  verdade("editar sem GIF novo não apaga o GIF", /\.\.\.\(gif \? \{ gif_url: gif \} : \{\}\)/.test(criar));
+
+  const sql = readFileSync(`${aqui}/../supabase/migracoes/005-eventos-agenda.sql`, "utf8");
+  for (const col of ["gif_url", "cargo_id", "repetir_min", "lembrete_min", "lembrete_feito", "aviso_feito"]) {
+    verdade(`a migração cria ${col}`, new RegExp(`add column if not exists ${col}\\b`).test(sql));
   }
 }
 
@@ -4571,15 +4675,21 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("e o comando não abre janela nenhuma",
     !/showModal\(janelaValida\(janelaDoEvento/.test(fonteEv2));
 
-  const def = fonteEv2.slice(fonteEv2.indexOf('name: "evento",'), fonteEv2.indexOf('name: "evento",') + 1400);
+  const def = fonteEv2.slice(fonteEv2.indexOf('name: "evento",'), fonteEv2.indexOf('name: "evento",') + 3000);
   verdade("o quando tem autocompletar", /name: "quando"[^]{0,120}autocomplete: true/.test(def));
-  verdade("a votação é uma opção do próprio comando", /name: "votacao"/.test(def));
+  verdade("repetir é uma opção do próprio comando, com sugestões", /name: "repetir"[^]{0,80}autocomplete: true/.test(def));
+  verdade("o lembrete também", /name: "lembrete"/.test(def));
+  verdade("o GIF vem como arquivo", /type: 11, name: "gif"/.test(def));
+  verdade("ou como link", /name: "gif-link"/.test(def));
+  verdade("e o cargo como cargo de verdade", /type: 8, name: "cargo"/.test(def));
   verdade("e o fuso é opcional", /name: "fuso"[^]{0,120}required: false/.test(def));
 
   /* O autocompletar tinha um dono só -- a lista de eventos do Kingshot --, e
      responderia nomes de rally onde o /evento espera "3h". */
   verdade("o autocompletar sabe de qual comando veio",
-    /inter\.commandName === "evento"[^]{0,200}sugestoesDeQuando/.test(fonteEv2));
+    /inter\.commandName === "evento"[^]{0,400}sugestoesDeQuando/.test(fonteEv2));
+  verdade("e de qual campo: o repetir tem as sugestões dele",
+    /inter\.commandName === "evento"[^]{0,200}foco\?\.name === "repetir"[^]{0,80}sugestoesDeRepetir/.test(fonteEv2));
 }
 
 /* ====== o catálogo do que o bot faz ======

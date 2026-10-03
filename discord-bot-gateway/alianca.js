@@ -302,9 +302,11 @@ async function embedJogador(fid) {
    URL de anexo do Discord vem assinada e caduca em poucas horas -- guardar o
    link faria a imagem sumir sozinha depois. */
 const BALDE = "top-midia";
-const MAX_MIDIA = 20 * 1024 * 1024;
+export const MAX_MIDIA = 20 * 1024 * 1024;
 
-async function reHospedar(url, prefixo) {
+/* Exportada: o GIF do /evento, que e' de todo cliente, passa pelo mesmo
+   caminho -- anexo do Discord caduca igual em qualquer servidor. */
+export async function reHospedar(url, prefixo) {
   const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
   if (!r.ok) throw new Error("baixar");
   const buf = new Uint8Array(await r.arrayBuffer());

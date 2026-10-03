@@ -19,7 +19,7 @@ import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:
 import { CATEGORIAS, doCliente } from "./catalogo.js";
 /* O que e' so' da alianca [TOP]: fica fora daqui para nao se misturar com o
    produto. Ver o comentario no topo do alianca.js. */
-import { ligarAlianca, COMANDOS_DA_ALIANCA, comandoDaAlianca, boasVindasDaAlianca,
+import { ligarAlianca, COMANDOS_DA_ALIANCA, comandoDaAlianca, boasVindasDaAlianca, reHospedar, MAX_MIDIA,
   seletorNasBoasVindas, rosasDaAlianca } from "./alianca.js";
 import { ligarSuporte, exigirSuporte, montarSuporte, guildDoSuporte, cliqueSuporte, PREFIXO_LER,
   nomeNoIdioma, ordemNoSuporte, garantirConvite } from "./suporte.js";
@@ -217,7 +217,7 @@ const GUARDO_POR = [
      redesenha a agenda. Este prazo e' a rede embaixo: servidor de onde eu fui
      expulso nao tem varredura, e o que ficou pra tras nao pode ficar pra
      sempre. A presenca vai junto, por cascata. */
-  ["cyron_evento", 30, "os eventos e quem confirmou presença"],
+  ["cyron_evento", 30, "os eventos e quem se inscreveu"],
 ];
 
 async function sbPatch(caminho, corpo) {
@@ -7109,6 +7109,101 @@ const EVENTO_SOBREVIVE = 6 * 60 * 60 * 1000;
    erro de digitacao mais facil que segurar a tecla. */
 const EVENTO_MAX = 365 * 24 * 60 * 60 * 1000;
 
+/* ---------------- a agenda: repetir, lembrar, avisar ----------------
+
+   O evento deixou de ser so' um cartao com hora. Ele imita a tela do jogo
+   ("Instalar Armadilha"): data, hora, repetir, e um GIF. Quem se inscreve no
+   cartao recebe um lembrete NO PRIVADO, na lingua dela, e e' marcado quando
+   o evento comeca. Num evento que repete, a inscricao vale para as proximas
+   vezes -- e' o "inscrever-se automaticamente" do jogo.
+
+   Repetir minimo de uma hora: menos que isso e' spam com cara de agenda. E
+   no maximo trinta dias, que e' o prazo que a pagina de privacidade promete
+   para evento parado. */
+const REPETIR_MIN = 60;
+const REPETIR_MAX = 30 * 24 * 60;
+const LEMBRETES = [5, 10, 15, 30, 60];
+
+/* O bot pode ter estado fora do ar na hora. Chegando muito depois, marcar
+   todo mundo seria chamar para uma coisa que ja acabou: passado disto, o
+   evento so' anda para a proxima data, calado. */
+const AVISO_ATRASADO = 30 * 60 * 1000;
+
+/* Mencao demais estoura as 2000 letras da mensagem -- e uma chamada com cem
+   nomes ja nao e' lida por ninguem. */
+const MENCOES_MAX = 80;
+
+/* "24h", "7d", "47h30m", "1d12h", "todo dia", "semanal", "nao".
+   Devolve minutos, 0 para "nao repete", ou null quando nao entendeu. */
+function repetirDoTexto(bruto) {
+  const t = String(bruto || "").trim().toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/^(?:a cada|cada|every|todo|toda|todos|todas)\s+/, "").replace(/\s+/g, " ");
+  if (!t || /^(?:0|nao|no|never|nunca|nao repetir|uma vez|once)$/.test(t)) return 0;
+  if (/^(?:dia|dias|diario|daily|day)$/.test(t)) return 1440;
+  if (/^(?:semana|semanas|semanal|weekly|week)$/.test(t)) return 10080;
+  const m = t.match(/^(?:(\d{1,2})\s*d(?:ias?|ays?)?)?\s*(?:(\d{1,3})\s*h(?:oras?|ours?|rs?)?)?\s*(?:(\d{1,4})\s*m(?:in|inutos?|inutes?)?)?$/);
+  if (!m || (!m[1] && !m[2] && !m[3])) return null;
+  const min = Number(m[1] || 0) * 1440 + Number(m[2] || 0) * 60 + Number(m[3] || 0);
+  return min >= REPETIR_MIN && min <= REPETIR_MAX ? min : null;
+}
+
+/* O contrario, para mostrar: 1440 -> "24h", 2850 -> "47h30m", 10080 -> "7d".
+   Sem palavra nenhuma de proposito: o cartao e' um so' para todas as linguas. */
+function textoDaRepeticao(min) {
+  const n = Number(min) || 0;
+  if (n <= 0) return "";
+  if (n % 1440 === 0 && n >= 2880) return `${n / 1440}d`;
+  const h = Math.floor(n / 60), m = n % 60;
+  return h ? `${h}h${m ? `${m}m` : ""}` : `${m}m`;
+}
+
+/* As opcoes do campo "repetir" enquanto se digita. */
+function sugestoesDeRepetir(digitado) {
+  const fora = [];
+  const t = String(digitado || "").trim();
+  const lido = t ? repetirDoTexto(t) : null;
+  if (lido) fora.push({ name: `🔁 ${t}  →  a cada ${textoDaRepeticao(lido)} / every ${textoDaRepeticao(lido)}`, value: t });
+  for (const [nome, valor] of [
+    ["Não repetir / Don't repeat", "0"],
+    ["🔁 Todo dia / Every day (24h)", "24h"],
+    ["🔁 Toda semana / Every week (7d)", "7d"],
+    ["🔁 A cada 2 dias / Every 2 days", "2d"],
+    ["🔁 A cada 12h / Every 12h", "12h"],
+  ]) {
+    if (!fora.some((f) => f.value === valor)) fora.push({ name: nome, value: valor });
+  }
+  return fora.slice(0, 25);
+}
+
+/* A proxima vez DEPOIS de agora. Um laco, e nao uma conta so', porque o bot
+   pode ter ficado fora varias repeticoes: quem chega atrasado pula todas. */
+function proximaVez(quandoMs, repetirMin, agora = Date.now()) {
+  const passo = Number(repetirMin) * 60000;
+  if (!(passo > 0)) return null;
+  let t = Number(quandoMs);
+  if (t > agora) return t;
+  t += Math.ceil((agora - t + 1) / passo) * passo;
+  return t;
+}
+
+/* A mensagem que acorda o celular de todo mundo na hora: o cargo, se houver,
+   e cada inscrito. allowedMentions diz EXATAMENTE quem pode ser marcado --
+   nada de @everyone escondido no titulo de alguem. */
+function mencoesDoAviso(ev, inscritos = []) {
+  const s = Math.floor(new Date(ev.quando).getTime() / 1000);
+  const ids = [...new Set(inscritos.map(String))].filter((id) => /^\d{5,25}$/.test(id));
+  const marcados = ids.slice(0, MENCOES_MAX);
+  const cargo = /^\d{5,25}$/.test(String(ev.cargo_id || "")) ? String(ev.cargo_id) : null;
+  const linhas = [`🔔 **${String(ev.titulo).slice(0, 100)}** · <t:${s}:t>`];
+  const quem = [cargo ? `<@&${cargo}>` : null, ...marcados.map((id) => `<@${id}>`)].filter(Boolean);
+  if (quem.length) linhas.push(quem.join(" ") + (ids.length > marcados.length ? ` +${ids.length - marcados.length}` : ""));
+  return {
+    content: linhas.join("\n"),
+    allowedMentions: { parse: [], users: marcados, roles: cargo ? [cargo] : [] },
+  };
+}
+
 /* Le o que o lider digitou em "quando".
 
    Aceita duas familias, e a diferenca entre elas e' o fuso:
@@ -7254,29 +7349,34 @@ function cartaoDoEvento(ev, presencas = [], agora = Date.now()) {
   const s = Math.floor(new Date(ev.quando).getTime() / 1000);
   const passou = new Date(ev.quando).getTime() <= agora;
 
+  /* O <t:R> anda sozinho na tela de quem le: "em 2 horas", "em 5 minutos".
+     E' o cronometro do cartao, e nao custa uma edicao sequer. */
   const partes = [`🕒 <t:${s}:F>`, `⏳ <t:${s}:R>`];
+  const extras = [];
+  if (Number(ev.repetir_min) > 0) extras.push(`🔁 ${textoDaRepeticao(ev.repetir_min)}`);
+  if (Number(ev.lembrete_min) > 0) extras.push(`⏰ −${ev.lembrete_min}m ✉️`);
+  if (/^\d{5,25}$/.test(String(ev.cargo_id || ""))) extras.push(`📣 <@&${ev.cargo_id}>`);
+  if (extras.length) partes.push(extras.join(" · "));
   if (ev.detalhes) partes.push("", String(ev.detalhes));
 
-  const campos = [];
-  if (ev.votacao) {
-    const vao = presencas.filter((p) => p.vai);
-    const nao = presencas.filter((p) => !p.vai);
-    /* Nomes em mencao, e nao em texto: mencao nao tem lingua, cabe em poucos
-       caracteres e o Discord desenha o apelido de cada servidor sozinho. */
-    const lista = (gente) => gente.length
-      ? gente.slice(0, 20).map((p) => `<@${p.discord_user_id}>`).join(" ") +
-        (gente.length > 20 ? ` +${gente.length - 20}` : "")
-      : "—";
-    campos.push({ name: `✋ ${vao.length}`, value: lista(vao), inline: true });
-    campos.push({ name: `😴 ${nao.length}`, value: lista(nao), inline: true });
-  }
+  /* Inscricao e' quem disse "vou" -- a mesma linha da votacao de antes, por
+     isso os cartoes antigos continuam contando certo. Os "nao vou" antigos
+     simplesmente nao aparecem mais. */
+  const inscritos = presencas.filter((p) => p.vai);
+  /* Nomes em mencao, e nao em texto: mencao nao tem lingua, cabe em poucos
+     caracteres e o Discord desenha o apelido de cada servidor sozinho. */
+  const lista = inscritos.length
+    ? inscritos.slice(0, 20).map((p) => `<@${p.discord_user_id}>`).join(" ") +
+      (inscritos.length > 20 ? ` +${inscritos.length - 20}` : "")
+    : "—";
 
   return {
     color: passou ? 0x9aa0a6 : COR,
     title: `${passou ? "✔️" : "📅"} ${String(ev.titulo).slice(0, 240)}`,
     description: partes.join("\n"),
-    ...(campos.length ? { fields: campos } : {}),
-    footer: { text: "🌐 read this in your language · the time is already in your clock" },
+    fields: [{ name: `🔔 ${inscritos.length}`, value: lista, inline: false }],
+    ...(ev.gif_url ? { image: { url: String(ev.gif_url) } } : {}),
+    footer: { text: "🔔 subscribe: DM reminder + ping · 🌐 read this in your language · time shown in your clock" },
   };
 }
 
@@ -7287,11 +7387,10 @@ function cartaoDoEvento(ev, presencas = [], agora = Date.now()) {
    acidente, porque a data inventada ainda era futura no relógio de verdade. */
 function botoesDoEvento(ev, agora = Date.now()) {
   const linha = [];
-  if (ev.votacao && new Date(ev.quando).getTime() > agora) {
-    linha.push(
-      { type: 2, custom_id: `evento:vou:${ev.id}`, style: 3, emoji: { name: "✋" }, label: "I'm in" },
-      { type: 2, custom_id: `evento:nao:${ev.id}`, style: 2, emoji: { name: "😴" }, label: "Can't" },
-    );
+  if (new Date(ev.quando).getTime() > agora) {
+    /* Um botao so': tocar inscreve, tocar de novo sai. Dois botoes (vou / nao
+       vou) pediam uma decisao a quem so' queria ser lembrado. */
+    linha.push({ type: 2, custom_id: `evento:vou:${ev.id}`, style: 3, emoji: { name: "🔔" }, label: "Subscribe" });
   }
   linha.push({ type: 2, custom_id: `evento:idioma:${ev.id}`, style: 2,
     emoji: { name: "🌐" }, label: "My language" });
@@ -7304,7 +7403,10 @@ function botoesDoEvento(ev, agora = Date.now()) {
 async function eventosDoServidor(servidorId) {
   const desde = new Date(Date.now() - EVENTO_SOBREVIVE).toISOString();
   return await sb(`cyron_evento?servidor_id=eq.${servidorId}&quando=gte.${desde}` +
-    "&select=id,titulo,detalhes,quando,votacao,msg_id&order=quando.asc")
+    /* Tudo, e nao uma lista de colunas: a agenda ganhou colunas novas, e uma
+       lista que cite uma delas antes da migracao faria a leitura falhar -- e
+       a agenda inteira sumir da sala. */
+    "&select=*&order=quando.asc")
     .catch(() => null) || [];
 }
 
@@ -7327,7 +7429,7 @@ async function desenharEventos(guild, servidor) {
   const eventos = await eventosDoServidor(servidor.id);
   for (const ev of eventos) {
     const carga = {
-      embeds: [cartaoDoEvento(ev, ev.votacao ? await presencasDoEvento(ev.id) : [])],
+      embeds: [cartaoDoEvento(ev, await presencasDoEvento(ev.id))],
       components: botoesDoEvento(ev),
       allowedMentions: { parse: [] },
     };
@@ -7347,8 +7449,12 @@ async function desenharEventos(guild, servidor) {
   }
 
   /* O que ja passou do prazo sai da sala E do banco. */
+  /* O que repete nunca "passou": ele anda para a proxima data na ronda da
+     agenda. Apagar aqui um que o bot nao conseguiu andar (fora do ar na hora)
+     jogaria fora a agenda e as inscricoes de todo mundo. */
   const velhos = await sb(`cyron_evento?servidor_id=eq.${servidor.id}` +
-    `&quando=lt.${new Date(Date.now() - EVENTO_SOBREVIVE).toISOString()}&select=id,msg_id`)
+    `&quando=lt.${new Date(Date.now() - EVENTO_SOBREVIVE).toISOString()}` +
+    "&or=(repetir_min.is.null,repetir_min.eq.0)&select=id,msg_id")
     .catch(() => null) || [];
   for (const v of velhos) {
     if (v.msg_id) {
@@ -7371,7 +7477,38 @@ async function atualizarEventos() {
   }
 }
 
-/* O lider mandou a janela de volta. */
+/* O GIF do evento: arquivo ou link, guardado no nosso balde.
+
+   Anexo do Discord vem com assinatura que caduca em horas -- guardar o link
+   cru faria o urso sumir do cartao no dia seguinte. Devolve a URL guardada,
+   null quando nao veio nada, ou lanca com o motivo para a frase certa. */
+async function gifDoEvento(inter) {
+  const anexo = inter.options.getAttachment("gif");
+  if (anexo) {
+    if (!/^(image|video)\//i.test(anexo.contentType || "")) throw new Error("tipo");
+    if (Number(anexo.size) > MAX_MIDIA) throw new Error("grande");
+    return await reHospedar(anexo.url, `evento-${inter.guildId}`);
+  }
+  const link = String(inter.options.getString("gif-link") || "").trim();
+  if (!link) return null;
+  if (!/^https:\/\/\S+$/i.test(link)) throw new Error("link");
+  if (link.startsWith(`${SB_URL}/storage/`)) return link;
+  return await reHospedar(link, `evento-${inter.guildId}`);
+}
+
+const PORQUE_DO_GIF = {
+  tipo: "Esse arquivo não é imagem nem GIF.",
+  grande: "O GIF passa de 20 MB.",
+  link: "O link do GIF tem que começar com https://",
+  baixar: "Não consegui baixar o GIF desse link.",
+  subir: "Não consegui guardar o GIF agora. Tente de novo em instantes.",
+};
+
+/* O lider mandou o comando.
+
+   Mesmo nome de um evento que ja existe neste servidor = EDITAR, e nao criar
+   outro. E' assim que o dono "mexe" num evento sem uma tela de edicao: manda
+   de novo com o horario certo, e as inscricoes ficam. */
 async function criarEvento(inter) {
   await inter.deferReply({ flags: 64 });
 
@@ -7382,10 +7519,12 @@ async function criarEvento(inter) {
   const bruto = inter.options.getString("quando").trim();
   const detalhes = (inter.options.getString("detalhes") || "").trim();
   const fusoBruto = (inter.options.getString("fuso") || "").trim();
-  /* Votação ligada por padrão: o evento existe para juntar gente, e a
-     pergunta "quem vai?" é a razão de ele ser um cartão e não um recado.
-     Quem não quer diz não na própria linha do comando. */
-  const votacao = inter.options.getBoolean("votacao") ?? true;
+  const repetirBruto = (inter.options.getString("repetir") || "").trim();
+  const lembrete = inter.options.getInteger("lembrete") ?? 0;
+  /* O @everyone tambem aparece na lista de cargos. Marcar o servidor inteiro
+     a cada repeticao nao e' convite, e' alarme -- esse fica de fora. */
+  const escolhido = inter.options.getRole("cargo");
+  const cargo = escolhido && escolhido.id !== inter.guildId ? escolhido : null;
 
   /* O fuso guardado deste oficial vale quando ele não escreve nenhum: depois
      da primeira vez, marcar um evento é preencher duas coisas. */
@@ -7393,7 +7532,7 @@ async function criarEvento(inter) {
     : (Number((await ajustes())[`fuso:${inter.user.id}`]) || 0);
   if (fusoBruto && fuso === null) {
     return inter.editReply({ content:
-      `🤔 Não entendi o fuso **${fusoBruto}**. Escreva como \`-3\`, \`+2\` ou \`+5:30\`.` });
+      `🤔 Não entendi o fuso **${fusoBruto}**. Escreva como \`-3\`, \`+2\`, \`+5:30\` ou \`0\` para UTC.` });
   }
 
   const quando = quandoDoTexto(bruto, Date.now(), fuso ?? 0);
@@ -7410,33 +7549,80 @@ async function criarEvento(inter) {
       "pior que não marcar._" });
   }
 
-  /* O fuso deste oficial fica lembrado para a próxima janela vir preenchida. */
+  const repetir = repetirDoTexto(repetirBruto);
+  if (repetir === null) {
+    return inter.editReply({ content:
+      `🤔 Não entendi o repetir **${repetirBruto}**. Use \`24h\`, \`7d\`, \`47h30m\` ou \`0\` para não repetir — ` +
+      "entre 1 hora e 30 dias." });
+  }
+
+  let gif = null;
+  try {
+    gif = await gifDoEvento(inter);
+  } catch (e) {
+    return inter.editReply({ content: `🖼️ ${PORQUE_DO_GIF[e?.message] || PORQUE_DO_GIF.subir}` });
+  }
+
+  /* O fuso deste oficial fica lembrado para a próxima vez vir preenchida. */
   if (fuso !== null) await porAjuste(`fuso:${inter.user.id}`, String(fuso)).catch(() => {});
 
-  const criado = await sbPost("cyron_evento", {
-    servidor_id: servidor.id, guild_id: inter.guildId, titulo,
-    detalhes: detalhes || null, quando: new Date(quando).toISOString(),
-    votacao, criado_por: inter.user.id,
-  }).catch((e) => {
-    console.error("eventos: nao consegui criar:", e?.message || e);
-    return null;
-  });
-  const ev = Array.isArray(criado) ? criado[0] : criado;
+  const campos = {
+    titulo, detalhes: detalhes || null, quando: new Date(quando).toISOString(),
+    repetir_min: repetir || null,
+    lembrete_min: LEMBRETES.includes(lembrete) ? lembrete : null,
+    cargo_id: cargo?.id || null,
+    lembrete_feito: false, aviso_feito: false,
+    /* GIF so' muda quando veio um novo: editar o horario nao apaga o urso. */
+    ...(gif ? { gif_url: gif } : {}),
+  };
+
+  const existente = (await sb(`cyron_evento?servidor_id=eq.${servidor.id}` +
+    `&titulo=eq.${encodeURIComponent(titulo)}&select=id&limit=1`).catch(() => null))?.[0];
+
+  let ev = null;
+  if (existente) {
+    await sbPatch(`cyron_evento?id=eq.${existente.id}`, campos).catch((e) =>
+      console.error("eventos: nao consegui editar:", e?.message || e));
+    ev = { ...campos, id: existente.id };
+  } else {
+    const criado = await sbPost("cyron_evento", {
+      ...campos, servidor_id: servidor.id, guild_id: inter.guildId,
+      votacao: true, criado_por: inter.user.id,
+    }).catch((e) => {
+      console.error("eventos: nao consegui criar:", e?.message || e);
+      return null;
+    });
+    ev = Array.isArray(criado) ? criado[0] : criado;
+  }
   if (!ev?.id) {
     return inter.editReply({ content:
       "Não consegui guardar o evento. Se isto continuar, a tabela dos eventos " +
-      "pode não ter sido criada ainda — está em `supabase/migracoes/002-eventos.sql`." });
+      "pode não estar atualizada — está em `supabase/migracoes/005-eventos-agenda.sql`." });
   }
 
   await desenharEventos(inter.guild, servidor).catch(() => {});
 
   const s = Math.floor(quando / 1000);
+  const linhas = [
+    `📅 **${titulo}** ${existente ? "atualizado" : "marcado"}: <t:${s}:F> — <t:${s}:R>.`,
+    repetir ? `🔁 Repete a cada **${textoDaRepeticao(repetir)}**.` : "Não repete.",
+    campos.lembrete_min ? `⏰ Quem se inscrever recebe um lembrete no privado **${campos.lembrete_min} min antes**.`
+      : "⏰ Sem lembrete antes — só o aviso na hora.",
+    cargo ? `📣 Na hora eu marco ${cargo} e os inscritos.` : "📣 Na hora eu marco os inscritos.",
+    "",
+    "_Cada pessoa vê o horário no fuso dela. Para mudar algo, use `/evento` de novo com o mesmo nome._",
+  ];
+  /* Cargo que nao se deixa marcar: o Discord engole a mencao calado. Melhor
+     avisar agora do que o lider descobrir na hora do rally. */
+  if (cargo && !cargo.mentionable &&
+      !inter.guild.members.me?.permissions?.has(PermissionFlagsBits.MentionEveryone)) {
+    linhas.push(`⚠️ O cargo ${cargo} não está como "mencionável", e eu não tenho permissão de marcar todos. ` +
+      "Ligue \"Permitir que qualquer um @mencione este cargo\" nas configurações do cargo.");
+  }
   return inter.editReply({
-    content: `📅 **${titulo}** marcado para <t:${s}:F> — <t:${s}:R>.\n` +
-      "_Cada pessoa vê esse horário no fuso dela._",
+    content: linhas.join("\n"),
+    allowedMentions: { parse: [] },
     components: [{ type: 1, components: [
-      { type: 2, custom_id: `evento:votacao:${ev.id}`, style: 2, emoji: { name: "✋" },
-        label: votacao ? "Tirar a votação" : "Adicionar votação" },
       { type: 2, custom_id: `evento:apagar:${ev.id}`, style: 4, emoji: { name: "🗑️" },
         label: "Apagar" },
     ] }],
@@ -7448,7 +7634,7 @@ async function cliqueEvento(inter) {
   const servidor = await servidorDoGuild(inter.guildId);
   if (!servidor) return inter.reply({ flags: 64, content: "Ainda não terminei de me instalar aqui." });
 
-  const ev = (await sb(`cyron_evento?id=eq.${id}&select=id,titulo,detalhes,quando,votacao,msg_id,criado_por`)
+  const ev = (await sb(`cyron_evento?id=eq.${id}&select=*`)
     .catch(() => null))?.[0];
   if (!ev) return inter.reply({ flags: 64, content: "Esse evento não existe mais." });
 
@@ -7495,13 +7681,177 @@ async function cliqueEvento(inter) {
 
   /* Presença. Um upsert por pessoa: dois cliques no mesmo instante não
      disputam nada, porque cada um escreve a própria linha. */
+  /* Inscricao: um botao so', que liga e desliga. O "nao" e' dos cartoes
+     antigos, que ainda tem o botao 😴 ate' a proxima edicao -- vale como sair. */
   if (acao === "vou" || acao === "nao") {
-    await inter.deferUpdate();
-    await sbPost("cyron_evento_presenca",
-      { evento_id: Number(ev.id), discord_user_id: inter.user.id, vai: acao === "vou" },
-      "resolution=merge-duplicates").catch((e) =>
-        console.error("eventos: nao consegui guardar a presenca:", e?.message || e));
+    await inter.deferReply({ flags: 64 });
+    const jaEstava = (await sb(`cyron_evento_presenca?evento_id=eq.${Number(ev.id)}` +
+      `&discord_user_id=eq.${inter.user.id}&vai=eq.true&select=vai`).catch(() => null))?.length > 0;
+    const entra = acao === "vou" && !jaEstava;
+    if (entra) {
+      await sbPost("cyron_evento_presenca",
+        { evento_id: Number(ev.id), discord_user_id: inter.user.id, vai: true },
+        "resolution=merge-duplicates").catch((e) =>
+          console.error("eventos: nao consegui guardar a inscricao:", e?.message || e));
+    } else {
+      await sbDel(`cyron_evento_presenca?evento_id=eq.${Number(ev.id)}&discord_user_id=eq.${inter.user.id}`)
+        .catch((e) => console.error("eventos: nao consegui tirar a inscricao:", e?.message || e));
+    }
     await desenharEventos(inter.guild, servidor).catch(() => {});
+
+    const idioma = (await idiomaEscolhido(inter.user.id)) || idiomaDoAplicativo(inter.locale) || "en";
+    const frase = entra
+      ? (Number(ev.lembrete_min) > 0
+        ? `Inscrição feita! Você recebe um lembrete no privado ${ev.lembrete_min} minutos antes, e eu te marco quando começar.`
+        : "Inscrição feita! Eu te marco quando o evento começar.")
+      : "Inscrição cancelada. Você não recebe mais avisos deste evento.";
+    const embed = await traduzirEmbed({ color: entra ? COR_OK : 0x9aa0a6, description: frase },
+      idioma, await motorDoGuild(inter.guildId)).catch(() => ({ description: frase }));
+    return inter.editReply({ embeds: [{ ...embed, title: `${entra ? "🔔" : "🔕"} ${String(ev.titulo).slice(0, 200)}` }] });
+  }
+}
+
+/* ---------------- a ronda da agenda, de minuto em minuto ----------------
+
+   Duas coisas, cada uma UMA vez por data:
+
+   - o LEMBRETE, no privado de cada inscrito, na lingua dele, X minutos antes;
+   - o AVISO, na hora: o cartao e' REENVIADO marcando o cargo e os inscritos.
+     Reenviado, e nao editado, porque editar nao faz celular nenhum apitar.
+
+   A marca de "feito" e' gravada ANTES de mandar. Se o bot cair no meio,
+   alguem fica sem lembrete -- o contrario seria mandar duas vezes para todo
+   mundo a cada reinicio, que e' o jeito mais rapido de um bot ser silenciado. */
+let agendaRodando = false;
+
+async function inscritosDoEvento(id) {
+  return (await presencasDoEvento(id)).filter((p) => p.vai).map((p) => String(p.discord_user_id));
+}
+
+function linkDaMensagem(guildId, canalId, msgId) {
+  return guildId && canalId && msgId ? `https://discord.com/channels/${guildId}/${canalId}/${msgId}` : null;
+}
+
+/* O lembrete no privado. O titulo e o nome vao como estao -- tradutor
+   estraga nome proprio --, e so' a frase passa pelo tradutor, uma vez por
+   lingua. A hora vai depois da traducao, porque <t:...> e' marcacao. */
+async function lembrarInscritos(guild, ev, inscritos) {
+  const s = Math.floor(new Date(ev.quando).getTime() / 1000);
+  const motor = await motorDoGuild(guild.id).catch(() => undefined);
+  const frases = new Map();
+  const canal = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === CANAL_EVENTOS);
+  const link = linkDaMensagem(guild.id, canal?.id, ev.msg_id);
+  let foram = 0;
+
+  for (const id of inscritos.slice(0, 200)) {
+    try {
+      const idioma = (await idiomaEscolhido(id).catch(() => null)) || "en";
+      if (!frases.has(idioma)) {
+        const t = await traduzirEmbed({ description:
+          "O evento em que você se inscreveu está chegando. Se lembre de participar!" }, idioma, motor)
+          .catch(() => null);
+        frases.set(idioma, t?.description || "Your event is starting soon. Don't forget to join!");
+      }
+      const membro = await guild.members.fetch(id).catch(() => null);
+      const nome = membro?.displayName || membro?.user?.username || "";
+      const usuario = membro?.user || await client.users.fetch(id).catch(() => null);
+      if (!usuario) continue;
+      await usuario.send({
+        embeds: [{
+          color: COR,
+          title: `🔔 ${String(ev.titulo).slice(0, 240)}`,
+          description: (nome ? `👋 **${nome}**\n` : "") + frases.get(idioma) + `\n\n🕒 <t:${s}:F> · ⏳ <t:${s}:R>`,
+          ...(ev.gif_url ? { image: { url: String(ev.gif_url) } } : {}),
+          footer: { text: guild.name.slice(0, 100) },
+        }],
+        ...(link ? { components: [{ type: 1, components: [
+          { type: 2, style: 5, url: link, emoji: { name: "📅" }, label: guild.name.slice(0, 70) },
+        ] }] } : {}),
+      });
+      foram++;
+    } catch (e) {
+      /* 50007: a pessoa fechou o privado. Nao e' erro meu nem dela -- ela
+         ainda e' marcada no cartao na hora. */
+      if (e?.code !== 50007) console.error("eventos: nao consegui lembrar", id, e?.message || e);
+    }
+  }
+  console.log(`eventos: lembrete de "${ev.titulo}" foi para ${foram} de ${inscritos.length}`);
+}
+
+/* Na hora: apaga o cartao velho e posta de novo, marcando. Se o evento
+   repete, o cartao novo ja' mostra a PROXIMA data -- e a inscricao continua. */
+async function avisarNaHora(guild, servidor, ev, inscritos, marcar, agora = Date.now()) {
+  const canal = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === CANAL_EVENTOS);
+  const aviso = mencoesDoAviso(ev, inscritos);
+
+  let proximo = ev;
+  if (Number(ev.repetir_min) > 0) {
+    const nova = proximaVez(new Date(ev.quando).getTime(), ev.repetir_min, agora);
+    proximo = { ...ev, quando: new Date(nova).toISOString(), lembrete_feito: false, aviso_feito: false };
+    /* criado_em anda junto: o prazo de 30 dias da privacidade conta da
+       ultima vez que o evento aconteceu, e nao de quando foi criado. Sem
+       isso a limpeza diaria apagaria um evento semanal vivo no 31o dia. */
+    const hoje = new Date(agora).toISOString();
+    await sbPatch(`cyron_evento?id=eq.${ev.id}`, {
+      quando: proximo.quando, lembrete_feito: false, aviso_feito: false, criado_em: hoje,
+    }).catch((e) => console.error("eventos: nao consegui andar para a proxima data:", e?.message || e));
+    await sbPatch(`cyron_evento_presenca?evento_id=eq.${ev.id}`, { criado_em: hoje }).catch(() => {});
+  }
+  if (!canal) return;
+
+  if (ev.msg_id) {
+    const velha = await canal.messages.fetch(ev.msg_id).catch(() => null);
+    if (velha) await velha.delete().catch(() => {});
+  }
+  const presencas = await presencasDoEvento(ev.id);
+  const nova = await canal.send({
+    ...(marcar ? { content: aviso.content } : {}),
+    embeds: [cartaoDoEvento(proximo, presencas, agora)],
+    components: botoesDoEvento(proximo, agora),
+    allowedMentions: marcar ? aviso.allowedMentions : { parse: [] },
+  }).catch((e) => {
+    console.error("eventos: nao consegui avisar na hora:", e?.message || e);
+    return null;
+  });
+  if (nova) await sbPatch(`cyron_evento?id=eq.${ev.id}`, { msg_id: nova.id }).catch(() => {});
+}
+
+async function rodarAgendaDeEventos(agora = Date.now()) {
+  if (agendaRodando) return;
+  agendaRodando = true;
+  try {
+    /* Uma hora a frente cobre o maior lembrete (60 min). */
+    const ate = new Date(agora + 61 * 60000).toISOString();
+    const pendentes = await sb(`cyron_evento?aviso_feito=eq.false&quando=lte.${ate}&select=*&order=quando.asc&limit=200`)
+      .catch(() => null) || [];
+
+    for (const ev of pendentes) {
+      try {
+        const guild = client.guilds.cache.get(String(ev.guild_id));
+        if (!guild) continue;
+        const t = new Date(ev.quando).getTime();
+        const lembrete = Number(ev.lembrete_min) || 0;
+
+        if (lembrete > 0 && !ev.lembrete_feito && agora >= t - lembrete * 60000) {
+          await sbPatch(`cyron_evento?id=eq.${ev.id}`, { lembrete_feito: true });
+          /* Lembrete que so' daria para mandar depois do inicio nao e'
+             lembrete: o aviso da hora ja' cobre. */
+          if (agora < t) await lembrarInscritos(guild, ev, await inscritosDoEvento(ev.id));
+        }
+
+        if (agora >= t) {
+          await sbPatch(`cyron_evento?id=eq.${ev.id}`, { aviso_feito: true });
+          const servidor = await servidorDoGuild(guild.id);
+          if (!servidor) continue;
+          await avisarNaHora(guild, servidor, ev, await inscritosDoEvento(ev.id),
+            agora - t <= AVISO_ATRASADO, agora);
+        }
+      } catch (e) {
+        console.error(`eventos: a agenda falhou no evento ${ev.id}:`, e?.message || e);
+      }
+    }
+  } finally {
+    agendaRodando = false;
   }
 }
 
@@ -13021,6 +13371,8 @@ client.on("interactionCreate", async (inter) => {
          qualquer pedido. Com o /evento pedindo sugestão de horário, ele
          receberia nomes de rally onde esperava "3h". */
       if (inter.commandName === "evento") {
+        const foco = inter.options.getFocused(true);
+        if (foco?.name === "repetir") return inter.respond(sugestoesDeRepetir(String(foco.value || "")));
         const fuso = Number((await ajustes())[`fuso:${inter.user.id}`]) || 0;
         return inter.respond(
           sugestoesDeQuando(String(inter.options.getFocused() || ""), Date.now(), fuso));
@@ -14418,12 +14770,24 @@ const GLOBAIS_DO_CYRON = [
         description: "O nome do evento. Ex: Urso · Bear Trap" },
       { type: 3, name: "quando", required: true, autocomplete: true,
         description: "3h · 90m · 20:30 · 23/09 20:30 — escolha uma sugestão" },
-      { type: 5, name: "votacao", required: false,
-        description: "Perguntar quem vai? (padrão: sim)" },
+      { type: 3, name: "repetir", required: false, autocomplete: true, max_length: 20,
+        description: "Repetir? 24h · 7d · 47h30m — vazio: não repete" },
+      { type: 4, name: "lembrete", required: false,
+        description: "Lembrete no privado de quem se inscreveu, antes do início",
+        choices: [
+          { name: "Sem lembrete / No reminder", value: 0 },
+          ...LEMBRETES.map((m) => ({ name: `${m} min antes / ${m} min before`, value: m })),
+        ] },
+      { type: 11, name: "gif", required: false,
+        description: "GIF ou imagem do evento (arquivo)" },
+      { type: 3, name: "gif-link", required: false, max_length: 500,
+        description: "Ou o link do GIF (https://...)" },
+      { type: 8, name: "cargo", required: false,
+        description: "Cargo para marcar na hora, além de quem se inscreveu" },
       { type: 3, name: "detalhes", required: false, max_length: 800,
         description: "O que mais precisa ser dito" },
       { type: 3, name: "fuso", required: false, max_length: 10,
-        description: "Só para hora de relógio, se a sugestão vier errada. Ex: -3" },
+        description: "Fuso da hora digitada. Ex: -3 · 0 para UTC (como no jogo)" },
     ],
   },
   {
@@ -14903,6 +15267,9 @@ client.once("clientReady", () => {
   setInterval(() => {
     sincronizarRecentes().catch((e) => console.error("espelho: passada curta falhou:", e?.message || e));
     descarregarUso().catch((e) => console.error("uso: descarga falhou:", e?.message || e));
+    /* A agenda precisa do minuto: lembrete "10 min antes" numa ronda de dez
+       em dez chegaria na hora do evento. */
+    rodarAgendaDeEventos().catch((e) => console.error("eventos: agenda falhou:", e?.message || e));
   }, 60 * 1000);
 });
 
