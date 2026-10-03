@@ -4277,7 +4277,7 @@ function conferirCartao(onde, embed, componentes = []) {
 
 /* ============ o painel de seletores do /evento ============ */
 {
-  const m = carregar(["EVENTO_MAX", "LEMBRETES", "REPETICOES", "FUSOS", "FUSOS_RAPIDOS", "textoDaRepeticao",
+  const m = carregar(["EVENTO_MAX", "LEMBRETES", "REPETICOES", "TODOS_FUSOS", "MINUTOS_DOS_FUSOS", "fusoDoTexto", "rotuloDoFuso", "sugestoesDeFuso", "fusoDoCampo", "textoDaRepeticao",
     "rotuloDaRepeticao", "textoDoFuso", "partesNoFuso", "instanteDe", "horarioInicial", "opcoesDoDia",
     "nalingua", "painelDoRascunho"]);
   globalThis.COR = 0xF5A623;
@@ -4317,8 +4317,22 @@ function conferirCartao(onde, embed, componentes = []) {
   const passado = await m.painelDoRascunho("abc", { ...p, quando: AGORA - 60000 }, "pt", AGORA);
   verdade("horário que passou trava o ✅", passado.components[4].components.find((b) => b.custom_id.startsWith("evsel:criar")).disabled === true);
 
-  for (const f of m.FUSOS_RAPIDOS) verdade(`o fuso rápido ${m.textoDoFuso(f)} também está na lista do comando`, m.FUSOS.includes(f));
-  ok("a lista de fusos cabe no Discord", m.FUSOS.length <= 25, true);
+  /* Todos os fusos do mundo, inclusive os de meia hora e de 45 minutos. */
+  for (const f of [-720, -570, -210, -180, 0, 330, 345, 525, 765, 840]) verdade(`o fuso ${m.textoDoFuso(f)} existe`, m.MINUTOS_DOS_FUSOS.has(f));
+  const oeste = m.TODOS_FUSOS.filter(([x]) => x <= 0).length, leste = m.TODOS_FUSOS.filter(([x]) => x > 0).length;
+  verdade("as duas listas do painel cabem no Discord (25 cada)", oeste <= 25 && leste <= 25);
+  verdade("o Brasil aparece pelo nome", m.sugestoesDeFuso("brasília").some((o) => o.value === "-180"));
+  verdade("e pelo número", m.sugestoesDeFuso("-3")[0].value === "-180");
+  verdade("e o Japão por Tokyo", m.sugestoesDeFuso("tokyo").some((o) => o.value === "540"));
+  verdade("o autocompletar nunca passa de 25", m.sugestoesDeFuso("").length <= 25 && m.sugestoesDeFuso("u").length <= 25);
+  ok("o campo aceita o que a lista mandou", m.fusoDoCampo("-180"), -180);
+  ok("e o que a pessoa digitou sem escolher", m.fusoDoCampo("+5:30"), 330);
+  ok("e UTC-3 escrito", m.fusoDoCampo("UTC-3"), -180);
+  ok("vazio: sem escolha", m.fusoDoCampo(""), null);
+  verdade("o rótulo de cada fuso cabe numa opção", m.TODOS_FUSOS.every(([x]) => m.rotuloDoFuso(x).length <= 100));
+  const escolha = await m.painelDoRascunho("abc", { ...p, escolhendoFuso: true }, "pt", AGORA);
+  ok("o 🌍 abre as duas listas e o ↩️", escolha.components.length, 3);
+  ok("com o fuso atual marcado", escolha.components[0].components[0].options.filter((o) => o.default).map((o) => o.value), ["0"]);
 }
 
 /* ============ o leitor automático: Apps → Criar evento ============ */
@@ -4377,7 +4391,7 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o rascunho é só de quem pediu e administra",
     /p\.userId !== inter\.user\.id \|\| !inter\.memberPermissions\?\.has\(PermissionFlagsBits\.ManageGuild\)/.test(clique));
   verdade("nada é criado sem ✅", (clique.match(/acao === "criar"/g) || []).length === 2);
-  verdade("o botão 🌍 troca o fuso mantendo o relógio", /acao === "fuso"[^]{0,500}p\.quando = instanteDe\(pt, novo\)/.test(clique));
+  verdade("escolher o fuso mantém o relógio", /acao === "oeste" \|\| acao === "leste"[^]{0,500}p\.quando = instanteDe\(pt, novo\)/.test(clique));
   verdade("o ✏️ do leitor abre o painel de seletores, e não um formulário de digitar",
     /acao === "corrigir"[^]{0,160}painelDoRascunho/.test(clique));
   const conf = f.slice(f.indexOf("async function confirmarEvento"), f.indexOf("async function criarEvento"));
@@ -4484,6 +4498,7 @@ function conferirCartao(onde, embed, componentes = []) {
 {
   const f = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
   verdade("a agenda vira origem das salas de idioma sozinha", /await agendaComoOrigem\(servidor\.id, canal\)/.test(f));
+  verdade("e nunca no servidor de suporte", /async function agendaComoOrigem[^]{0,400}ehServidorDoSuporte/.test(f));
   verdade("só em servidor que já tem salas por idioma", /agendaComoOrigem[^]{0,400}replicasDoIdioma\(servidorId\)\)\.length\) return/.test(f));
   verdade("escolher canais no painel não desliga a agenda", /async function definirFontes[^]{0,600}tipo=neq\.\$\{TIPO_AGENDA\}/.test(f));
   verdade("o aviso na hora também chega nas salas de idioma", /async function avisarNaHora[^]{0,3000}desenharNasCopias\(/.test(f));
@@ -4889,7 +4904,7 @@ function conferirCartao(onde, embed, componentes = []) {
   const def = fonteEv2.slice(fonteEv2.indexOf('name: "evento",'), fonteEv2.indexOf('name: "evento",') + 4000);
   verdade("o quando tem autocompletar", /name: "quando"[^]{0,120}autocomplete: true/.test(def));
   verdade("repetir é uma LISTA, nada para digitar errado", /type: 4, name: "repetir"[^]{0,200}choices: REPETICOES/.test(def));
-  verdade("o fuso também é lista", /type: 4, name: "fuso"[^]{0,200}choices: FUSOS/.test(def));
+  verdade("o fuso tem todos os fusos, pelo autocompletar", /type: 3, name: "fuso"[^]{0,300}autocomplete: true/.test(def));
   verdade("o quando deixou de ser obrigatório (sem ele abre o painel)", /name: "quando", required: false/.test(def));
   verdade("as descrições têm tradução para o app de cada líder", /descriptionLocalizations: TRADUCOES_DO_EVENTO\.comando/.test(def));
   verdade("o lembrete também", /name: "lembrete"/.test(def));
