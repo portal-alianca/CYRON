@@ -4643,6 +4643,8 @@ function conferirCartao(onde, embed, componentes = []) {
   /* ---- o quadro de quem escolheu idioma ---- */
   {
     globalThis.nomeNaPropriaLingua = (c) => ({ pt: "🇧🇷 Português", en: "🇬🇧 English" })[c] || c;
+    globalThis.menuIdioma = () => [{ type: 1, components: [{ type: 3, custom_id: "escolher-idioma",
+      options: [{ label: "Português", value: "pt" }] }] }];
     const Q = carregar(["diaISO", "LEMBRAR_A_CADA_DIAS", "LEMBRETES_POR_DIA", "quemTemIdioma",
       "cartaoDosIdiomas", "botaoDoLembrete", "quemLembrarHoje"]);
     const cargos = [{ idioma: "pt", role_id: "r-pt" }, { idioma: "en", role_id: "r-en" }];
@@ -4655,11 +4657,16 @@ function conferirCartao(onde, embed, componentes = []) {
     ok("sem idioma: quem não tem cargo nem escolheu no bot (bots fora)", sem, ["leo", "max"]);
     const quadro = Q.cartaoDosIdiomas(porIdioma, sem);
     conferirCartao("o quadro de idiomas", quadro, Q.botaoDoLembrete(false));
-    verdade("o quadro marca quem falta (sem notificar: é cartão)", /<@leo> <@max>/.test(quadro.description));
+    const faltamCampo = quadro.fields.at(-1);
+    verdade("o quadro marca quem falta (sem notificar: é cartão)", /<@leo> <@max>/.test(faltamCampo.value));
+    verdade("todo em inglês", /Pick your language/.test(quadro.title) && !/Escolha|Sem idioma/.test(JSON.stringify(quadro)));
+    ok("um campo por língua, lado a lado", quadro.fields.filter((f) => f.inline).map((f) => f.name), ["🇧🇷 Português", "🇬🇧 English"]);
+    verdade("o menu de escolher vai junto do quadro",
+      Q.botaoDoLembrete(false).some((l) => l.components.some((c) => c.custom_id === "escolher-idioma")));
     const muitos = Array.from({ length: 300 }, (_, i) => `u${i}`);
     conferirCartao("o quadro com 300 sem idioma", Q.cartaoDosIdiomas(porIdioma, muitos));
-    verdade("e diz quantos ficaram de fora da lista", /\+260/.test(Q.cartaoDosIdiomas(porIdioma, muitos).description));
-    verdade("todo mundo com idioma: comemora", /Todo mundo já escolheu/.test(Q.cartaoDosIdiomas(porIdioma, []).description));
+    verdade("e diz quantos ficaram de fora da lista", /and 260 more/.test(Q.cartaoDosIdiomas(porIdioma, muitos).fields.at(-1).value));
+    verdade("todo mundo com idioma: comemora", /Everyone has picked/.test(Q.cartaoDosIdiomas(porIdioma, []).fields.at(-1).value));
 
     let r = Q.quemLembrarHoje(["leo", "max"], {}, "2026-10-03");
     ok("primeiro dia: marca os dois", r.hojeVao, ["leo", "max"]);
@@ -4673,8 +4680,44 @@ function conferirCartao(onde, embed, componentes = []) {
 
     const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
     verdade("o lembrete notifica só quem está na lista do dia", /allowedMentions: \{ users: hojeVao \}/.test(idx));
+    verdade("e leva o menu de escolher junto", /components: menuIdioma\(\),\s*allowedMentions: \{ users: hojeVao \}/.test(idx));
     verdade("o quadro não notifica ninguém", /canal\.send\(\{ \.\.\.carga, allowedMentions: \{ parse: \[\] \} \}\)/.test(idx));
     verdade("o lembrete de ontem é apagado", /if \(antes\.msg\) await/.test(idx));
+    const S = carregar(["salaDoQuadro", "lerGuardado"]);
+    const canal = (id, publico = true) => ({ id, send: () => {}, permissionsFor: () => ({ has: () => publico }) });
+    const g = (...cs) => ({ roles: { everyone: {} }, channels: { cache: new Map(cs.map((c) => [c.id, c])) } });
+    const guild = g(canal("welcome"), canal("textos", false), canal("geral"));
+    ok("sem sala de idioma, o quadro vai para o portão",
+      S.salaDoQuadro(guild, [{ canal_id: "textos", tipo: "convite" }, { canal_id: "welcome", tipo: "portao" }])?.id, "welcome");
+    const comSala = g(canal("welcome"), { ...canal("idi"), name: "🌐-idioma-language" });
+    ok("a sala de idioma de verdade vem antes do portão",
+      S.salaDoQuadro(comSala, [{ canal_id: "welcome", tipo: "portao" }, { canal_id: "idi", tipo: "convite" }])?.id, "idi");
+    ok("sem portão, um convite que todo mundo vê",
+      S.salaDoQuadro(guild, [{ canal_id: "textos", tipo: "convite" }, { canal_id: "geral", tipo: "convite" }])?.id, "geral");
+    ok("sala apagada não conta", S.salaDoQuadro(guild, [{ canal_id: "sumiu", tipo: "portao" }]), null);
+    ok("a marca antiga (só o id) ainda é lida", S.lerGuardado("123"), { msg: "123" });
+    ok("a nova guarda a sala junto", S.lerGuardado('{"canal":"c","msg":"m"}'), { canal: "c", msg: "m" });
+    {
+      globalThis.CANAL_PORTA = "🌐-idioma-language";
+      globalThis.ChannelType = { GuildText: 0 };
+      const criados = [];
+      let posicao = null;
+      const cache = new Map([["w", { id: "w", type: 0, name: "⛩️welcome⛩️", parentId: null, rawPosition: 0 }],
+        ["t", { id: "t", type: 0, name: "geral", parentId: "cat", rawPosition: 0 }]]);
+      cache.find = (f) => [...cache.values()].find(f);
+      globalThis.canalPorNomeOuCria = async (g, nome) => { const c = { id: "nova", type: 0, name: nome, parentId: null,
+        rawPosition: 9, send: () => {}, setPosition: async (p) => { posicao = p; } }; criados.push(nome); cache.set("nova", c); return c; };
+      const T = carregar(["salaDeIdiomaNoTopo"]);
+      const sala = await T.salaDeIdiomaNoTopo({ name: "TOP", channels: { cache } });
+      ok("sem a sala de idioma, ela é criada", criados, ["🌐-idioma-language"]);
+      ok("logo abaixo do primeiro canal do topo (o welcome)", posicao, 1);
+      await T.salaDeIdiomaNoTopo({ name: "TOP", channels: { cache } });
+      ok("e só uma vez", criados.length, 1);
+      verdade("o quadro usa a sala do topo", sala.id === "nova" &&
+        /const canal = noTopo\?\.send \? noTopo : salaDoQuadro\(guild, portas\)/.test(idx));
+    }
+    verdade("mudou de sala: o quadro velho sai de onde estava",
+      /if \(guardado\.msg && guardado\.canal !== canal\.id\) \{\s*await apagarDeOutraSala/.test(idx));
     verdade("o suporte e o painel ficam de fora", /ehOPainel\(guild\.id\) \|\| await ehServidorDoSuporte\(guild\.id\)/.test(idx));
     verdade("o botão de desligar passa pela checagem de Gerenciar Servidor",
       idx.indexOf('if (acao === "lembrete")') > idx.indexOf("PermissionFlagsBits.ManageGuild", idx.indexOf("async function cliquePainel")));

@@ -10497,31 +10497,35 @@ function quemTemIdioma(membros, cargos, escolhidos) {
   return { porIdioma: [...porIdioma].sort((a, b) => b[1] - a[1]), sem };
 }
 
+/* Em ingles, e so' em ingles: o quadro e' UMA mensagem para gente de vinte
+   linguas, e duas linguas lado a lado dobravam o tamanho sem servir a mais
+   ninguem. Os nomes das linguas vao na propria lingua, e o resto e' numero. */
 function cartaoDosIdiomas(porIdioma, sem, desligado = false) {
-  const linhas = porIdioma.map(([c, n]) => `${nomeNaPropriaLingua(c)} — **${n}**`);
+  const total = porIdioma.reduce((a, [, n]) => a + n, 0);
   const MOSTRAR = 40;
   const faltam = sem.length
     ? sem.slice(0, MOSTRAR).map((id) => `<@${id}>`).join(" ") +
-      (sem.length > MOSTRAR ? ` _+${sem.length - MOSTRAR}_` : "")
-    : "✅ Todo mundo já escolheu! · Everyone picked one!";
+      (sem.length > MOSTRAR ? `\n_and ${sem.length - MOSTRAR} more_` : "")
+    : "✅ Everyone has picked a language!";
   return {
     color: sem.length ? 0xC9A227 : 0x2E8B7A,
-    title: "🌐 Quem já escolheu o idioma · Who picked a language",
-    description: [
-      linhas.length ? linhas.join("\n") : "_ninguém ainda · nobody yet_",
-      "",
-      `❓ **Sem idioma · No language: ${sem.length}**`,
-      faltam,
-    ].join("\n").slice(0, 4000),
-    footer: { text: "Escolha o seu no menu acima · Pick yours in the menu above" +
-      (desligado ? " · 🔕 lembrete diário desligado" : " · 🔔 lembrete diário ligado") },
+    title: "🌐 Pick your language",
+    description: "Choose your language in the menu below and the whole server arrives **translated for you** — " +
+      "announcements, chat, events, everything.",
+    fields: [
+      ...porIdioma.slice(0, 18).map(([c, n]) => ({ name: nomeNaPropriaLingua(c), value: `**${n}** ${n === 1 ? "member" : "members"}`, inline: true })),
+      { name: `❓ Still without a language — ${sem.length}`, value: faltam.slice(0, 1024) },
+    ],
+    footer: { text: `${total} with a language · ${sem.length} without · updates every 10 min · daily reminder ${desligado ? "off" : "on"}` },
   };
 }
 
+/* O menu de escolher vai junto do quadro: quem se ve na lista de quem falta
+   resolve ali mesmo, sem procurar onde. */
 function botaoDoLembrete(desligado) {
-  return [{ type: 1, components: [{ type: 2, custom_id: "cyron:lembrete", style: 2,
+  return [...menuIdioma(), { type: 1, components: [{ type: 2, custom_id: "cyron:lembrete", style: 2,
     emoji: { name: desligado ? "🔔" : "🔕" },
-    label: desligado ? "Ligar lembrete diário (admins)" : "Desligar lembrete diário (admins)" }] }];
+    label: desligado ? "Turn daily reminder on (admins)" : "Turn daily reminder off (admins)" }] }];
 }
 
 /* Quem marcar hoje: so' quem nao foi marcado nos ultimos 3 dias, e no maximo
@@ -10535,10 +10539,78 @@ function quemLembrarHoje(sem, marcados = {}, hoje = diaISO(Date.now()), max = LE
   return { hojeVao, registro };
 }
 
+/* Onde o quadro mora: o PORTAO primeiro (a sala que quem ainda nao escolheu
+   idioma ve -- no TOP, o ⛩️welcome), e so' sem ele a primeira sala de
+   convite que todo mundo enxerga. A primeira versao ia direto a um convite
+   qualquer, e no TOP ele caiu numa sala que quem tem idioma nem abre. */
+function salaDoQuadro(guild, portas) {
+  const vivas = (portas || []).map((p) => ({ ...p, canal: guild.channels.cache.get(String(p.canal_id)) }))
+    .filter((p) => p.canal?.send);
+  const todos = guild.roles?.everyone;
+  const publica = (c) => !todos || c.permissionsFor?.(todos)?.has?.(PermissionFlagsBits.ViewChannel) !== false;
+  /* A sala de idioma de verdade primeiro (no TOP, a 🌐-idioma-language); sem
+     ela, o portao; e so' entao um convite que todo mundo ve. */
+  const deIdioma = (c) => /idioma|language|lingua|idiom|sprache|langue/i.test(String(c?.name || ""));
+  return (vivas.find((p) => p.tipo === "convite" && deIdioma(p.canal) && publica(p.canal)) ||
+    vivas.find((p) => p.tipo === "portao") ||
+    vivas.find((p) => p.tipo === "convite" && publica(p.canal)) ||
+    vivas.find((p) => p.tipo === "convite"))?.canal || null;
+}
+
+/* O que o quadro guarda: canal e mensagem. Antes era so' a mensagem; essas
+   chaves antigas viram { msg } e a mudanca de sala as apaga do lugar velho. */
+function lerGuardado(valor) {
+  if (!valor) return {};
+  try {
+    const v = JSON.parse(valor);
+    if (v && typeof v === "object") return v;
+  } catch { /* formato antigo: so' o id */ }
+  return { msg: String(valor) };
+}
+
+async function apagarDeOutraSala(guild, canalId, msgId) {
+  if (!msgId) return;
+  const canais = canalId ? [guild.channels.cache.get(String(canalId))] : [...guild.channels.cache.values()]
+    .filter((c) => c?.type === ChannelType.GuildText);
+  for (const c of canais) {
+    const m = c?.messages ? await c.messages.fetch(msgId).catch(() => null) : null;
+    if (m) { await m.delete().catch(() => {}); return; }
+  }
+}
+
+/* A sala de idioma no TOPO do servidor, criada se nao existir.
+
+   A instalacao so' cria a 🌐-idioma-language quando o servidor nao tem lugar
+   nenhum para escolher idioma. O TOP ja' tinha (o portao e convites dentro de
+   "Text Channels") -- e foi isso que deixou o quadro escondido numa categoria
+   fechada. Quem ja' tem idioma ve so' a categoria dele e nao acha onde trocar;
+   quem nao tem, nao acha onde escolher.
+
+   So' leitura, visivel para todos, fora de categoria e logo abaixo do
+   primeiro canal do topo (o welcome, no TOP). */
+async function salaDeIdiomaNoTopo(guild) {
+  const achada = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === CANAL_PORTA);
+  if (achada) return achada;
+  const sala = await canalPorNomeOuCria(guild, CANAL_PORTA,
+    "Pick your language here and the whole server arrives translated for you.");
+  const topo = [...guild.channels.cache.values()]
+    .filter((c) => c.type === ChannelType.GuildText && !c.parentId && c.id !== sala.id)
+    .sort((a, b) => a.rawPosition - b.rawPosition)[0];
+  await sala.setPosition(topo ? topo.rawPosition + 1 : 0)
+    .catch((e) => console.log("idiomas: nao consegui subir a sala:", e?.message || e));
+  console.log(`idiomas: criei #${CANAL_PORTA} no topo de ${guild.name}`);
+  return sala;
+}
+
 async function quadroDeIdiomas(guild, servidor, { forcar = false, agora = Date.now() } = {}) {
-  const portaId = await portaDoIdioma(guild);
-  const canal = portaId ? guild.channels.cache.get(portaId) : null;
-  if (!canal?.send) return;
+  const portas = await sb(`discord_convite_idioma?servidor_id=eq.${servidor.id}&select=canal_id,tipo`).catch(() => null);
+  if (!portas) return;   // banco fora: nao crio sala nem acuso ninguem
+  const noTopo = await salaDeIdiomaNoTopo(guild).catch((e) => {
+    console.log("idiomas: nao consegui a sala do topo em", guild.name, e?.message || e);
+    return null;
+  });
+  const canal = noTopo?.send ? noTopo : salaDoQuadro(guild, portas);
+  if (!canal) return;
   const [cargos, escolhas] = await Promise.all([
     sb(`discord_chat_espelho?servidor_id=eq.${servidor.id}&role_id=not.is.null&select=idioma,role_id`).catch(() => null),
     sbPaginado("discord_idioma_jogador?select=discord_user_id").catch(() => null),
@@ -10553,16 +10625,23 @@ async function quadroDeIdiomas(guild, servidor, { forcar = false, agora = Date.n
   const desligado = !!marcas[`idioma_lembrete_off:${servidor.id}`];
   const carga = { embeds: [cartaoDosIdiomas(porIdioma, sem, desligado)], components: botaoDoLembrete(desligado) };
   const chaveQuadro = `idioma_quadro:${servidor.id}`;
+  const guardado = lerGuardado(marcas[chaveQuadro]);
+  /* Mudou de sala (ou e' do formato antigo, sem sala): o quadro velho sai de
+     onde estava, e um novo nasce aqui. */
+  if (guardado.msg && guardado.canal !== canal.id) {
+    await apagarDeOutraSala(guild, guardado.canal, guardado.msg);
+    guardado.msg = null;
+  }
   const assinatura = assinaturaDoCartao(carga.embeds[0], carga.components);
-  if (forcar || !jaDesenhado(marcas[chaveQuadro], assinatura, agora)) {
-    const velho = marcas[chaveQuadro] ? await canal.messages.fetch(marcas[chaveQuadro]).catch(() => null) : null;
+  if (forcar || !guardado.msg || !jaDesenhado(guardado.msg, assinatura, agora)) {
+    const velho = guardado.msg ? await canal.messages.fetch(guardado.msg).catch(() => null) : null;
     if (velho) {
       await velho.edit(carga).catch(() => {});
       marcarDesenhado(velho.id, assinatura, agora);
     } else {
       const novo = await canal.send({ ...carga, allowedMentions: { parse: [] } }).catch(() => null);
       if (novo) {
-        await porAjuste(chaveQuadro, novo.id);
+        await porAjuste(chaveQuadro, JSON.stringify({ canal: canal.id, msg: novo.id }));
         marcarDesenhado(novo.id, assinatura, agora);
       }
     }
@@ -10574,18 +10653,18 @@ async function quadroDeIdiomas(guild, servidor, { forcar = false, agora = Date.n
   let antes = {};
   try { antes = JSON.parse(marcas[chaveLembrete] || "{}"); } catch { antes = {}; }
   if (desligado || antes.dia === hoje) return;
-  if (antes.msg) await (await canal.messages.fetch(antes.msg).catch(() => null))?.delete().catch(() => {});
+  if (antes.msg) await apagarDeOutraSala(guild, antes.canal || null, antes.msg);
   const { hojeVao, registro } = quemLembrarHoje(sem, antes.marcados || {}, hoje);
   let msg = null;
   if (hojeVao.length) {
     msg = await canal.send({
       content: `👋 ${hojeVao.map((id) => `<@${id}>`).join(" ")}\n` +
-        "Escolham o idioma de vocês no menu aqui em cima 👆 para ler o servidor traduzido.\n" +
-        "_Pick your language in the menu above 👆 to read this server in your language._",
+        "**Pick your language below** to read this server in your own language. 🌐",
+      components: menuIdioma(),
       allowedMentions: { users: hojeVao },
     }).catch(() => null);
   }
-  await porAjuste(chaveLembrete, JSON.stringify({ dia: hoje, msg: msg?.id || null, marcados: registro }));
+  await porAjuste(chaveLembrete, JSON.stringify({ dia: hoje, canal: canal.id, msg: msg?.id || null, marcados: registro }));
 }
 
 async function quadrosDeIdioma() {
