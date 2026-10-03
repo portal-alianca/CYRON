@@ -4640,6 +4640,47 @@ function conferirCartao(onde, embed, componentes = []) {
     ok("na volta seguinte não mexe em nada", [apagadas.length, limpas.length], [1, 1]);
   }
 
+  /* ---- o quadro de quem escolheu idioma ---- */
+  {
+    globalThis.nomeNaPropriaLingua = (c) => ({ pt: "🇧🇷 Português", en: "🇬🇧 English" })[c] || c;
+    const Q = carregar(["diaISO", "LEMBRAR_A_CADA_DIAS", "LEMBRETES_POR_DIA", "quemTemIdioma",
+      "cartaoDosIdiomas", "botaoDoLembrete", "quemLembrarHoje"]);
+    const cargos = [{ idioma: "pt", role_id: "r-pt" }, { idioma: "en", role_id: "r-en" }];
+    const m = (id, roles = [], bot = false) => ({ id, bot, cargos: new Set(roles) });
+    const { porIdioma, sem } = Q.quemTemIdioma([
+      m("ana", ["r-pt"]), m("bia", ["r-pt"]), m("joe", ["r-en"]),
+      m("leo"), m("max"), m("robo", [], true), m("zoe"),
+    ], cargos, new Set(["zoe"]));
+    ok("conta por idioma, do maior ao menor", porIdioma, [["pt", 2], ["en", 1]]);
+    ok("sem idioma: quem não tem cargo nem escolheu no bot (bots fora)", sem, ["leo", "max"]);
+    const quadro = Q.cartaoDosIdiomas(porIdioma, sem);
+    conferirCartao("o quadro de idiomas", quadro, Q.botaoDoLembrete(false));
+    verdade("o quadro marca quem falta (sem notificar: é cartão)", /<@leo> <@max>/.test(quadro.description));
+    const muitos = Array.from({ length: 300 }, (_, i) => `u${i}`);
+    conferirCartao("o quadro com 300 sem idioma", Q.cartaoDosIdiomas(porIdioma, muitos));
+    verdade("e diz quantos ficaram de fora da lista", /\+260/.test(Q.cartaoDosIdiomas(porIdioma, muitos).description));
+    verdade("todo mundo com idioma: comemora", /Todo mundo já escolheu/.test(Q.cartaoDosIdiomas(porIdioma, []).description));
+
+    let r = Q.quemLembrarHoje(["leo", "max"], {}, "2026-10-03");
+    ok("primeiro dia: marca os dois", r.hojeVao, ["leo", "max"]);
+    r = Q.quemLembrarHoje(["leo", "max", "novo"], r.registro, "2026-10-04");
+    ok("no dia seguinte, só quem chegou", r.hojeVao, ["novo"]);
+    r = Q.quemLembrarHoje(["leo", "max", "novo"], r.registro, "2026-10-06");
+    ok("três dias depois, os primeiros de novo", r.hojeVao, ["leo", "max"]);
+    r = Q.quemLembrarHoje(["max"], r.registro, "2026-10-07");
+    verdade("quem escolheu idioma sai do registro", !("leo" in r.registro) && !("novo" in r.registro));
+    ok("no máximo 20 por dia", Q.quemLembrarHoje(muitos, {}, "2026-10-03").hojeVao.length, 20);
+
+    const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+    verdade("o lembrete notifica só quem está na lista do dia", /allowedMentions: \{ users: hojeVao \}/.test(idx));
+    verdade("o quadro não notifica ninguém", /canal\.send\(\{ \.\.\.carga, allowedMentions: \{ parse: \[\] \} \}\)/.test(idx));
+    verdade("o lembrete de ontem é apagado", /if \(antes\.msg\) await/.test(idx));
+    verdade("o suporte e o painel ficam de fora", /ehOPainel\(guild\.id\) \|\| await ehServidorDoSuporte\(guild\.id\)/.test(idx));
+    verdade("o botão de desligar passa pela checagem de Gerenciar Servidor",
+      idx.indexOf('if (acao === "lembrete")') > idx.indexOf("PermissionFlagsBits.ManageGuild", idx.indexOf("async function cliquePainel")));
+    verdade("o quadro roda na varredura", /await quadrosDeIdioma\(\)\.catch/.test(idx));
+  }
+
   /* ---- não buscar a mensagem fixada quando nada mudou ---- */
   {
     const M = carregar(["desenhadoPorUltimo", "CONFERIR_DE_VERDADE", "jaDesenhado", "marcarDesenhado"]);
