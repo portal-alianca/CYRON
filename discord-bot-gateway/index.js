@@ -10535,10 +10535,45 @@ function quemLembrarHoje(sem, marcados = {}, hoje = diaISO(Date.now()), max = LE
   return { hojeVao, registro };
 }
 
+/* Onde o quadro mora: o PORTAO primeiro (a sala que quem ainda nao escolheu
+   idioma ve -- no TOP, o ⛩️welcome), e so' sem ele a primeira sala de
+   convite que todo mundo enxerga. A primeira versao ia direto a um convite
+   qualquer, e no TOP ele caiu numa sala que quem tem idioma nem abre. */
+function salaDoQuadro(guild, portas) {
+  const vivas = (portas || []).map((p) => ({ ...p, canal: guild.channels.cache.get(String(p.canal_id)) }))
+    .filter((p) => p.canal?.send);
+  const todos = guild.roles?.everyone;
+  const publica = (c) => !todos || c.permissionsFor?.(todos)?.has?.(PermissionFlagsBits.ViewChannel) !== false;
+  return (vivas.find((p) => p.tipo === "portao") ||
+    vivas.find((p) => p.tipo === "convite" && publica(p.canal)) ||
+    vivas.find((p) => p.tipo === "convite"))?.canal || null;
+}
+
+/* O que o quadro guarda: canal e mensagem. Antes era so' a mensagem; essas
+   chaves antigas viram { msg } e a mudanca de sala as apaga do lugar velho. */
+function lerGuardado(valor) {
+  if (!valor) return {};
+  try {
+    const v = JSON.parse(valor);
+    if (v && typeof v === "object") return v;
+  } catch { /* formato antigo: so' o id */ }
+  return { msg: String(valor) };
+}
+
+async function apagarDeOutraSala(guild, canalId, msgId) {
+  if (!msgId) return;
+  const canais = canalId ? [guild.channels.cache.get(String(canalId))] : [...guild.channels.cache.values()]
+    .filter((c) => c?.type === ChannelType.GuildText);
+  for (const c of canais) {
+    const m = c?.messages ? await c.messages.fetch(msgId).catch(() => null) : null;
+    if (m) { await m.delete().catch(() => {}); return; }
+  }
+}
+
 async function quadroDeIdiomas(guild, servidor, { forcar = false, agora = Date.now() } = {}) {
-  const portaId = await portaDoIdioma(guild);
-  const canal = portaId ? guild.channels.cache.get(portaId) : null;
-  if (!canal?.send) return;
+  const portas = await sb(`discord_convite_idioma?servidor_id=eq.${servidor.id}&select=canal_id,tipo`).catch(() => null);
+  const canal = salaDoQuadro(guild, portas);
+  if (!canal) return;
   const [cargos, escolhas] = await Promise.all([
     sb(`discord_chat_espelho?servidor_id=eq.${servidor.id}&role_id=not.is.null&select=idioma,role_id`).catch(() => null),
     sbPaginado("discord_idioma_jogador?select=discord_user_id").catch(() => null),
@@ -10553,16 +10588,23 @@ async function quadroDeIdiomas(guild, servidor, { forcar = false, agora = Date.n
   const desligado = !!marcas[`idioma_lembrete_off:${servidor.id}`];
   const carga = { embeds: [cartaoDosIdiomas(porIdioma, sem, desligado)], components: botaoDoLembrete(desligado) };
   const chaveQuadro = `idioma_quadro:${servidor.id}`;
+  const guardado = lerGuardado(marcas[chaveQuadro]);
+  /* Mudou de sala (ou e' do formato antigo, sem sala): o quadro velho sai de
+     onde estava, e um novo nasce aqui. */
+  if (guardado.msg && guardado.canal !== canal.id) {
+    await apagarDeOutraSala(guild, guardado.canal, guardado.msg);
+    guardado.msg = null;
+  }
   const assinatura = assinaturaDoCartao(carga.embeds[0], carga.components);
-  if (forcar || !jaDesenhado(marcas[chaveQuadro], assinatura, agora)) {
-    const velho = marcas[chaveQuadro] ? await canal.messages.fetch(marcas[chaveQuadro]).catch(() => null) : null;
+  if (forcar || !guardado.msg || !jaDesenhado(guardado.msg, assinatura, agora)) {
+    const velho = guardado.msg ? await canal.messages.fetch(guardado.msg).catch(() => null) : null;
     if (velho) {
       await velho.edit(carga).catch(() => {});
       marcarDesenhado(velho.id, assinatura, agora);
     } else {
       const novo = await canal.send({ ...carga, allowedMentions: { parse: [] } }).catch(() => null);
       if (novo) {
-        await porAjuste(chaveQuadro, novo.id);
+        await porAjuste(chaveQuadro, JSON.stringify({ canal: canal.id, msg: novo.id }));
         marcarDesenhado(novo.id, assinatura, agora);
       }
     }
@@ -10574,7 +10616,7 @@ async function quadroDeIdiomas(guild, servidor, { forcar = false, agora = Date.n
   let antes = {};
   try { antes = JSON.parse(marcas[chaveLembrete] || "{}"); } catch { antes = {}; }
   if (desligado || antes.dia === hoje) return;
-  if (antes.msg) await (await canal.messages.fetch(antes.msg).catch(() => null))?.delete().catch(() => {});
+  if (antes.msg) await apagarDeOutraSala(guild, antes.canal || null, antes.msg);
   const { hojeVao, registro } = quemLembrarHoje(sem, antes.marcados || {}, hoje);
   let msg = null;
   if (hojeVao.length) {
@@ -10585,7 +10627,7 @@ async function quadroDeIdiomas(guild, servidor, { forcar = false, agora = Date.n
       allowedMentions: { users: hojeVao },
     }).catch(() => null);
   }
-  await porAjuste(chaveLembrete, JSON.stringify({ dia: hoje, msg: msg?.id || null, marcados: registro }));
+  await porAjuste(chaveLembrete, JSON.stringify({ dia: hoje, canal: canal.id, msg: msg?.id || null, marcados: registro }));
 }
 
 async function quadrosDeIdioma() {

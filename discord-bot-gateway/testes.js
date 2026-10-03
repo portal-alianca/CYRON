@@ -4675,6 +4675,19 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("o lembrete notifica só quem está na lista do dia", /allowedMentions: \{ users: hojeVao \}/.test(idx));
     verdade("o quadro não notifica ninguém", /canal\.send\(\{ \.\.\.carga, allowedMentions: \{ parse: \[\] \} \}\)/.test(idx));
     verdade("o lembrete de ontem é apagado", /if \(antes\.msg\) await/.test(idx));
+    const S = carregar(["salaDoQuadro", "lerGuardado"]);
+    const canal = (id, publico = true) => ({ id, send: () => {}, permissionsFor: () => ({ has: () => publico }) });
+    const g = (...cs) => ({ roles: { everyone: {} }, channels: { cache: new Map(cs.map((c) => [c.id, c])) } });
+    const guild = g(canal("welcome"), canal("textos", false), canal("geral"));
+    ok("o quadro vai para o portão (a sala de quem ainda não escolheu)",
+      S.salaDoQuadro(guild, [{ canal_id: "textos", tipo: "convite" }, { canal_id: "welcome", tipo: "portao" }])?.id, "welcome");
+    ok("sem portão, um convite que todo mundo vê",
+      S.salaDoQuadro(guild, [{ canal_id: "textos", tipo: "convite" }, { canal_id: "geral", tipo: "convite" }])?.id, "geral");
+    ok("sala apagada não conta", S.salaDoQuadro(guild, [{ canal_id: "sumiu", tipo: "portao" }]), null);
+    ok("a marca antiga (só o id) ainda é lida", S.lerGuardado("123"), { msg: "123" });
+    ok("a nova guarda a sala junto", S.lerGuardado('{"canal":"c","msg":"m"}'), { canal: "c", msg: "m" });
+    verdade("mudou de sala: o quadro velho sai de onde estava",
+      /if \(guardado\.msg && guardado\.canal !== canal\.id\) \{\s*await apagarDeOutraSala/.test(idx));
     verdade("o suporte e o painel ficam de fora", /ehOPainel\(guild\.id\) \|\| await ehServidorDoSuporte\(guild\.id\)/.test(idx));
     verdade("o botão de desligar passa pela checagem de Gerenciar Servidor",
       idx.indexOf('if (acao === "lembrete")') > idx.indexOf("PermissionFlagsBits.ManageGuild", idx.indexOf("async function cliquePainel")));
