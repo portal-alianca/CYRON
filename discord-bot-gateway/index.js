@@ -10469,6 +10469,139 @@ async function fontesDoSuporte(guild, ids) {
   return await apagarOrfas(guild, servidor);
 }
 
+/* ---------------- quem ja' escolheu idioma, na propria sala de escolher ----------------
+
+   Quem nao escolhe idioma nao recebe cargo, nao ve as salas traduzidas e acha
+   que o bot nao funciona -- e' o membro que o servidor perde sem saber. O
+   quadro fixado na sala de escolher mostra quantos escolheram cada lingua e
+   QUEM falta (mencao dentro de cartao nao notifica ninguem).
+
+   O lembrete diario e' o que notifica de verdade, e tem freio: cada pessoa e'
+   marcada no maximo a cada 3 dias, no maximo 20 por dia, e o lembrete de
+   ontem e' apagado. Marcar as mesmas pessoas todo dia ensina a silenciar o
+   canal -- ou a sair do servidor. Os admins desligam pelo botao do quadro. */
+const LEMBRAR_A_CADA_DIAS = 3;
+const LEMBRETES_POR_DIA = 20;
+
+/* Quem tem e quem nao tem idioma, sem rede. Tem idioma quem tem um cargo de
+   idioma daqui OU ja' escolheu no bot (o cargo chega na proxima volta). */
+function quemTemIdioma(membros, cargos, escolhidos) {
+  const porIdioma = new Map();
+  const sem = [];
+  for (const m of membros) {
+    if (m.bot) continue;
+    const idioma = cargos.find((c) => m.cargos.has(c.role_id))?.idioma;
+    if (idioma) porIdioma.set(idioma, (porIdioma.get(idioma) || 0) + 1);
+    else if (!escolhidos.has(m.id)) sem.push(m.id);
+  }
+  return { porIdioma: [...porIdioma].sort((a, b) => b[1] - a[1]), sem };
+}
+
+function cartaoDosIdiomas(porIdioma, sem, desligado = false) {
+  const linhas = porIdioma.map(([c, n]) => `${nomeNaPropriaLingua(c)} — **${n}**`);
+  const MOSTRAR = 40;
+  const faltam = sem.length
+    ? sem.slice(0, MOSTRAR).map((id) => `<@${id}>`).join(" ") +
+      (sem.length > MOSTRAR ? ` _+${sem.length - MOSTRAR}_` : "")
+    : "✅ Todo mundo já escolheu! · Everyone picked one!";
+  return {
+    color: sem.length ? 0xC9A227 : 0x2E8B7A,
+    title: "🌐 Quem já escolheu o idioma · Who picked a language",
+    description: [
+      linhas.length ? linhas.join("\n") : "_ninguém ainda · nobody yet_",
+      "",
+      `❓ **Sem idioma · No language: ${sem.length}**`,
+      faltam,
+    ].join("\n").slice(0, 4000),
+    footer: { text: "Escolha o seu no menu acima · Pick yours in the menu above" +
+      (desligado ? " · 🔕 lembrete diário desligado" : " · 🔔 lembrete diário ligado") },
+  };
+}
+
+function botaoDoLembrete(desligado) {
+  return [{ type: 1, components: [{ type: 2, custom_id: "cyron:lembrete", style: 2,
+    emoji: { name: desligado ? "🔔" : "🔕" },
+    label: desligado ? "Ligar lembrete diário (admins)" : "Desligar lembrete diário (admins)" }] }];
+}
+
+/* Quem marcar hoje: so' quem nao foi marcado nos ultimos 3 dias, e no maximo
+   20. Devolve tambem o registro novo, ja' sem quem escolheu idioma. */
+function quemLembrarHoje(sem, marcados = {}, hoje = diaISO(Date.now()), max = LEMBRETES_POR_DIA) {
+  const limite = diaISO(Date.parse(`${hoje}T00:00:00Z`) - LEMBRAR_A_CADA_DIAS * 864e5);
+  const ainda = new Set(sem);
+  const registro = Object.fromEntries(Object.entries(marcados).filter(([id]) => ainda.has(id)));
+  const hojeVao = sem.filter((id) => !registro[id] || registro[id] <= limite).slice(0, max);
+  for (const id of hojeVao) registro[id] = hoje;
+  return { hojeVao, registro };
+}
+
+async function quadroDeIdiomas(guild, servidor, { forcar = false, agora = Date.now() } = {}) {
+  const portaId = await portaDoIdioma(guild);
+  const canal = portaId ? guild.channels.cache.get(portaId) : null;
+  if (!canal?.send) return;
+  const [cargos, escolhas] = await Promise.all([
+    sb(`discord_chat_espelho?servidor_id=eq.${servidor.id}&role_id=not.is.null&select=idioma,role_id`).catch(() => null),
+    sbPaginado("discord_idioma_jogador?select=discord_user_id").catch(() => null),
+  ]);
+  if (!cargos || !escolhas) return;   // sem saber quem tem, nao acuso ninguem
+  const lista = await membrosDo(guild).catch(() => null);
+  if (!lista) return;
+  const membros = [...lista.values()].map((m) => ({ id: m.id, bot: m.user?.bot, cargos: m.roles?.cache || new Map() }));
+  const { porIdioma, sem } = quemTemIdioma(membros, cargos, new Set(escolhas.map((e) => String(e.discord_user_id))));
+
+  const marcas = await ajustes();
+  const desligado = !!marcas[`idioma_lembrete_off:${servidor.id}`];
+  const carga = { embeds: [cartaoDosIdiomas(porIdioma, sem, desligado)], components: botaoDoLembrete(desligado) };
+  const chaveQuadro = `idioma_quadro:${servidor.id}`;
+  const assinatura = assinaturaDoCartao(carga.embeds[0], carga.components);
+  if (forcar || !jaDesenhado(marcas[chaveQuadro], assinatura, agora)) {
+    const velho = marcas[chaveQuadro] ? await canal.messages.fetch(marcas[chaveQuadro]).catch(() => null) : null;
+    if (velho) {
+      await velho.edit(carga).catch(() => {});
+      marcarDesenhado(velho.id, assinatura, agora);
+    } else {
+      const novo = await canal.send({ ...carga, allowedMentions: { parse: [] } }).catch(() => null);
+      if (novo) {
+        await porAjuste(chaveQuadro, novo.id);
+        marcarDesenhado(novo.id, assinatura, agora);
+      }
+    }
+  }
+
+  /* O lembrete: uma vez por dia (UTC), quem falta e nao foi marcado ha' 3 dias. */
+  const hoje = diaISO(agora);
+  const chaveLembrete = `idioma_lembrete:${servidor.id}`;
+  let antes = {};
+  try { antes = JSON.parse(marcas[chaveLembrete] || "{}"); } catch { antes = {}; }
+  if (desligado || antes.dia === hoje) return;
+  if (antes.msg) await (await canal.messages.fetch(antes.msg).catch(() => null))?.delete().catch(() => {});
+  const { hojeVao, registro } = quemLembrarHoje(sem, antes.marcados || {}, hoje);
+  let msg = null;
+  if (hojeVao.length) {
+    msg = await canal.send({
+      content: `👋 ${hojeVao.map((id) => `<@${id}>`).join(" ")}\n` +
+        "Escolham o idioma de vocês no menu aqui em cima 👆 para ler o servidor traduzido.\n" +
+        "_Pick your language in the menu above 👆 to read this server in your language._",
+      allowedMentions: { users: hojeVao },
+    }).catch(() => null);
+  }
+  await porAjuste(chaveLembrete, JSON.stringify({ dia: hoje, msg: msg?.id || null, marcados: registro }));
+}
+
+async function quadrosDeIdioma() {
+  for (const [, guild] of client.guilds.cache) {
+    try {
+      /* O painel nao e' cliente, e o suporte recebe visitante de passagem:
+         marcar quem so' veio tirar uma duvida seria expulsar essa pessoa. */
+      if (await ehOPainel(guild.id) || await ehServidorDoSuporte(guild.id).catch(() => false)) continue;
+      const servidor = await servidorDoGuild(guild.id);
+      if (servidor) await quadroDeIdiomas(guild, servidor);
+    } catch (e) {
+      console.log("idiomas: nao consegui o quadro de", guild.name, e?.message || e);
+    }
+  }
+}
+
 /* A sala de escolher o idioma deste servidor: a guardada na instalacao
    (discord_convite_idioma), e nao a achada pelo nome -- num servidor que
    ja' tinha lugar para isso, a porta e' o canal que ja' existia. */
@@ -10729,6 +10862,18 @@ async function cliquePainel(inter) {
      No fixado, a aba abre AO LADO, efemera e na lingua de quem escolheu: o
      fixado e' de todos e continua na visao geral. Na copia efemera, a propria
      copia troca de aba. */
+  /* O botao do quadro de idiomas: liga e desliga o lembrete diario. */
+  if (acao === "lembrete") {
+    const chave = `idioma_lembrete_off:${servidor.id}`;
+    const desligado = !!(await ajustes())[chave];
+    await porAjuste(chave, desligado ? "" : "1");
+    await inter.reply({ flags: 64, content: desligado
+      ? "🔔 Lembrete diário **ligado**: uma vez por dia eu marco quem ainda não escolheu idioma (cada pessoa no máximo a cada 3 dias)."
+      : "🔕 Lembrete diário **desligado**. O quadro continua mostrando quem falta, sem marcar ninguém." });
+    await quadroDeIdiomas(inter.guild, servidor, { forcar: true }).catch(() => {});
+    return;
+  }
+
   if (acao === "aba" && inter.isStringSelectMenu()) {
     const aba = ABAS_DO_PAINEL.some((a) => a.valor === inter.values?.[0]) ? inter.values[0] : "resumo";
     const noFixado = inter.message?.id === servidor.msg_config;
@@ -17486,6 +17631,7 @@ async function umaPassada() {
   await repararInstalacoes().catch((e) => console.error("instalar: reparo falhou:", e?.message || e));
   await sincronizarSalas().catch((e) => console.error("espelho: sincronia falhou:", e?.message || e));
   await garantirConvites().catch((e) => console.error("portaria: passada falhou:", e?.message || e));
+  await quadrosDeIdioma().catch((e) => console.log("idiomas: quadro falhou:", e?.message || e));
   await atualizarCartoes().catch((e) => console.error("config: cartões falharam:", e?.message || e));
   await aposentarArenas().catch((e) => console.log("arena: aposentar falhou:", e?.message || e));
   await atualizarEventos().catch((e) => console.error("eventos: passada falhou:", e?.message || e));
