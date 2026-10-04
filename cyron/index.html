@@ -57,6 +57,9 @@ img.av{object-fit:cover; background:#000}
 .servidores hr{width:32px; border:0; border-top:2px solid var(--fundo); margin:0}
 
 .lateral{background:var(--lateral); position:sticky; top:0; height:100vh; display:flex; flex-direction:column}
+.lateral .banner{display:block; width:100%; height:auto; aspect-ratio:17/6; object-fit:cover}
+.lateral .banner + header{box-shadow:none}
+.banner-cel{display:none; width:100%; height:auto; aspect-ratio:17/6; object-fit:cover; border-radius:8px; margin-bottom:16px}
 .lateral header{height:48px; padding:0 16px; display:flex; align-items:center; font-weight:700; color:var(--forte); border-bottom:1px solid var(--linha); box-shadow:0 1px 0 rgba(0,0,0,.2)}
 .canais{padding:12px 8px; overflow-y:auto; flex:1}
 .categoria{font-size:12px; font-weight:700; letter-spacing:.02em; text-transform:uppercase; color:var(--fraco); padding:16px 8px 4px}
@@ -178,6 +181,7 @@ img.av{object-fit:cover; background:#000}
   .anexos figure{max-width:calc(50% - 4px)}
   .anexos img{height:260px}
   .inicio-canal{padding-top:36px}
+  .banner-cel{display:block}
   .inicio-canal h1,.inicio-canal h2{font-size:26px}
   .msg{padding:2px 12px; gap:0 12px}
 }
@@ -203,18 +207,19 @@ html[lang="en"] [data-en]{display:revert}
 </nav>
 
 <aside class="lateral">
+  <img class="banner" src="./img/banner.jpg" alt="" width="240" height="85">
   <header>CYRON</header>
   <nav class="canais" aria-label="Canais / Channels">
     <div class="categoria"><span data-pt>Comece aqui</span><span data-en>Start here</span></div>
     <a class="canal ativo" href="#boas-vindas"><span data-pt>boas-vindas</span><span data-en>welcome</span></a>
     <a class="canal" href="#funciona"><span data-pt>como-funciona</span><span data-en>how-it-works</span></a>
-    <a class="canal" href="#recursos"><span data-pt>o-que-ele-faz</span><span data-en>what-it-does</span></a>
+    <a class="canal" href="#recursos"><span data-pt>o-que-ela-faz</span><span data-en>what-it-does</span></a>
     <div class="categoria"><span data-pt>Para o dono</span><span data-en>For owners</span></div>
     <a class="canal" href="#planos"><span data-pt>planos</span><span data-en>pricing</span></a>
     <a class="canal" href="#perguntas"><span data-pt>perguntas</span><span data-en>questions</span></a>
     <div class="categoria"><span data-pt>Links</span><span data-en>Links</span></div>
     <a class="canal fora" href="./passos.html"><span data-pt>primeiros-passos</span><span data-en>get-started</span></a>
-    <a class="canal fora" href="./recursos.html"><span data-pt>tudo-que-ele-faz</span><span data-en>everything-it-does</span></a>
+    <a class="canal fora" href="./recursos.html"><span data-pt>tudo-que-ela-faz</span><span data-en>everything-it-does</span></a>
     <a class="canal fora" href="./painel.html"><span data-pt>meus-servidores</span><span data-en>my-servers</span></a>
     <a class="canal fora" href="https://discord.gg/yDwePceB38" rel="noopener"><span data-pt>suporte</span><span data-en>support</span></a>
   </nav>
@@ -239,7 +244,7 @@ html[lang="en"] [data-en]{display:revert}
   </div>
   <nav class="faixa-canais" aria-label="Canais / Channels">
     <a href="#funciona"># <span data-pt>como-funciona</span><span data-en>how-it-works</span></a>
-    <a href="#recursos"># <span data-pt>o-que-ele-faz</span><span data-en>what-it-does</span></a>
+    <a href="#recursos"># <span data-pt>o-que-ela-faz</span><span data-en>what-it-does</span></a>
     <a href="#planos"># <span data-pt>planos</span><span data-en>pricing</span></a>
     <a href="#perguntas"># <span data-pt>perguntas</span><span data-en>questions</span></a>
     <a href="./passos.html">↗ <span data-pt>primeiros-passos</span><span data-en>get-started</span></a>
@@ -250,6 +255,7 @@ html[lang="en"] [data-en]{display:revert}
 
   <!-- ======================= BOAS-VINDAS ======================= -->
   <div id="boas-vindas" class="inicio-canal">
+    <img class="banner-cel" src="./img/banner.jpg" alt="" width="960" height="339">
     <div class="grande-hash">#</div>
     <h1><span data-pt>Um servidor. Todas as línguas.</span><span data-en>One server. Every language.</span></h1>
     <p><span data-pt>Este é o começo do canal #boas-vindas. A CYRON é um bot de tradução para Discord.</span><span data-en>This is the start of the #welcome channel. CYRON is a translation bot for Discord.</span></p>
@@ -389,7 +395,7 @@ html[lang="en"] [data-en]{display:revert}
   <!-- ======================= O QUE ELE FAZ ======================= -->
   <div id="recursos" class="inicio-canal">
     <div class="grande-hash">#</div>
-    <h2><span data-pt>o-que-ele-faz</span><span data-en>what-it-does</span></h2>
+    <h2><span data-pt>o-que-ela-faz</span><span data-en>what-it-does</span></h2>
     <p><span data-pt>Feito para alianças de jogo com gente do mundo inteiro — e serve para qualquer servidor.</span><span data-en>Built for game alliances with people from all over the world — and it fits any server.</span></p>
   </div>
 
