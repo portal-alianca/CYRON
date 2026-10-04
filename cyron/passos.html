@@ -10,13 +10,13 @@
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌐</text></svg>">
 <style>
-/* Âmbar dos próprios cartões do bot (0xF5A623): quem vê o CYRON trabalhar no
+/* O azul do logo do CYRON, o mesmo da página inicial: quem vê o CYRON trabalhar no
    Discord e chega aqui reconhece o mesmo produto. */
 :root{
-  --fundo:#0B0D11; --painel:#13161C; --painel-2:#1A1E26; --painel-3:#222833;
+  --fundo:#07080F; --painel:#13161C; --painel-2:#1A1E26; --painel-3:#222833;
   --borda:#232935; --borda-viva:#333B49;
   --texto:#EDEFF3; --fraco:#98A1AE; --fraquinho:#6C7583;
-  --ambar:#F5A623; --ambar-claro:#FFC768; --verde:#5EBB83; --azul:#5865F2;
+  --ambar:#7B8CFF; --ambar-claro:#A9B4FF; --verde:#5EBB83; --azul:#5865F2;
   --r:16px;
   --serif:ui-serif,Georgia,"Times New Roman",serif;
 }
@@ -45,7 +45,7 @@ h1,h2,h3{line-height:1.15; margin:0; letter-spacing:-.022em}
 .barra nav a:hover{color:var(--texto); background:var(--painel-2); text-decoration:none}
 .idioma{display:flex; border:1px solid var(--borda-viva); border-radius:9px; overflow:hidden; margin-left:6px; flex:0 0 auto}
 .idioma button{background:none; border:0; color:var(--fraco); font:700 12px/1 inherit; padding:8px 10px; cursor:pointer}
-.idioma button[aria-pressed="true"]{background:var(--ambar); color:#1a1206}
+.idioma button[aria-pressed="true"]{background:var(--ambar); color:#0B0D1A}
 
 /* ---------- a barra no telefone ----------
 
@@ -77,12 +77,12 @@ h1,h2,h3{line-height:1.15; margin:0; letter-spacing:-.022em}
 .bt:hover{text-decoration:none; transform:translateY(-1px); filter:brightness(1.08)}
 .bt-1{background:var(--azul); color:#fff; box-shadow:0 8px 26px -12px rgba(88,101,242,.9)}
 .bt-2{background:var(--painel-3); color:var(--texto); border-color:var(--borda-viva)}
-.bt-3{background:var(--ambar); color:#1a1206}
+.bt-3{background:var(--ambar); color:#0B0D1A}
 
 /* ---------- topo ---------- */
 .topo{padding:96px 0 76px; position:relative; overflow:hidden; text-align:center}
 .topo::before{content:""; position:absolute; inset:-30% 15% auto; height:520px;
-  background:radial-gradient(closest-side,rgba(245,166,35,.15),transparent 72%); pointer-events:none}
+  background:radial-gradient(closest-side,rgba(123,140,255,.15),transparent 72%); pointer-events:none}
 .topo h1{font-size:clamp(34px,6vw,60px); font-weight:760; position:relative}
 .topo h1 em{font-style:normal; color:var(--ambar)}
 .chamada{margin:22px auto 0; max-width:600px; color:var(--fraco); font-size:clamp(17px,2.3vw,20px); position:relative}
@@ -94,7 +94,7 @@ h1,h2,h3{line-height:1.15; margin:0; letter-spacing:-.022em}
 .sala{background:var(--painel); border:1px solid var(--borda); border-radius:var(--r); padding:15px 17px}
 .sala .cab{font-size:12.5px; color:var(--fraquinho); font-weight:650; margin-bottom:11px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .fala{display:flex; gap:11px}
-.bola{width:32px; height:32px; border-radius:50%; flex:0 0 32px; background:linear-gradient(140deg,#8b5cf6,#f5a623)}
+.bola{width:32px; height:32px; border-radius:50%; flex:0 0 32px; background:linear-gradient(140deg,#8b5cf6,#7B8CFF)}
 .fala b{display:block; font-size:13.5px; color:var(--ambar-claro); font-weight:650}
 .fala p{margin:3px 0 0; font-size:14.5px; line-height:1.5}
 .carimbo{font-size:11.5px; color:var(--fraquinho); margin-top:7px}
@@ -194,7 +194,7 @@ section h2{font-size:clamp(26px,3.8vw,38px)}
 .formas{display:grid; gap:18px; grid-template-columns:1fr 1fr; margin-top:40px}
 @media (max-width:760px){ .formas{grid-template-columns:1fr} }
 .forma{background:var(--painel); border:1px solid var(--borda); border-radius:var(--r); padding:28px}
-.forma.viva{border-color:rgba(245,166,35,.4); background:linear-gradient(180deg,rgba(245,166,35,.05),transparent 60%),var(--painel)}
+.forma.viva{border-color:rgba(123,140,255,.4); background:linear-gradient(180deg,rgba(123,140,255,.05),transparent 60%),var(--painel)}
 .forma .tipo{font-size:12px; font-weight:750; letter-spacing:.14em; text-transform:uppercase; color:var(--fraquinho); margin-bottom:10px}
 .forma.viva .tipo{color:var(--ambar)}
 .forma h3{font-size:23px; font-family:var(--serif); font-weight:600; letter-spacing:-.01em}
@@ -209,7 +209,7 @@ section h2{font-size:clamp(26px,3.8vw,38px)}
 .tabela thead th{font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--fraquinho); font-weight:750}
 .tabela th[scope="row"]{font-weight:500; color:var(--fraco)}
 .tabela td{font-variant-numeric:tabular-nums}
-.tabela .col-pago{background:rgba(245,166,35,.045)}
+.tabela .col-pago{background:rgba(123,140,255,.045)}
 .preco-linha td{padding-top:22px; padding-bottom:22px}
 .preco{font-size:27px; font-weight:750; letter-spacing:-.02em; color:var(--texto)}
 .preco small{font-size:13.5px; font-weight:500; color:var(--fraquinho)}
