@@ -10517,6 +10517,116 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("e arrumar o /admin chama o do suporte", /await adminNoSuporte\(def, gid\)/.test(idx));
 }
 
+/* ====== indique e ganhe ======
+
+   O prêmio é de graça para quem pede, então o que este bloco prende são as
+   REGRAS: sem elas, "quem cria um servidor por semana" ganha Pro para sempre.
+   Cada recusa tem o seu caso aqui, e o prêmio só sai com gente E uso. */
+{
+  const { createHash } = await import("node:crypto");
+  globalThis.createHash = createHash;
+  const salvo = { p: globalThis.planoDe };
+  globalThis.planoDe = (s) => (s?.plano === "pago" || Date.parse(s?.teste_ate || "") > Date.now() ? "pago" : "gratis");
+  const I = carregar(["INDICACAO", "DIAS_DE_TESTE", "LETRAS_DO_CODIGO", "codigoDeIndicacao", "normalizarCodigo",
+    "nascimentoDoGuild", "recusaDaIndicacao", "avaliarIndicacao", "diasDoPremio", "podeInformarIndicacao",
+    "FRASES_DA_RECUSA", "regrasDaIndicacao", "SITE_DO_CYRON", "rodapeDeDivulgacao"]);
+  const dia = 864e5, agora = Date.parse("2026-10-04T12:00:00Z");
+
+  /* ---- o código ---- */
+  const c = I.codigoDeIndicacao("90bbd26e-3788-4f3f-844d-5c11409be76e");
+  verdade("o código tem o formato CY-XXXXXX", /^CY-[A-Z2-9]{6}$/.test(c));
+  ok("e é sempre o mesmo para o mesmo servidor", I.codigoDeIndicacao("90bbd26e-3788-4f3f-844d-5c11409be76e"), c);
+  verdade("servidores diferentes, códigos diferentes", I.codigoDeIndicacao("outro") !== c);
+  verdade("sem letras que se confundem (O, I, 0, 1)", !/[OI01]/.test(c.slice(3)));
+  ok("digitado de qualquer jeito, vira o mesmo código", I.normalizarCodigo(` cy ${c.slice(3).toLowerCase()} `), c);
+  ok("com o traço também", I.normalizarCodigo(c.toLowerCase()), c);
+  ok("vazio continua vazio", I.normalizarCodigo("  "), "");
+
+  /* ---- a idade sai do próprio id ---- */
+  ok("o id da TOP diz quando ela nasceu", new Date(I.nascimentoDoGuild("1535115496163381270")).getUTCFullYear(), 2026);
+  ok("id quebrado não estoura", I.nascimentoDoGuild("abc"), 0);
+
+  /* Um id de guild com a data que eu quiser: é o que o Discord faz. */
+  const guildDe = (diasAtras, dono = "d1", membros = 50) => ({
+    id: String((BigInt(agora - diasAtras * dia) - 1420070400000n) << 22n), ownerId: dono, memberCount: membros });
+
+  /* ---- as recusas na hora de digitar ---- */
+  const indicado = { id: "B", criado_em: new Date(agora - 2 * dia).toISOString() };
+  const indicador = { id: "A" };
+  const base = { indicado, indicador, guildIndicado: guildDe(400, "d2"), guildIndicador: guildDe(400, "d1"), jaIndicado: false, agora };
+  ok("tudo certo: aceita", I.recusaDaIndicacao(base), null);
+  ok("código que não existe", I.recusaDaIndicacao({ ...base, indicador: null }), "codigo");
+  ok("servidor que tirou o CYRON não indica", I.recusaDaIndicacao({ ...base, guildIndicador: null }), "codigo");
+  ok("o próprio código", I.recusaDaIndicacao({ ...base, indicador: { id: "B" } }), "proprio");
+  ok("só uma indicação por servidor", I.recusaDaIndicacao({ ...base, jaIndicado: true }), "ja");
+  ok("depois da janela de dias, não",
+    I.recusaDaIndicacao({ ...base, indicado: { id: "B", criado_em: new Date(agora - 20 * dia).toISOString() } }), "tarde");
+  ok("servidor criado agora no Discord (o que farma), não", I.recusaDaIndicacao({ ...base, guildIndicado: guildDe(3, "d2") }), "novo");
+  ok("mesmo dono nos dois, não", I.recusaDaIndicacao({ ...base, guildIndicado: guildDe(400, "d1") }), "mesmoDono");
+  for (const k of ["codigo", "proprio", "ja", "tarde", "novo", "mesmoDono"]) {
+    verdade(`a recusa "${k}" tem frase`, typeof I.FRASES_DA_RECUSA[k] === "string" && I.FRASES_DA_RECUSA[k].length > 10);
+  }
+
+  /* ---- a avaliação de hora em hora ---- */
+  const ind = { criado_em: new Date(agora - 10 * dia).toISOString() };
+  const usoDe = (dias, cada) => Array.from({ length: dias }, (_, i) => ({ dia: `2026-09-${10 + i}`, traducoes: cada }));
+  const av = (o) => I.avaliarIndicacao({ ind, guildIndicado: guildDe(400, "d2"), guildIndicador: guildDe(400, "d1"), agora, ...o });
+  ok("com gente e uso, vale", av({ uso: usoDe(5, 30) }).status, "valida");
+  ok("uso num dia só não vale (farmar num dia)", av({ uso: usoDe(1, 500) }).status, "pendente");
+  ok("muitos dias com pouca tradução, ainda não", av({ uso: usoDe(10, 5) }).status, "pendente");
+  ok("servidor vazio não vale, mesmo usando", av({ uso: usoDe(5, 30), guildIndicado: guildDe(400, "d2", 5) }).status, "pendente");
+  ok("passou do prazo sem uso: recusa",
+    I.avaliarIndicacao({ ind: { criado_em: new Date(agora - 31 * dia).toISOString() }, guildIndicado: guildDe(400, "d2"),
+      guildIndicador: guildDe(400, "d1"), uso: [], agora }).status, "recusada");
+  ok("o indicado tirou o CYRON: recusa", av({ uso: usoDe(5, 30), guildIndicado: null }).status, "recusada");
+  ok("o dono passou o servidor para si mesmo depois: recusa",
+    av({ uso: usoDe(5, 30), guildIndicado: guildDe(400, "d1") }).status, "recusada");
+
+  /* ---- o prêmio ---- */
+  const em = (iso) => Math.round((Date.parse(iso) - Date.now()) / dia);
+  ok("grátis que nunca testou: ganha o teste junto (não perde os 7 dias dele)",
+    em(I.diasDoPremio({ plano: "gratis" }, 7).teste_ate), 14);
+  ok("e vira Pro", I.diasDoPremio({ plano: "gratis" }, 7).nivel, "pro");
+  ok("quem já usou o teste ganha só o prêmio",
+    em(I.diasDoPremio({ plano: "gratis", teste_ate: "2026-01-01T00:00:00Z" }, 7).teste_ate), 7);
+  ok("no meio do teste, soma no fim dele",
+    em(I.diasDoPremio({ teste_ate: new Date(Date.now() + 3 * dia).toISOString() }, 7).teste_ate), 10);
+  ok("pagando por data, soma na data",
+    em(I.diasDoPremio({ pago_ate: new Date(Date.now() + 20 * dia).toISOString() }, 7).pago_ate), 27);
+  ok("Aliança paga continua Aliança", I.diasDoPremio({ nivel: "alianca", teste_ate: "2026-01-01" }, 7).nivel, "alianca");
+  ok("liberado sem prazo não tem dia para somar", I.diasDoPremio({ plano: "pago" }, 7), null);
+
+  /* ---- quem pode digitar o código ---- */
+  verdade("instalou há 2 dias: pode", I.podeInformarIndicacao({ criado_em: new Date(Date.now() - 2 * dia).toISOString() }, false));
+  verdade("já informou: não", !I.podeInformarIndicacao({ criado_em: new Date(Date.now() - 2 * dia).toISOString() }, true));
+  verdade("instalou há um mês: não", !I.podeInformarIndicacao({ criado_em: new Date(Date.now() - 30 * dia).toISOString() }, false));
+
+  /* ---- o rodapé ---- */
+  verdade("servidor grátis leva a linha do CYRON", /CYRON/.test(I.rodapeDeDivulgacao({ plano: "gratis" })));
+  ok("quem paga não carrega propaganda", I.rodapeDeDivulgacao({ plano: "pago" }), "");
+  ok("sem servidor, sem linha", I.rodapeDeDivulgacao(null), "");
+  verdade("a linha é miúda e leva ao site", /^\n-# 🌐 \[CYRON\]\(https:\/\/portal-alianca\.github\.io\/cyron\/\)/.test(I.rodapeDeDivulgacao({})));
+  verdade("as regras falam dos números de verdade",
+    I.regrasDaIndicacao().includes(String(I.INDICACAO.usoTraducoes)) && I.regrasDaIndicacao().includes(String(I.INDICACAO.membrosMin)));
+
+  /* ---- a ligação no resto do bot ---- */
+  const idx = semComentarios(fonte);
+  verdade("a aba Plano tem o botão 🤝", /custom_id: "cyron:indicar"/.test(idx));
+  verdade("o botão abre a tela", /acao === "indicar"\) return inter\.reply\(await telaDaIndicacao\(servidor\)\)/.test(idx));
+  verdade("e 'Fui indicado' abre a janela antes de responder qualquer coisa",
+    /acao === "indicado"\) return inter\.showModal\(janelaValida\(janelaDaIndicacao\(\)\)\)/.test(idx));
+  verdade("a janela é tratada", /customId === "cyron:indicado"\) return await informarIndicacao\(inter\)/.test(idx));
+  verdade("a revisão roda de hora em hora", /async function deHoraEmHora[^]*?revisarIndicacoes\(\)/.test(idx));
+  verdade("o prêmio só sai de quem trocou de pendente (não paga duas vezes)",
+    /cyron_indicacao\?indicado_id=eq\.\$\{ind\.indicado_id\}&status=eq\.pendente/.test(idx) && /if \(!mudou\.length \|\| r\.status !== "valida"\)/.test(idx));
+  verdade("e quem indica tem teto por mês", /premioIndicador = recentes\.length < INDICACAO\.porMes/.test(idx));
+  verdade("o rodapé vai na bandeira e no Translate", (idx.match(/rodapeDeDivulgacao\(/g) || []).length >= 3);
+  const sql = readFileSync(`${aqui}/../supabase/migracoes/009-indicacao.sql`, "utf8");
+  verdade("no banco, um servidor só pode ser indicado uma vez", /indicado_id\s+uuid\s+primary key/.test(sql));
+  verdade("e não pode indicar a si mesmo", /check \(indicado_id <> indicador_id\)/.test(sql));
+  globalThis.planoDe = salvo.p;
+}
+
 let resumiu = false;
 process.on("exit", () => {
   if (resumiu) return;

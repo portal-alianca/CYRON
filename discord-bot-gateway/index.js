@@ -6709,6 +6709,12 @@ function componentesDoPainel(servidor, fontes, limite, orfas, opcoes, aba = "res
   if (aba === "plano" && (situacao.length || teste.length)) {
     linhas.push({ type: 1, components: [...situacao, ...teste].slice(0, 5) });
   }
+  /* Linha propria: a de cima ja' pode chegar a cinco. */
+  if (aba === "plano") {
+    linhas.push({ type: 1, components: [
+      { type: 2, custom_id: "cyron:indicar", style: 2, emoji: { name: "🤝" }, label: "Indique e ganhe" },
+    ] });
+  }
 
   /* Linha própria, e não junto dos de situação: aquela linha já chega a três
      botões, e cinco é o teto do Discord -- passar disso não dá erro bonito,
@@ -10895,6 +10901,277 @@ async function comecarTeste(inter, servidor, buscar = fetch) {
     "O painel se atualiza em até um minuto. Para continuar depois disso, é só pagar pelo 💠 Pix.");
 }
 
+/* ---------------- indique e ganhe ----------------
+
+   Quem indica o CYRON a outro servidor ganha dias de Pro, e o indicado tambem.
+
+   O premio e' de graca para quem pede, entao as regras existem para o premio
+   ir para servidor DE VERDADE, e nao para quem cria um servidor por semana:
+
+   - o indicado informa o codigo nos primeiros dias com o CYRON, uma vez so';
+   - servidor do Discord com pelo menos um mes de vida (servidor criado hoje
+     para ganhar dias e' exatamente o caso que isto pega);
+   - dono diferente do servidor que indicou;
+   - gente: um minimo de membros;
+   - USO de verdade: traducoes em varios dias diferentes, dentro de um prazo.
+     Membro e idade se fabricam; uma comunidade conversando todo dia, nao.
+
+   So' depois disso a indicacao vale e os dois ganham. E quem indica tem teto
+   por mes: indicar e' boca a boca, nao emprego. */
+const INDICACAO = {
+  dias: 7,             // o premio, para cada lado
+  janelaDias: 14,      // o indicado informa o codigo ate 14 dias depois de me instalar
+  idadeMinDias: 30,    // idade minima do servidor indicado no Discord
+  membrosMin: 20,
+  usoDias: 5,          // dias diferentes com traducao...
+  usoTraducoes: 150,   // ...e traducoes somadas
+  prazoDias: 30,       // para cumprir o uso, contado do codigo informado
+  porMes: 2,           // premios de quem indica a cada 30 dias
+};
+
+/* O codigo de um servidor: sai do id, entao nao precisa ser guardado. Sem
+   O, I, 0 e 1, como os codigos de ativacao, para ninguem confundir. */
+const LETRAS_DO_CODIGO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+function codigoDeIndicacao(servidorId) {
+  const h = createHash("sha256").update(`indicacao:${servidorId}`).digest();
+  let s = "";
+  for (let i = 0; i < 6; i++) s += LETRAS_DO_CODIGO[h[i] % LETRAS_DO_CODIGO.length];
+  return `CY-${s}`;
+}
+
+function normalizarCodigo(texto) {
+  const s = String(texto || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return s ? `CY-${s.replace(/^CY/, "")}` : "";
+}
+
+/* Quando o servidor nasceu no Discord: esta' dentro do proprio id. */
+function nascimentoDoGuild(guildId) {
+  try { return Number((BigInt(String(guildId)) >> 22n) + 1420070400000n); } catch { return 0; }
+}
+
+/* As regras que se conferem na hora em que o codigo e' digitado. Devolve o
+   motivo da recusa, ou null. */
+function recusaDaIndicacao({ indicado, indicador, guildIndicado, guildIndicador, jaIndicado, agora = Date.now() }) {
+  if (!indicador || !guildIndicador) return "codigo";
+  if (String(indicador.id) === String(indicado?.id)) return "proprio";
+  if (jaIndicado) return "ja";
+  const desde = Date.parse(indicado?.criado_em || "") || agora;
+  if (agora - desde > INDICACAO.janelaDias * 864e5) return "tarde";
+  if (agora - nascimentoDoGuild(guildIndicado?.id) < INDICACAO.idadeMinDias * 864e5) return "novo";
+  if (guildIndicado?.ownerId && guildIndicado.ownerId === guildIndicador.ownerId) return "mesmoDono";
+  return null;
+}
+
+/* As regras que precisam de tempo, conferidas de hora em hora.
+   `uso`: [{ dia, traducoes }] do servidor indicado, desde a indicacao. */
+function avaliarIndicacao({ ind, guildIndicado, guildIndicador, uso = [], agora = Date.now() }) {
+  if (!guildIndicado) return { status: "recusada", motivo: "o servidor indicado tirou o CYRON" };
+  if (!guildIndicador) return { status: "recusada", motivo: "o servidor que indicou tirou o CYRON" };
+  if (guildIndicado.ownerId && guildIndicado.ownerId === guildIndicador.ownerId) {
+    return { status: "recusada", motivo: "os dois servidores têm o mesmo dono" };
+  }
+  const dias = new Set(uso.filter((u) => Number(u.traducoes) > 0).map((u) => u.dia)).size;
+  const total = uso.reduce((s, u) => s + (Number(u.traducoes) || 0), 0);
+  const membros = Number(guildIndicado.memberCount) || 0;
+  if (membros >= INDICACAO.membrosMin && dias >= INDICACAO.usoDias && total >= INDICACAO.usoTraducoes) {
+    return { status: "valida", motivo: `${membros} membros, ${total} traduções em ${dias} dias` };
+  }
+  const desde = Date.parse(ind?.criado_em || "") || agora;
+  if (agora - desde > INDICACAO.prazoDias * 864e5) {
+    return { status: "recusada", motivo: `não chegou ao uso mínimo em ${INDICACAO.prazoDias} dias` };
+  }
+  return { status: "pendente", motivo: null, membros, dias, total };
+}
+
+/* Os dias do premio, somados ao que o servidor ja' tem.
+
+   Pagando por data, soma na data. No gratis, vira teste do Pro -- e quem
+   ainda nao tinha usado o teste de 7 dias ganha o teste junto, para a
+   indicacao nunca custar o teste que ele teria de qualquer jeito. Liberado
+   sem prazo nao tem dia para somar: null. */
+function diasDoPremio(servidor, dias, agora = Date.now()) {
+  if (!servidor || servidor.plano === "pago") return null;
+  const pago = Date.parse(servidor.pago_ate || "");
+  if (pago > agora) return { pago_ate: new Date(pago + dias * 864e5).toISOString() };
+  const teste = Date.parse(servidor.teste_ate || "");
+  const extra = !servidor.teste_ate && !servidor.pago_ate ? DIAS_DE_TESTE : 0;
+  const base = teste > agora ? teste : agora;
+  return { teste_ate: new Date(base + (dias + extra) * 864e5).toISOString(), nivel: servidor.nivel || "pro" };
+}
+
+const FRASES_DA_RECUSA = {
+  codigo: "🤝 Não encontrei esse código. Ele tem o formato **CY-XXXXXX** e fica no painel do servidor que te indicou (aba Plano → 🤝).",
+  proprio: "🤝 Esse é o código **deste** servidor. Ele serve para indicar outros.",
+  ja: "🤝 Este servidor já informou uma indicação. Vale uma por servidor.",
+  tarde: `🤝 O código de indicação vale nos primeiros **${INDICACAO.janelaDias} dias** depois de instalar o CYRON, e esse prazo já passou.`,
+  novo: `🤝 A indicação vale para servidores com pelo menos **${INDICACAO.idadeMinDias} dias** de vida no Discord.`,
+  mesmoDono: "🤝 Os dois servidores têm o mesmo dono. A indicação é para trazer comunidades novas.",
+};
+
+function regrasDaIndicacao() {
+  return [
+    `• O servidor indicado informa o seu código em até **${INDICACAO.janelaDias} dias** depois de instalar o CYRON.`,
+    `• Ele precisa ter **${INDICACAO.idadeMinDias}+ dias** de vida no Discord, **${INDICACAO.membrosMin}+ membros** e outro dono.`,
+    `• E usar de verdade: **${INDICACAO.usoTraducoes} traduções** em **${INDICACAO.usoDias} dias diferentes**, dentro de ${INDICACAO.prazoDias} dias.`,
+    `• Cumpriu? Os dois ganham **${INDICACAO.dias} dias de Pro**. Quem indica ganha até **${INDICACAO.porMes} por mês**.`,
+  ].join("\n");
+}
+
+function podeInformarIndicacao(servidor, jaIndicado, agora = Date.now()) {
+  const desde = Date.parse(servidor?.criado_em || "") || 0;
+  return !jaIndicado && desde > 0 && agora - desde <= INDICACAO.janelaDias * 864e5;
+}
+
+async function telaDaIndicacao(servidor) {
+  const [minhas, eu] = await Promise.all([
+    sb(`cyron_indicacao?indicador_id=eq.${servidor.id}&select=status,premio_indicador`).catch(() => []),
+    sb(`cyron_indicacao?indicado_id=eq.${servidor.id}&select=status`).catch(() => []),
+  ]);
+  const conta = (st) => (minhas || []).filter((m) => m.status === st).length;
+  const ganhos = (minhas || []).filter((m) => m.status === "valida" && m.premio_indicador).length;
+  const embed = {
+    color: COR_OK,
+    title: "🤝 Indique e ganhe",
+    description: `Indique o CYRON para outra aliança. Quando ela usar de verdade, **os dois servidores ganham ${INDICACAO.dias} dias de Pro**.\n\n` +
+      `**O código deste servidor:** \`${codigoDeIndicacao(servidor.id)}\`\n` +
+      "_O dono do outro servidor coloca esse código no painel dele: /cyron → aba Plano → 🤝 → Fui indicado._\n\n" +
+      `**Regras**\n${regrasDaIndicacao()}`,
+    fields: [{ name: "Suas indicações",
+      value: `⏳ ${conta("pendente")} em andamento · ✅ ${conta("valida")} valeram · 🎁 ${ganhos * INDICACAO.dias} dias ganhos`, inline: false }],
+  };
+  const informar = podeInformarIndicacao(servidor, (eu || []).length > 0);
+  return {
+    flags: 64,
+    embeds: [embed],
+    components: [{ type: 1, components: [
+      { type: 2, style: 5, emoji: { name: "➕" }, label: "Link para instalar", url: linkDeConvite() },
+      ...(informar ? [{ type: 2, style: 1, custom_id: "cyron:indicado", emoji: { name: "🎟️" }, label: "Fui indicado" }] : []),
+    ] }],
+  };
+}
+
+function janelaDaIndicacao() {
+  return {
+    custom_id: "cyron:indicado",
+    title: "Quem indicou o CYRON para vocês?",
+    components: [{ type: 1, components: [{
+      type: 4, custom_id: "codigo", style: 1, required: true, max_length: 12,
+      label: "Código do servidor que indicou", placeholder: "CY-XXXXXX",
+    }] }],
+  };
+}
+
+async function informarIndicacao(inter) {
+  if (!inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    return inter.reply({ flags: 64, content: "🔒 Só quem tem **Gerenciar Servidor** pode informar a indicação." });
+  }
+  const indicado = await servidorDoGuild(inter.guildId);
+  if (!indicado) return inter.reply({ flags: 64, content: "Ainda não terminei de me instalar aqui." });
+  await inter.deferReply({ flags: 64 });
+
+  let digitado = "";
+  try { digitado = inter.fields.getTextInputValue("codigo"); } catch { /* vazio */ }
+  const codigo = normalizarCodigo(digitado);
+
+  const todos = await sb("cyron_servidor?saiu_em=is.null&select=id,guild_id,nome").catch(() => null);
+  if (!todos) return inter.editReply("❌ Não consegui conferir o código agora. Tente de novo em instantes.");
+  const indicador = todos.find((s) => codigoDeIndicacao(s.id) === codigo) || null;
+  const ja = await sb(`cyron_indicacao?indicado_id=eq.${indicado.id}&select=indicado_id`).catch(() => null);
+  if (!ja) return inter.editReply("❌ Não consegui conferir o código agora. Tente de novo em instantes.");
+
+  const recusa = recusaDaIndicacao({
+    indicado, indicador, jaIndicado: ja.length > 0,
+    guildIndicado: inter.guild, guildIndicador: indicador && client.guilds.cache.get(String(indicador.guild_id)),
+  });
+  if (recusa) return inter.editReply(FRASES_DA_RECUSA[recusa]);
+
+  try {
+    await sbPost("cyron_indicacao", { indicado_id: indicado.id, indicador_id: indicador.id, informado_por: inter.user.id });
+  } catch (e) {
+    /* A chave e' o indicado: dois cliques ao mesmo tempo viram uma linha so'. */
+    if (/409|duplicate|23505/.test(String(e?.message || e))) return inter.editReply(FRASES_DA_RECUSA.ja);
+    console.error("indicacao: nao consegui gravar:", e?.message || e);
+    return inter.editReply("❌ Não consegui gravar agora. Tente de novo em instantes.");
+  }
+  console.log(`indicacao: ${indicado.nome || indicado.id} indicado por ${indicador.nome || indicador.id}`);
+  return inter.editReply(`✅ **Indicação de ${indicador.nome || "outro servidor"} registrada.**\n\n` +
+    `Ela vale quando este servidor usar o CYRON de verdade: **${INDICACAO.usoTraducoes} traduções em ${INDICACAO.usoDias} dias diferentes** ` +
+    `(e ${INDICACAO.membrosMin}+ membros). Aí os dois ganham **${INDICACAO.dias} dias de Pro** — eu aviso o dono no privado.`);
+}
+
+async function premiar(servidorId, dias) {
+  const s = (await sb(`cyron_servidor?id=eq.${servidorId}&select=id,guild_id,plano,nivel,teste_ate,pago_ate`).catch(() => null))?.[0];
+  const patch = diasDoPremio(s, dias);
+  if (!patch) return null;
+  await sbPatch(`cyron_servidor?id=eq.${servidorId}`, patch);
+  cacheServidor.delete(String(s.guild_id));
+  return patch.pago_ate || patch.teste_ate;
+}
+
+async function avisarDonoDoPremio(guild, texto) {
+  const dono = guild?.ownerId && await client.users.fetch(guild.ownerId).catch(() => null);
+  if (!dono) return;
+  await dono.send({ embeds: [{ color: COR_OK, title: "🎁 Indicação valeu!", description: texto,
+    footer: { text: guild.name.slice(0, 100) } }] }).catch(() => {});
+}
+
+/* De hora em hora: as pendentes que cumpriram as regras viram premio; as que
+   estouraram o prazo, recusa. A troca de status e' condicional (so' de
+   pendente), e e' ela que libera o premio: duas maquinas rodando ao mesmo
+   tempo nao pagam duas vezes. */
+async function revisarIndicacoes(agora = Date.now()) {
+  const pendentes = await sb("cyron_indicacao?status=eq.pendente&select=*&limit=200").catch(() => null);
+  if (!pendentes?.length) return;
+  const servidores = await sb("cyron_servidor?select=id,guild_id,nome").catch(() => []) || [];
+  const porId = new Map(servidores.map((s) => [String(s.id), s]));
+  const guildDe = (id) => client.guilds.cache.get(String(porId.get(String(id))?.guild_id || ""));
+
+  for (const ind of pendentes) {
+    try {
+      const desde = String(ind.criado_em).slice(0, 10);
+      const uso = await sb(`cyron_uso_diario?servidor_id=eq.${ind.indicado_id}&dia=gte.${desde}&select=dia,traducoes`) || [];
+      const r = avaliarIndicacao({ ind, guildIndicado: guildDe(ind.indicado_id), guildIndicador: guildDe(ind.indicador_id), uso, agora });
+      if (r.status === "pendente") continue;
+
+      let premioIndicador = false;
+      if (r.status === "valida") {
+        const mes = new Date(agora - 30 * 864e5).toISOString();
+        const recentes = await sb(`cyron_indicacao?indicador_id=eq.${ind.indicador_id}&premio_indicador=is.true&validada_em=gte.${mes}&select=indicado_id`) || [];
+        premioIndicador = recentes.length < INDICACAO.porMes;
+      }
+      const r2 = await fetch(`${SB_URL}/rest/v1/cyron_indicacao?indicado_id=eq.${ind.indicado_id}&status=eq.pendente`, {
+        method: "PATCH",
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json", Prefer: "return=representation" },
+        body: JSON.stringify({ status: r.status, motivo: r.motivo, ...(r.status === "valida"
+          ? { validada_em: new Date(agora).toISOString(), premio_indicador: premioIndicador } : {}) }),
+      }).catch(() => null);
+      const mudou = r2?.ok ? await r2.json().catch(() => []) : [];
+      if (!mudou.length || r.status !== "valida") {
+        if (mudou.length) console.log(`indicacao: recusada (${porId.get(String(ind.indicado_id))?.nome || ind.indicado_id}): ${r.motivo}`);
+        continue;
+      }
+
+      const nomeIndicado = porId.get(String(ind.indicado_id))?.nome || "o servidor indicado";
+      const nomeIndicador = porId.get(String(ind.indicador_id))?.nome || "o servidor que indicou";
+      const ateIndicado = await premiar(ind.indicado_id, INDICACAO.dias).catch(() => null);
+      if (ateIndicado) {
+        await avisarDonoDoPremio(guildDe(ind.indicado_id), `A indicação de **${nomeIndicador}** valeu: vocês usaram o CYRON de verdade. ` +
+          `O Pro está ligado até **${new Date(ateIndicado).toLocaleDateString("pt-BR")}**.`);
+      }
+      if (premioIndicador) {
+        const ateIndicador = await premiar(ind.indicador_id, INDICACAO.dias).catch(() => null);
+        if (ateIndicador) {
+          await avisarDonoDoPremio(guildDe(ind.indicador_id), `**${nomeIndicado}** entrou pela sua indicação e já está usando. ` +
+            `Vocês ganharam **${INDICACAO.dias} dias de Pro** — ligado até **${new Date(ateIndicador).toLocaleDateString("pt-BR")}**.`);
+        }
+      }
+      console.log(`indicacao: valeu ${nomeIndicado} ← ${nomeIndicador}${premioIndicador ? "" : " (indicador no teto do mês)"}`);
+    } catch (e) {
+      console.error("indicacao: revisao falhou:", e?.message || e);
+    }
+  }
+}
+
 const FUNCAO_DO_PIX = `${SB_URL}/functions/v1/cyron-mercadopago`;
 const NIVEIS_DO_PIX = { pro: "Pro · R$ 29,90/mês", alianca: "Aliança · R$ 79/mês", teste: "Teste · R$ 1" };
 
@@ -11015,6 +11292,9 @@ async function cliquePainel(inter) {
     if (!await exigirSuporte(inter, "liberar o teste grátis")) return;
     return await comecarTeste(inter, servidor);
   }
+  if (acao === "indicar") return inter.reply(await telaDaIndicacao(servidor));
+  /* showModal exige interacao ainda nao respondida: nada antes dele. */
+  if (acao === "indicado") return inter.showModal(janelaValida(janelaDaIndicacao()));
 
   /* Publicar o recibo para o servidor.
 
@@ -15201,6 +15481,17 @@ async function cliqueVerNaImagem(inter, buscar = fetch) {
   }
 }
 
+/* A linha de divulgacao no pe' da traducao que vai para uma pessoa.
+
+   Quem reage com a bandeira ja' esta' usando o CYRON e acabou de ver o que ele
+   faz -- e' a melhor hora para saber que ele existe para o servidor DELA. Uma
+   linha miuda, no fim, so' em servidor gratis: quem paga nao paga para
+   carregar propaganda. */
+function rodapeDeDivulgacao(servidor) {
+  if (!servidor || planoDe(servidor) !== "gratis") return "";
+  return `\n-# 🌐 [CYRON](${SITE_DO_CYRON}) · traduza o seu servidor também / translate your server too`;
+}
+
 async function cliqueTraduzirMsg(inter) {
   const id = inter.customId.slice("traduzir-msg:".length);
   const idioma = String(inter.values?.[0] || "");
@@ -15233,7 +15524,8 @@ async function cliqueTraduzirMsg(inter) {
         embeds: [{
           color: COR,
           title: `${LINGUAS_MENU.find(([c]) => c === idioma)?.[2] ?? "🌐"} ${nomeDoIdioma(idioma)}`,
-          description: traduzido.slice(0, 3800) + (link ? `\n\n[⤴ Voltar / Back](${link})` : ""),
+          description: traduzido.slice(0, 3800) + (link ? `\n\n[⤴ Voltar / Back](${link})` : "") +
+            rodapeDeDivulgacao(await servidorDoGuild(inter.guildId).catch(() => null)),
           footer: { text: "Só você está vendo isto · troque o idioma abaixo" },
         }],
         components: menuTraduzir(id),
@@ -16192,6 +16484,7 @@ client.on("interactionCreate", async (inter) => {
       if (inter.customId === "cyron:motor") return await salvarMotor(inter);
       if (inter.customId === "cyron:palavras") return await salvarPalavras(inter);
       if (inter.customId === "cyron:codigo") return await resgatarCodigo(inter);
+      if (inter.customId === "cyron:indicado") return await informarIndicacao(inter);
       if (inter.customId === "admin:codigos") return await gerarCodigos(inter);
       if (inter.customId === "admin:ajustes") return await salvarAjustes(inter);
       if (inter.customId === "admin:chaves") return await salvarChaves(inter);
@@ -16652,7 +16945,8 @@ client.on("messageReactionAdd", async (reacao, quem) => {
         color: COR,
         author: autor ? { name: autor, icon_url: msg.author?.displayAvatarURL?.() } : undefined,
         title: nomeDoIdioma(idioma),
-        description: traduzido.slice(0, 3800) + (msg.url ? `\n\n[⤴ Voltar / Back](${msg.url})` : ""),
+        description: traduzido.slice(0, 3800) + (msg.url ? `\n\n[⤴ Voltar / Back](${msg.url})` : "") +
+          rodapeDeDivulgacao(servidor),
         footer: { text: `#${msg.channel?.name || ""} · ${msg.guild.name}` },
       }],
     });
@@ -17895,6 +18189,7 @@ async function deHoraEmHora() {
   /* console.log, e nao console.error: falhar aqui viraria um erro sobre o
      canal de erros, que tentaria se anotar nele mesmo. */
   await revisarErros().catch((e) => console.log("erros: revisao falhou:", e?.message || e));
+  await revisarIndicacoes().catch((e) => console.error("indicacao: passada falhou:", e?.message || e));
 }
 
 /* Morrer não pode ser silencioso.
