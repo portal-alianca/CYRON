@@ -13640,6 +13640,57 @@ async function refazerFicha(servidorId) {
    pra tela seria mostra-la a quem abrir o painel, e formulario nao e' lugar de
    guardar segredo -- o estado ("tenho" ou "nao tenho") aparece no rotulo, que
    basta pra saber o que fazer. */
+/* ---------------- as listas de bots ----------------
+
+   O discordbotlist mostra na pagina do bot a lista de comandos e quantos
+   servidores ele tem -- mas so' se o bot contar. Sem isso a pagina fica com
+   um aviso vermelho de "nao enviou a lista de comandos", que espanta quem
+   esta' decidindo se instala. */
+const DBL_API = "https://discordbotlist.com/api/v1/bots";
+
+async function chaveDoDbl() {
+  const doCofre = String(process.env.DBL_CHAVE || "").trim();
+  if (doCofre) return doCofre;
+  const a = await ajustes().catch(() => ({}));
+  return a?.dbl_chave ? decifrar(a.dbl_chave) : "";
+}
+
+/* O formato que a lista quer e' o do proprio Discord: nome, descricao, tipo e
+   opcoes. O /admin fica de fora -- e' meu, e so' existe no servidor de suporte. */
+function comandosParaLista(comandos) {
+  return (comandos || [])
+    .filter((c) => c && c.name && c.name !== "admin")
+    .map((c) => ({
+      name: c.name,
+      description: c.description || "",
+      type: c.type || 1,
+      options: (c.options || []).map((o) => ({
+        name: o.name, description: o.description || "", type: o.type, required: !!o.required,
+      })),
+    }));
+}
+
+async function avisarDiscordBotList({ comandos = false } = {}, buscar = fetch) {
+  const chave = await chaveDoDbl();
+  if (!chave || !client.user) return { ok: false, erro: "sem token" };
+  const cab = { Authorization: chave, "Content-Type": "application/json" };
+  const base = `${DBL_API}/${client.user.id}`;
+  const guilds = client.guilds.cache.size;
+  const users = [...client.guilds.cache.values()].reduce((s, g) => s + (Number(g.memberCount) || 0), 0);
+  const r = await buscar(`${base}/stats`, { method: "POST", headers: cab, body: JSON.stringify({ guilds, users }),
+    signal: AbortSignal.timeout(15000) });
+  if (!r.ok) return { ok: false, erro: `stats HTTP ${r.status}` };
+  let enviados = 0;
+  if (comandos) {
+    const lista = comandosParaLista([...(await client.application.commands.fetch()).values()]);
+    const r2 = await buscar(`${base}/commands`, { method: "POST", headers: cab, body: JSON.stringify(lista),
+      signal: AbortSignal.timeout(15000) });
+    if (!r2.ok) return { ok: false, erro: `commands HTTP ${r2.status}` };
+    enviados = lista.length;
+  }
+  return { ok: true, guilds, comandos: enviados };
+}
+
 async function janelaDasChaves() {
   const a = await ajustes();
   /* O rotulo diz de ONDE veio a chave. Sem isso o painel mostraria "não
@@ -13663,9 +13714,14 @@ async function janelaDasChaves() {
       { type: 1, components: [{ type: 4, custom_id: "deepl_chave", style: 1, required: false, max_length: 200,
         label: `DeepL${tem("deepl")}`.slice(0, 45),
         placeholder: "a chave grátis termina em :fx" }] },
+      /* O token do discordbotlist mora aqui, cifrado, e nao no chat nem no
+         codigo: com ele qualquer um edita a pagina do bot la'. */
+      { type: 1, components: [{ type: 4, custom_id: "dbl_chave", style: 1, required: false, max_length: 300,
+        label: `Token do discordbotlist${tem("dbl")}`.slice(0, 45),
+        placeholder: "página do bot no discordbotlist → token" }] },
       { type: 1, components: [{ type: 4, custom_id: "apagar", style: 1, required: false, max_length: 20,
-        label: "Apagar alguma? (azure, deepl)",
-        placeholder: "vazio mantém as duas" }] },
+        label: "Apagar alguma? (azure, deepl, dbl)",
+        placeholder: "vazio mantém todas" }] },
     ],
   };
 }
@@ -13849,7 +13905,7 @@ async function salvarChaves(inter) {
   const apagar = campo("apagar").toLowerCase();
   const feito = [];
 
-  for (const tipo of ["azure", "deepl"]) {
+  for (const tipo of ["azure", "deepl", "dbl"]) {
     if (apagar.includes(tipo)) {
       await porAjuste(`${tipo}_chave`, null);
       feito.push(`🗑️ ${tipo}: apagada`);
@@ -13865,9 +13921,15 @@ async function salvarChaves(inter) {
   if (regiao) { await porAjuste("azure_regiao", regiao); feito.push("📍 região da Azure gravada"); }
 
   await recarregarAjustes();
+  /* O token do discordbotlist e' testado na hora: guardar um token errado e
+     so' descobrir dias depois, pelo aviso vermelho que nao sumiu, e' pior. */
+  if (campo("dbl_chave")) {
+    const r = await avisarDiscordBotList({ comandos: true }).catch((e) => ({ ok: false, erro: e?.message || String(e) }));
+    feito.push(r?.ok ? `📋 discordbotlist: ${r.comandos} comandos e ${r.guilds} servidores enviados`
+      : `⚠️ discordbotlist recusou: ${String(r?.erro || "sem resposta").slice(0, 150)} — confira o token`);
+  }
   return inter.editReply(feito.length
-    ? `${feito.join("\n")}\n\nEla entra **só quando o gratuito recusar** — é reserva, não substituto. ` +
-      "Assim a cota do mês fica guardada para o dia em que fizer falta."
+    ? `${feito.join("\n")}\n\nAs chaves de tradução entram **só quando o gratuito recusar** — são reserva, não substituto.`
     : "Nada mudou — todos os campos vieram vazios.");
 }
 
@@ -18190,6 +18252,9 @@ async function deHoraEmHora() {
      canal de erros, que tentaria se anotar nele mesmo. */
   await revisarErros().catch((e) => console.log("erros: revisao falhou:", e?.message || e));
   await revisarIndicacoes().catch((e) => console.error("indicacao: passada falhou:", e?.message || e));
+  /* Uma vez por dia leva os comandos junto; nas outras horas, so' o numero. */
+  await avisarDiscordBotList({ comandos: new Date().getUTCHours() === 6 })
+    .catch((e) => console.log("dbl: aviso falhou:", e?.message || e));
 }
 
 /* Morrer não pode ser silencioso.
@@ -18434,6 +18499,14 @@ client.once("clientReady", () => {
   for (const [, g] of client.guilds.cache) {
     publicarComandosDoDono(g).catch(() => { /* ja' registrado no log */ });
   }
+
+  /* Ao subir, a lista de bots recebe os comandos e o numero -- um minuto
+     depois, quando os comandos ja' foram arrumados. */
+  setTimeout(() => {
+    avisarDiscordBotList({ comandos: true })
+      .then((r) => { if (r.ok) console.log(`dbl: ${r.comandos} comandos e ${r.guilds} servidores enviados`); })
+      .catch((e) => console.log("dbl: aviso falhou:", e?.message || e));
+  }, 60000);
 
   separarComandos()
     .then(() => garantirComandosGlobais())

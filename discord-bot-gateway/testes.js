@@ -10627,6 +10627,34 @@ function conferirCartao(onde, embed, componentes = []) {
   globalThis.planoDe = salvo.p;
 }
 
+/* ====== o discordbotlist ======
+
+   A página do bot lá mostrava "você não enviou uma lista de comandos". O
+   bot passa a mandar os comandos e o número de servidores, com o token
+   guardado cifrado no /admin. */
+{
+  const { comandosParaLista } = carregar(["comandosParaLista"]);
+  const lista = comandosParaLista([
+    { name: "cyron", description: "Painel", type: 1, options: [] },
+    { name: "evento", description: "Agenda", options: [{ name: "titulo", description: "Nome", type: 3, required: true }] },
+    { name: "admin", description: "Só meu" },
+    null,
+  ]);
+  ok("os comandos vão no formato do Discord, sem o /admin", lista.map((c) => c.name), ["cyron", "evento"]);
+  ok("e com as opções", lista[1].options, [{ name: "titulo", description: "Nome", type: 3, required: true }]);
+  ok("tipo ausente vira comando de barra", lista[1].type, 1);
+
+  const idx = semComentarios(fonte);
+  verdade("o token entra pela janela das chaves", /custom_id: "dbl_chave"/.test(idx));
+  verdade("e é guardado cifrado como as outras", /for \(const tipo of \["azure", "deepl", "dbl"\]\)/.test(idx) &&
+    /porAjuste\(`\$\{tipo\}_chave`, cifrar\(nova\)\)/.test(idx));
+  verdade("a janela das chaves continua com no máximo 5 campos",
+    (idx.slice(idx.indexOf("async function janelaDasChaves"), idx.indexOf("async function janelaDaVisao")).match(/type: 4,/g) || []).length <= 5);
+  verdade("o número vai de hora em hora", /async function deHoraEmHora[^]*?avisarDiscordBotList\(/.test(idx));
+  verdade("e os comandos ao subir", /setTimeout\(\(\) => \{\s*avisarDiscordBotList\(\{ comandos: true \}\)/.test(idx));
+  verdade("o token vai no cabeçalho, nunca no log", !/console\.(log|error)\([^)]*chave\b/.test(idx.slice(idx.indexOf("async function avisarDiscordBotList"), idx.indexOf("async function janelaDasChaves"))));
+}
+
 let resumiu = false;
 process.on("exit", () => {
   if (resumiu) return;
