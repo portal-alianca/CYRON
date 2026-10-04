@@ -2745,7 +2745,7 @@ function conferirCartao(onde, embed, componentes = []) {
 
 /* ---- os botões dizem o que fazem ---- */
 {
-  const { componentesDoPainel } = carregar(["ABAS_DO_PAINEL", "podeTestar", "componentesDoPainel"]);
+  const { componentesDoPainel } = carregar(["ABAS_DO_PAINEL", "podeTestar", "MODOS", "modoDe", "componentesDoPainel"]);
   /* Vive num `let` que só o carregamento dos ajustes preenche; aqui ele nunca
      roda, então o botão de assinar entra pelo mesmo caminho de um servidor
      sem link configurado. */
@@ -2776,7 +2776,7 @@ function conferirCartao(onde, embed, componentes = []) {
 
 /* ---- os dois degraus de assinatura ---- */
 {
-  const { componentesDoPainel } = carregar(["ABAS_DO_PAINEL", "podeTestar", "componentesDoPainel"]);
+  const { componentesDoPainel } = carregar(["ABAS_DO_PAINEL", "podeTestar", "MODOS", "modoDe", "componentesDoPainel"]);
   globalThis.LINK_PAGAMENTO_VIVO = "https://pague.exemplo/alianca";
   globalThis.LINK_PRO_VIVO = "https://pague.exemplo/pro";
   const assinar = (servidor) => componentesDoPainel(servidor, [], { fontes: 10, idiomas: 20 }, [], [], "plano")
@@ -2906,7 +2906,7 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o clique chega (depois da checagem de Gerenciar Servidor)",
     checagem > 0 && painel.indexOf('if (acao === "pix")') > checagem &&
     /if \(acao\.startsWith\("pix:"\)\) \{[^}]*return await cobrarPix\(inter, servidor, acao\.slice\("pix:"\.length\)\)/.test(idx));
-  const { componentesDoPainel } = carregar(["ABAS_DO_PAINEL", "podeTestar", "componentesDoPainel"]);
+  const { componentesDoPainel } = carregar(["ABAS_DO_PAINEL", "podeTestar", "MODOS", "modoDe", "componentesDoPainel"]);
   const temPix = (s) => componentesDoPainel(s, [], { fontes: 10, idiomas: 20 }, [], [], "plano")
     .flatMap((l) => l.components).some((c) => c.custom_id === "cyron:pix");
   verdade("o painel oferece Pix a quem não é pago", temPix({ id: "s1", plano: "gratis" }));
@@ -10653,6 +10653,50 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o número vai de hora em hora", /async function deHoraEmHora[^]*?avisarDiscordBotList\(/.test(idx));
   verdade("e os comandos ao subir", /setTimeout\(\(\) => \{\s*avisarDiscordBotList\(\{ comandos: true \}\)/.test(idx));
   verdade("o token vai no cabeçalho, nunca no log", !/console\.(log|error)\([^)]*chave\b/.test(idx.slice(idx.indexOf("async function avisarDiscordBotList"), idx.indexOf("async function janelaDasChaves"))));
+}
+
+/* ====== o modo do servidor ======
+
+   Quem instala o CYRON só pela agenda não pode ganhar porta de idioma,
+   anúncios e alas que nunca pediu. O servidor novo nasce PERGUNTANDO, e só
+   o painel existe até alguém escolher. */
+{
+  globalThis.COR = globalThis.COR ?? 1;
+  const M = carregar(["MODOS", "modoDe", "criaSalasDeTraducao", "cartaoDoModo"]);
+  ok("servidor antigo (sem coluna) continua traduzido", M.modoDe({}), "traducao");
+  ok("valor estranho também", M.modoDe({ modo: "xyz" }), "traducao");
+  ok("ferramentas é ferramentas", M.modoDe({ modo: "ferramentas" }), "ferramentas");
+  verdade("só o modo tradução cria salas", M.criaSalasDeTraducao({}) && !M.criaSalasDeTraducao({ modo: "ferramentas" }) &&
+    !M.criaSalasDeTraducao({ modo: "escolher" }));
+
+  const pergunta = M.cartaoDoModo({ modo: "escolher" });
+  conferirCartao("a pergunta do modo", pergunta.embeds[0]);
+  const ids = pergunta.components[0].components.map((b) => b.custom_id);
+  ok("a pergunta tem os dois caminhos", ids, ["cyron:modo:traducao", "cyron:modo:ferramentas"]);
+  verdade("e promete não criar nada enquanto ninguém escolhe", /não crio nada além desta sala/.test(pergunta.embeds[0].description));
+  const ja = M.cartaoDoModo({ modo: "ferramentas" });
+  verdade("o modo atual fica marcado e desligado", ja.components[0].components[1].disabled === true &&
+    !ja.components[0].components[0].disabled);
+  verdade("e trocar avisa que não apaga nada", /não apaga nada/.test(ja.embeds[0].description));
+
+  const idx = semComentarios(fonte);
+  const instalar = idx.slice(idx.indexOf("async function instalarServidor"), idx.indexOf("async function instalarServidor") + 3000);
+  verdade("servidor novo nasce perguntando", /modo: "escolher"/.test(instalar));
+  verdade("o painel vem antes de qualquer outra sala",
+    instalar.indexOf("garantirCanalDeConfig") < instalar.indexOf("CANAL_PORTA") &&
+    instalar.indexOf("if (!criaSalasDeTraducao(servidor))") < instalar.indexOf("CANAL_PORTA"));
+  verdade("fora do modo tradução a instalação para no painel",
+    /if \(!criaSalasDeTraducao\(servidor\)\) \{\s*cacheServidor\.delete\(guild\.id\);\s*return servidor;/.test(instalar));
+  verdade("a varredura não monta alas fora do modo tradução",
+    /async function sincronizarUmGuild[^]*?if \(!criaSalasDeTraducao\(servidor\)\) return;[^]*?const pago = /.test(idx));
+  verdade("o quadro de idiomas (que cria a sala de idioma) só em servidor traduzido",
+    /servidor && criaSalasDeTraducao\(servidor\)\) await quadroDeIdiomas/.test(idx));
+  verdade("a agenda nasce no primeiro /evento", /async function criarEvento[^]*?if \(!canalDaAgenda\(inter\.guild\)\)[^]*?canalPorNomeOuCria\(inter\.guild, CANAL_EVENTOS/.test(idx));
+  verdade("ao entrar, pergunta o modo", /if \(modoDe\(servidor\) === "escolher"\) await perguntarModo\(guild, servidor\)/.test(idx));
+  verdade("os botões do modo têm rota (depois da checagem de Gerenciar Servidor)",
+    idx.indexOf('acao.startsWith("modo:")') > idx.indexOf("PermissionFlagsBits.ManageGuild", idx.indexOf("async function cliquePainel")));
+  const sql = readFileSync(`${aqui}/../supabase/migracoes/010-modo.sql`, "utf8");
+  verdade("no banco, o modo só aceita os três valores", /check \(modo in \('traducao', 'ferramentas', 'escolher'\)\)/.test(sql));
 }
 
 let resumiu = false;
