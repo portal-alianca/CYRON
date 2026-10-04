@@ -2119,10 +2119,11 @@ function conferirCartao(onde, embed, componentes = []) {
      mandou "oi" e olhou o primeiro cartão não via a expressão em lugar nenhum
      e concluiu que não existia. Estes três testes prendem a superfície, que é
      onde o defeito estava -- o passo a passo em si já era testado inteiro. */
-  const naPergunta = botoesDaPergunta().components
-    .filter((c) => String(c.custom_id || "").startsWith(`${PASSO.passo}:`));
-  ok("a primeira tela abre o passo a passo, e num botão só", naPergunta.length, 1);
-  ok("e ele começa no passo 1", naPergunta[0].custom_id, `${PASSO.passo}:1`);
+  /* Agora o passo a passo da primeira tela é o VÍDEO: quarenta segundos com
+     voz e legenda no lugar de cinco cartões para ir clicando. */
+  const naPergunta = botoesDaPergunta().components.filter((c) => c.custom_id === PASSO.video);
+  ok("a primeira tela abre o passo a passo em vídeo, e num botão só", naPergunta.length, 1);
+  verdade("e o botão diz que é o passo a passo", /passo a passo/i.test(naPergunta[0].label));
   verdade("a pergunta anuncia o passo a passo no texto, não só no botão",
     /passo a passo/i.test(paginaDeApresentacao().description));
 
@@ -2218,6 +2219,44 @@ function conferirCartao(onde, embed, componentes = []) {
     paginaDoPasso(1, "tr").image.url.endsWith("passo-autorizar-en.png"));
 
   verdade("o passo a passo tem entrada pelo menu de temas", !!TEMAS[TEMA_INSTALAR]);
+
+  /* ---- o tutorial em vídeo ----
+
+     O link no texto da mensagem é o que faz o Discord desenhar o player. Um
+     arquivo renomeado no site e esquecido aqui viraria um link morto no lugar
+     do vídeo -- por isso o teste é no disco, como o dos desenhos. */
+  {
+    const { videoDoTutorial, botoesDoVideo, telaDoVideo, botoesDosPlanos: planos } = carregar([
+      "SITE_DO_CYRON", "PASSO", "PERMISSOES_DO_CONVITE", "linkDeConvite", "botaoDeSuporte", "botoesDeConvite",
+      "botoesDosPlanos", "traduzirLinha", "videoDoTutorial", "botoesDoVideo", "telaDoVideo"]);
+    ok("em português, o vídeo português", videoDoTutorial("pt"), `${site}video/tutorial-pt.mp4`);
+    ok("em qualquer outra língua, o inglês", videoDoTutorial("ar"), `${site}video/tutorial-en.mp4`);
+    const VID = new URL("../cyron/video/", import.meta.url);
+    for (const idioma of ["pt", "en"]) {
+      const url = videoDoTutorial(idioma);
+      verdade(`e o vídeo existe no site: ${url.split("/").pop()}`, existsSync(new URL(url.split("/").pop(), VID)));
+    }
+    const tela = await telaDoVideo("pt");
+    ok("a tela do vídeo é o link no texto, que o Discord transforma em player", tela.content, videoDoTutorial("pt"));
+    ok("e não leva cartão por cima do player", tela.embeds, []);
+    for (const l of botoesDoVideo()) linhaCabe("tela do vídeo", l);
+    const ids = botoesDoVideo().flatMap((l) => l.components.map((c) => c.custom_id)).filter(Boolean);
+    verdade("dali dá para ver foto por foto, a partir do passo 1", ids.includes(`${PASSO.passo}:1`));
+    verdade("e voltar aos planos", ids.includes(PASSO.sim));
+    verdade("os planos levam ao vídeo",
+      planos().flatMap((l) => l.components).some((c) => c.custom_id === PASSO.video));
+
+    /* A conversa é um cartão só que se transforma, e o vídeo é a única tela
+       que usa o texto da mensagem. Sem limpar o texto a cada troca, o player
+       ficaria grudado em cima de todas as telas seguintes. */
+    const roteador = semComentarios(fonte).slice(semComentarios(fonte).indexOf("async function cliqueNoPrivado"));
+    const corpo = roteador.slice(0, roteador.indexOf("\n}\n"));
+    verdade("toda troca de tela no privado limpa o texto da mensagem",
+      /const editar = \(tela\) => inter\.editReply\(\{ content: "", \.\.\.tela \}\)/.test(corpo));
+    verdade("e nenhuma troca passa por fora dessa limpeza", !/inter\.editReply\(await/.test(corpo));
+    verdade("o botão do vídeo tem rota", /customId === PASSO\.video\) return editar\(await telaDoVideo/.test(corpo));
+    verdade("e o tema \"como instalar\" abre o vídeo", /TEMA_INSTALAR\) return editar\(await telaDoVideo/.test(corpo));
+  }
 
   /* ---- a apresentação não se repete, mas só depois de acontecer ----
 

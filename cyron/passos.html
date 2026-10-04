@@ -276,6 +276,17 @@ html[lang="en"] [data-en]{display:revert}
       <span data-en>Five steps, and three happen on their own. The total time is however long it takes you to click “Authorize”. The pictures below are drawings of what you'll see at each step — the <a href="./#funciona">photos of a real server</a> are on the home page.</span>
     </p>
 
+    <!-- O mesmo vídeo que o bot manda no privado: quarenta segundos com voz e
+         legenda, para quem prefere ver a ler. Os cartões continuam embaixo. -->
+    <div class="tutorial-video">
+      <video data-pt controls playsinline preload="metadata" src="./video/tutorial-pt.mp4" width="720" height="1280"></video>
+      <video data-en controls playsinline preload="metadata" src="./video/tutorial-en.mp4" width="720" height="1280"></video>
+    </div>
+    <style>
+      .tutorial-video{margin:28px 0 8px}
+      .tutorial-video video{width:100%; max-width:340px; height:auto; border-radius:16px; border:1px solid var(--borda); background:#000}
+    </style>
+
     <ol class="passos">
       <li>
         <div class="passo-texto">

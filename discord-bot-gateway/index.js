@@ -15305,6 +15305,7 @@ const PASSO = {
      truque do resto da conversa -- o estado viaja no botao --, so' que aqui
      ele carrega uma posicao em vez de um destino. */
   passo: "dm:passo",
+  video: "dm:video",
 };
 
 /* Rotulo de botao nao passa pelo traduzirEmbed -- ele so' olha titulo,
@@ -15404,7 +15405,7 @@ function botoesDaPergunta() {
     components: [
       { type: 2, style: 3, custom_id: PASSO.sim, emoji: { name: "✅" }, label: "Sim, quero" },
       { type: 2, style: 2, custom_id: PASSO.nao, emoji: { name: "💬" }, label: "Ainda não" },
-      { type: 2, style: 2, custom_id: `${PASSO.passo}:1`, emoji: { name: "📋" }, label: "Ver o passo a passo" },
+      { type: 2, style: 2, custom_id: PASSO.video, emoji: { name: "🎬" }, label: "Ver o passo a passo em vídeo" },
     ],
   };
 }
@@ -15477,7 +15478,7 @@ function botoesDosPlanos() {
   return [
     botoesDeConvite(),
     { type: 1, components: [
-      { type: 2, style: 1, custom_id: `${PASSO.passo}:1`, emoji: { name: "📋" }, label: "Ver o passo a passo" },
+      { type: 2, style: 1, custom_id: PASSO.video, emoji: { name: "🎬" }, label: "Ver o tutorial em vídeo" },
       { type: 2, style: 2, custom_id: PASSO.nao, emoji: { name: "💬" }, label: "Tenho outra dúvida" },
     ] },
   ];
@@ -15587,6 +15588,36 @@ function botoesDoPasso(n) {
   }];
   if (PASSOS[i - 1].convite) linhas.push(botoesDeConvite());
   return linhas;
+}
+
+/* ---- o tutorial em vídeo ----
+
+   Quarenta segundos com voz e legenda mostram os cinco passos melhor do que
+   cinco cartões que a pessoa tem de ir clicando. O vídeo mora no site, como as
+   fotos: o link no texto da mensagem faz o Discord desenhar o player ali
+   mesmo, sem anexo e sem upload a cada pedido.
+
+   Duas versões, como os desenhos: português para quem fala português, inglês
+   para o resto. Os cartões foto por foto continuam a um botão de distância,
+   para quem não pode dar play agora. */
+function videoDoTutorial(idioma) {
+  return `${SITE_DO_CYRON}video/tutorial-${idioma === "pt" ? "pt" : "en"}.mp4`;
+}
+
+function botoesDoVideo() {
+  return [
+    { type: 1, components: [
+      { type: 2, style: 2, custom_id: `${PASSO.passo}:1`, emoji: { name: "🖼️" }, label: "Ver foto por foto" },
+      { type: 2, style: 2, custom_id: PASSO.sim, emoji: { name: "↩️" }, label: "Voltar aos planos" },
+    ] },
+    botoesDeConvite(),
+  ];
+}
+
+async function telaDoVideo(idioma) {
+  const linhas = [];
+  for (const l of botoesDoVideo()) linhas.push(await traduzirLinha(l, idioma));
+  return { content: videoDoTutorial(idioma), embeds: [], components: linhas };
 }
 
 async function telaDoPasso(idioma, n) {
@@ -15736,22 +15767,27 @@ async function cliqueNoPrivado(inter) {
      que e' o mesmo efeito do update, sem o relogio correndo. */
   await inter.deferUpdate();
   const idioma = await idiomaDoJogador(inter.user.id, inter.locale);
+  /* A conversa e' um cartao so' que se transforma, e a tela do video e' a
+     unica que usa o texto da mensagem (o link do video). Sem limpar, o player
+     ficaria grudado em cima de todas as telas seguintes. */
+  const editar = (tela) => inter.editReply({ content: "", ...tela });
 
+  if (inter.customId === PASSO.video) return editar(await telaDoVideo(idioma));
   /* Antes das comparacoes exatas: este e' o unico custom_id da conversa que
      carrega um valor depois do nome. */
   if (inter.customId.startsWith(`${PASSO.passo}:`)) {
-    return inter.editReply(await telaDoPasso(idioma, inter.customId.split(":")[2]));
+    return editar(await telaDoPasso(idioma, inter.customId.split(":")[2]));
   }
-  if (inter.customId === PASSO.sim) return inter.editReply(await telaDosPlanos(idioma));
-  if (inter.customId === PASSO.nao) return inter.editReply(await telaDeAjuda(idioma));
-  if (inter.customId === PASSO.inicio) return inter.editReply(await telaDeApresentacao(idioma));
+  if (inter.customId === PASSO.sim) return editar(await telaDosPlanos(idioma));
+  if (inter.customId === PASSO.nao) return editar(await telaDeAjuda(idioma));
+  if (inter.customId === PASSO.inicio) return editar(await telaDeApresentacao(idioma));
   if (inter.customId === PASSO.ajuda) {
     const tema = String(inter.values?.[0] || "");
     /* Instalar nao e' uma explicacao de um paragrafo: e' uma sequencia. Por
        isso ele aparece no menu como qualquer tema e sai daqui por outro
        caminho. */
-    if (tema === TEMA_INSTALAR) return inter.editReply(await telaDoPasso(idioma, 1));
-    return inter.editReply(await telaDeAjuda(idioma, tema));
+    if (tema === TEMA_INSTALAR) return editar(await telaDoVideo(idioma));
+    return editar(await telaDeAjuda(idioma, tema));
   }
 }
 
