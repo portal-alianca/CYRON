@@ -5631,6 +5631,8 @@ async function sincronizarSalas() {
 async function sincronizarUmGuild(guild) {
       const servidor = await servidorDoGuild(guild.id);
       if (!servidor) return;
+      /* Fora do modo traducao nao ha' ala, porta nem replica para montar. */
+      if (!criaSalasDeTraducao(servidor)) return;
       const servidorId = servidor.id;
 
       const pago = planoDe(servidor) === "pago";
@@ -6324,22 +6326,103 @@ async function garantirCanalDeConfig(guild, servidor) {
   return canal;
 }
 
+/* ---------------- o modo do servidor ----------------
+
+   Nem todo servidor quer ser traduzido. Quem instala o CYRON so' pela agenda
+   nao pode ganhar porta de idioma, anuncios e alas por lingua que nunca
+   pediu -- foi assim que a escolha passou a vir ANTES de criar qualquer
+   coisa. Nulo e' 'traducao': todo servidor de antes desta escolha continua
+   exatamente como estava. */
+const MODOS = ["traducao", "ferramentas", "escolher"];
+function modoDe(servidor) {
+  return MODOS.includes(servidor?.modo) ? servidor.modo : "traducao";
+}
+function criaSalasDeTraducao(servidor) {
+  return modoDe(servidor) === "traducao";
+}
+
+function cartaoDoModo(servidor) {
+  const atual = modoDe(servidor);
+  return {
+    embeds: [{
+      color: COR,
+      title: atual === "escolher" ? "👋 Como vocês querem usar o CYRON aqui?" : "🔀 Modo do CYRON neste servidor",
+      description: [
+        `**🌐 Servidor traduzido**${atual === "traducao" ? " · _atual_" : ""}`,
+        "Eu crio a sala onde cada pessoa escolhe o idioma, um canal de anúncios e a 📆 agenda. " +
+          "No plano pago, cada língua ganha a sua ala, com as salas copiadas e traduzidas.",
+        "",
+        `**🧰 Só as ferramentas**${atual === "ferramentas" ? " · _atual_" : ""}`,
+        "Eu não crio sala nenhuma. Ficam a agenda de eventos (/evento, que cria a 📆 agenda na primeira vez), " +
+          "a tradução por bandeira e pelo menu **Translate**, e este painel.",
+        "",
+        atual === "escolher"
+          ? "_Enquanto ninguém escolher, eu não crio nada além desta sala. Dá para trocar depois no /cyron._"
+          : "_Trocar para Só as ferramentas não apaga nada: eu só paro de criar. As salas que já existem ficam, e você apaga as que não quiser._",
+      ].join("\n"),
+    }],
+    components: [{ type: 1, components: [
+      { type: 2, custom_id: "cyron:modo:traducao", style: atual === "traducao" ? 2 : 1, emoji: { name: "🌐" },
+        label: "Servidor traduzido", disabled: atual === "traducao" },
+      { type: 2, custom_id: "cyron:modo:ferramentas", style: atual === "ferramentas" ? 2 : 1, emoji: { name: "🧰" },
+        label: "Só as ferramentas", disabled: atual === "ferramentas" },
+    ] }],
+  };
+}
+
+async function perguntarModo(guild, servidor) {
+  const fresco = (await sb(`cyron_servidor?id=eq.${servidor.id}&select=canal_config`).catch(() => null))?.[0];
+  const canal = fresco?.canal_config && await guild.channels.fetch(fresco.canal_config).catch(() => null);
+  if (!canal?.send) return;
+  await canal.send(cartaoDoModo(servidor)).catch((e) => console.error("modo: nao consegui perguntar:", e?.message || e));
+}
+
+async function escolherModo(inter, servidor, modo) {
+  if (!["traducao", "ferramentas"].includes(modo)) return inter.reply({ flags: 64, content: "🤔 Não conheço esse modo." });
+  await inter.deferReply({ flags: 64 });
+  await sbPatch(`cyron_servidor?id=eq.${servidor.id}`, { modo });
+  cacheServidor.delete(inter.guildId);
+  console.log(`modo: ${inter.guild?.name} escolheu ${modo}`);
+  /* O cartao da pergunta passa a mostrar a escolha, para ninguem clicar de
+     novo achando que nao pegou. */
+  await inter.message?.edit?.(cartaoDoModo({ ...servidor, modo })).catch(() => {});
+  if (modo === "traducao") {
+    await instalarServidor(inter.guild);
+    await garantirConvites().catch(() => {});
+    await sincronizarAgora(inter.guild);
+    return inter.editReply("🌐 **Servidor traduzido.** Criei a sala de idioma, os anúncios e a agenda. " +
+      "Agora é cada pessoa escolher a língua dela na 🌐-idioma-language.");
+  }
+  return inter.editReply("🧰 **Só as ferramentas.** Não vou criar sala nenhuma. Use **/evento** para a agenda " +
+    "(a 📆 agenda nasce no primeiro evento), e a tradução por bandeira e pelo **Translate** já funcionam.");
+}
+
 async function instalarServidor(guild) {
   /* Ja instalado: sair no comeco. Isto roda tambem na varredura, pra consertar
      instalacao que parou no meio -- e uma instalacao completa nao pode ser
      refeita toda vez. */
-  const jaTem = await sb(`cyron_servidor?guild_id=eq.${encodeURIComponent(guild.id)}&select=id,plano`);
+  const jaTem = await sb(`cyron_servidor?guild_id=eq.${encodeURIComponent(guild.id)}&select=id,plano,modo`);
   let servidor = jaTem?.[0];
 
   if (!servidor) {
-    const criado = await sbPost("cyron_servidor", { guild_id: guild.id, nome: guild.name });
+    /* Servidor novo nasce PERGUNTANDO: quem so' quer a agenda nao pode
+       ganhar porta de idioma, anuncios e alas que nunca pediu. */
+    const criado = await sbPost("cyron_servidor", { guild_id: guild.id, nome: guild.name, modo: "escolher" });
     servidor = Array.isArray(criado) ? criado[0] : criado;
     if (!servidor?.id) {
       /* sbPost pode nao devolver a linha; le de volta em vez de adivinhar. */
-      servidor = (await sb(`cyron_servidor?guild_id=eq.${encodeURIComponent(guild.id)}&select=id,plano`))?.[0];
+      servidor = (await sb(`cyron_servidor?guild_id=eq.${encodeURIComponent(guild.id)}&select=id,plano,modo`))?.[0];
     }
     if (!servidor?.id) throw new Error("nao consegui registrar o servidor");
     console.log(`instalar: ${guild.name} registrado (plano ${servidor.plano})`);
+  }
+
+  /* A sala de comando vem primeiro: e' nela que fica a pergunta do modo, e
+     e' a unica sala que existe em qualquer modo. */
+  await garantirCanalDeConfig(guild, servidor);
+  if (!criaSalasDeTraducao(servidor)) {
+    cacheServidor.delete(guild.id);
+    return servidor;
   }
 
   /* A porta. O convite e' gravado sem mensagem_id de proposito: quem posta e
@@ -6355,9 +6438,6 @@ async function instalarServidor(guild) {
     });
     console.log(`instalar: porta de entrada em #${porta.name}`);
   }
-
-  /* A sala de comando: quem manda no servidor manda no bot. */
-  await garantirCanalDeConfig(guild, servidor);
 
   /* A fonte. */
   const jaFonte = await sb(`discord_fonte_replica?servidor_id=eq.${servidor.id}&select=canal_id`);
@@ -6726,6 +6806,8 @@ function componentesDoPainel(servidor, fontes, limite, orfas, opcoes, aba = "res
     linhas.push({ type: 1, components: [
       { type: 2, custom_id: "cyron:ajuda", style: 2, emoji: { name: "❓" }, label: "Ajuda" },
       botaoDeSuporte(),
+      { type: 2, custom_id: "cyron:modo", style: 2, emoji: { name: "🔀" },
+        label: modoDe(servidor) === "ferramentas" ? "Modo: só ferramentas" : modoDe(servidor) === "escolher" ? "Escolher o modo" : "Modo: traduzido" },
       ...(orfas?.length
         ? [{
             type: 2, custom_id: "cyron:limpar", style: 4, emoji: { name: "🗑️" },
@@ -8305,6 +8387,13 @@ async function criarEvento(inter) {
 
   const servidor = await servidorDoGuild(inter.guildId);
   if (!servidor) return inter.editReply({ content: (await nalingua(idioma, inter.guildId, "Ainda não terminei de me instalar aqui."))[0] });
+  /* No modo "so' ferramentas" a agenda nao nasce na instalacao: nasce aqui,
+     no primeiro evento, que e' quando alguem de fato a quer. */
+  if (!canalDaAgenda(inter.guild)) {
+    await canalPorNomeOuCria(inter.guild, CANAL_EVENTOS,
+      "Eventos com hora. O horário aparece no fuso de cada um. / Events with a time. Everyone sees it in their own clock.")
+      .catch((e) => console.error("eventos: nao consegui criar a agenda:", e?.message || e));
+  }
 
   const titulo = nomeLimpo(inter.options.getString("o-que"));
   const bruto = (inter.options.getString("quando") || "").trim();
@@ -10796,7 +10885,8 @@ async function quadrosDeIdioma() {
          marcar quem so' veio tirar uma duvida seria expulsar essa pessoa. */
       if (await ehOPainel(guild.id) || await ehServidorDoSuporte(guild.id).catch(() => false)) continue;
       const servidor = await servidorDoGuild(guild.id);
-      if (servidor) await quadroDeIdiomas(guild, servidor);
+      /* O quadro cria a 🌐-idioma-language se ela faltar: so' em servidor traduzido. */
+      if (servidor && criaSalasDeTraducao(servidor)) await quadroDeIdiomas(guild, servidor);
     } catch (e) {
       console.log("idiomas: nao consegui o quadro de", guild.name, e?.message || e);
     }
@@ -11293,6 +11383,8 @@ async function cliquePainel(inter) {
     return await comecarTeste(inter, servidor);
   }
   if (acao === "indicar") return inter.reply(await telaDaIndicacao(servidor));
+  if (acao === "modo") return inter.reply({ flags: 64, ...cartaoDoModo(servidor) });
+  if (acao.startsWith("modo:")) return await escolherModo(inter, servidor, acao.slice("modo:".length));
   /* showModal exige interacao ainda nao respondida: nada antes dele. */
   if (acao === "indicado") return inter.showModal(janelaValida(janelaDaIndicacao()));
 
@@ -15178,6 +15270,7 @@ client.on("guildCreate", async (guild) => {
     await sincronizarAgora(guild);
     await cartaoDeConfig(guild, servidor).catch((e) =>
       console.error("config: nao consegui pôr o cartão:", e?.message || e));
+    if (modoDe(servidor) === "escolher") await perguntarModo(guild, servidor);
   } catch (e) {
     console.error("instalar: falhei em", guild.name, e?.message || e);
   }
