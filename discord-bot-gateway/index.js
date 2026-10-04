@@ -8733,6 +8733,39 @@ function podeVerCanal(canal, membro) {
   }
 }
 
+/* O cartao do evento que ESTA pessoa enxerga.
+
+   Num servidor com alas por lingua, a agenda tem uma sala por idioma
+   (📆-agenda-pt, -en...), cada uma com o proprio cartao do evento -- e quem
+   so' tem a ala dele nao ve a agenda original. O botao do lembrete apontava
+   sempre para a original, e abria "Voce nao tem acesso a este link".
+
+   `opcoes`: [{ canal, idioma, msgId }], a original primeiro. Fica a sala da
+   lingua da pessoa; senao a original; senao qualquer uma que ela veja. Sem
+   o id do cartao, o link leva a sala -- melhor que nada. Nenhuma visivel:
+   null, e o lembrete vai sem botao. */
+function salaDaAgendaPara(opcoes, membro, idioma) {
+  const visiveis = (opcoes || []).filter((o) => o?.canal && podeVerCanal(o.canal, membro));
+  const escolha = visiveis.find((o) => o.idioma && o.idioma === idioma) ||
+    visiveis.find((o) => !o.idioma) || visiveis[0];
+  if (!escolha) return null;
+  const g = escolha.canal.guild?.id || escolha.canal.guildId;
+  if (!g) return null;
+  return escolha.msgId ? linkDaMensagem(g, escolha.canal.id, escolha.msgId)
+    : `https://discord.com/channels/${g}/${escolha.canal.id}`;
+}
+
+/* O id do cartao deste evento numa sala de idioma: elas nao guardam id
+   nenhum, entao procuro entre as ultimas mensagens o cartao que carrega o
+   botao do evento. */
+async function cartaoNaSala(canal, eventoId) {
+  const recentes = await canal.messages.fetch({ limit: 50 }).catch(() => null);
+  for (const m of recentes?.values?.() || []) {
+    if (m.author?.id === client.user?.id && eventoDoCartao(m) === String(eventoId)) return m.id;
+  }
+  return null;
+}
+
 function linkDaMensagem(guildId, canalId, msgId) {
   return guildId && canalId && msgId ? `https://discord.com/channels/${guildId}/${canalId}/${msgId}` : null;
 }
@@ -8745,7 +8778,12 @@ async function lembrarInscritos(guild, ev, inscritos) {
   const motor = await motorDoGuild(guild.id).catch(() => undefined);
   const frases = new Map();
   const canal = canalDaAgenda(guild);
-  const link = linkDaMensagem(guild.id, canal?.id, ev.msg_id);
+  /* A original e as salas de idioma, cada uma com o cartao dela. Uma busca
+     por sala, e nao por pessoa: o lembrete pode ir para duzentos inscritos. */
+  const opcoes = canal ? [{ canal, idioma: null, msgId: ev.msg_id }] : [];
+  for (const sala of await salasDaAgenda(guild, ev.servidor_id, canal).catch(() => [])) {
+    opcoes.push({ canal: sala.canal, idioma: sala.idioma, msgId: await cartaoNaSala(sala.canal, ev.id) });
+  }
   let foram = 0;
 
   for (const id of inscritos.slice(0, 200)) {
@@ -8761,7 +8799,7 @@ async function lembrarInscritos(guild, ev, inscritos) {
       const nome = membro?.displayName || membro?.user?.username || "";
       const usuario = membro?.user || await client.users.fetch(id).catch(() => null);
       if (!usuario) continue;
-      const linkDele = link && podeVerCanal(canal, membro) ? link : null;
+      const linkDele = salaDaAgendaPara(opcoes, membro, idioma);
       await usuario.send({
         embeds: [{
           color: COR,
