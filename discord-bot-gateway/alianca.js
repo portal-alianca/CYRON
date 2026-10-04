@@ -1,6 +1,6 @@
-/* A alianca [TOP] Best: o que o CYRON faz SO' no servidor da alianca do dono.
+/* A alianca [TOP] Best: o que a CYRON faz SO' no servidor da alianca do dono.
 
-   O CYRON nasceu como o bot desta alianca e virou produto. O que era da
+   A CYRON nasceu como o bot desta alianca e virou produto. O que era da
    alianca continuou dentro do index.js, misturado com o que todo cliente
    recebe -- e quem lia o arquivo nao sabia o que era produto e o que era
    coisa de casa. Agora mora aqui, separado:
@@ -11,7 +11,7 @@
      - os comandos /portal, /player, /settings, /events e /ranking
 
    Tudo aqui desiste sozinho em servidor sem alianca ligada (tabela
-   alianca_discord): cliente do CYRON nunca ve nada disto. Nada daqui mudou
+   alianca_discord): cliente da CYRON nunca ve nada disto. Nada daqui mudou
    de comportamento na mudanca -- so' de endereco.
 
    O index.js chama `ligarAlianca` uma vez, entregando o que este arquivo usa
@@ -416,11 +416,11 @@ async function comandoSettings(inter) {
 /* ---------------- quem entra no servidor ---------------- */
 
 /* O cartao de boas-vindas do Kingshot. Vem DEPOIS do convite de idioma, que
-   e' do CYRON e vale em qualquer servidor. */
+   e' da CYRON e vale em qualquer servidor. */
 export async function boasVindasDaAlianca(member, quem) {
   const aliancaId = await aliancaDoGuild(member.guild.id);
   if (!aliancaId) {
-    /* Nao e' erro: e' o estado NORMAL de quem instalou o CYRON so' pelo
+    /* Nao e' erro: e' o estado NORMAL de quem instalou a CYRON so' pelo
        tradutor e nunca ligou alianca nenhuma. Como erro, ele enchia o canal
        do dono toda vez que alguem entrava num servidor desses -- e erro que
        aparece sem nada pra consertar ensina a ignorar o canal. */

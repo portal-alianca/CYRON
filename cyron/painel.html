@@ -219,7 +219,7 @@ function linha(s) {
 
   if (!s.instalado) {
     cracha = '<span class="cracha c-gratis">' + pt("sem o bot", "not installed") + "</span>";
-    detalhe = pt("O CYRON ainda não está neste servidor", "CYRON isn't in this server yet");
+    detalhe = pt("A CYRON ainda não está neste servidor", "CYRON isn't in this server yet");
     acao = '<a class="bt bt-2 bt-p" href="' + CONVITE + '">' + pt("Adicionar", "Add") + "</a>";
   } else if (s.plano === "pago") {
     var ate = quando(s.ate);
@@ -272,7 +272,7 @@ function mostrar(dados) {
         "Não encontrei nenhum servidor em que você tenha permissão de gerenciar.",
         "I found no server where you have Manage Server permission.") + "</p>" +
       '<div class="centro"><a class="bt bt-1" href="' + CONVITE + '">' +
-        pt("Adicionar o CYRON a um servidor", "Add CYRON to a server") + "</a></div>";
+        pt("Adicionar a CYRON a um servidor", "Add CYRON to a server") + "</a></div>";
     return;
   }
 
@@ -280,8 +280,8 @@ function mostrar(dados) {
   tela.innerHTML =
     '<h1>' + pt("Seus servidores", "Your servers") + "</h1>" +
     '<p class="sub">' + (comBot
-      ? pt("O CYRON está em " + comBot + " deles.", "CYRON is in " + comBot + " of them.")
-      : pt("O CYRON ainda não está em nenhum deles.", "CYRON isn't in any of them yet.")) + "</p>" +
+      ? pt("A CYRON está em " + comBot + " deles.", "CYRON is in " + comBot + " of them.")
+      : pt("A CYRON ainda não está em nenhum deles.", "CYRON isn't in any of them yet.")) + "</p>" +
     '<div class="lista">' + lista.map(linha).join("") + "</div>" +
     '<div class="aviso calmo">' + pt(
       "Para cancelar ou trocar o cartão, use o recibo que o Stripe mandou por e-mail — o link de gerenciar assinatura está lá.",

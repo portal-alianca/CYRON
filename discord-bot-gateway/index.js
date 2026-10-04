@@ -166,7 +166,7 @@ async function sbPost(caminho, corpo, prefer = "") {
 
 /* Canal apagado na mao tem que se curar sozinho.
 
-   Alguem vai arrumar a barra lateral e apagar um canal do CYRON -- e' certo que
+   Alguem vai arrumar a barra lateral e apagar um canal da CYRON -- e' certo que
    vai acontecer. Ate agora o bot lia a linha no banco, tentava buscar o canal,
    nao achava, e seguia em frente: a linha ficava apontando pra um fantasma e o
    canal nunca voltava. O servidor emperrava sem ninguem entender por que.
@@ -240,7 +240,7 @@ async function sbPatch(caminho, corpo) {
    assina o aviso, o GIF de boas-vindas, o ranking. Quem nao joga Kingshot nao
    tem alianca e nao precisa de nenhuma dessas coisas.
 
-   "Que SERVIDOR e' este?" e' a pergunta do CYRON: portao de idioma, salas,
+   "Que SERVIDOR e' este?" e' a pergunta da CYRON: portao de idioma, salas,
    replicas, plano. Um servidor de trading, de anime ou de uma empresa responde
    essa e nao responde a outra.
 
@@ -346,7 +346,7 @@ client.on("guildMemberAdd", async (member) => {
 
        Daqui pra baixo e' o cartao de boas-vindas do Kingshot, que desiste na
        linha seguinte quando o servidor nao tem alianca ligada -- o estado
-       NORMAL de quem instalou o CYRON so' pelo tradutor. Com o convite depois
+       NORMAL de quem instalou a CYRON so' pelo tradutor. Com o convite depois
        disso, o cliente comum nao recebia nada ao entrar alguem: justamente o
        servidor onde ninguem sabe onde se escolhe o idioma.
 
@@ -2605,7 +2605,7 @@ function videoQueODiscordToca(texto) {
 
    Numa alianca de varios paises, print e' a moeda do dia a dia: regra de
    evento, horario de rally, relatorio de batalha, anuncio do jogo. E era
-   justamente o que nao atravessava -- o CYRON respondia "so' imagem, nao ha' o
+   justamente o que nao atravessava -- a CYRON respondia "so' imagem, nao ha' o
    que traduzir", e o print do lider em arabe chegava mudo na sala em
    portugues.
 
@@ -3235,7 +3235,7 @@ function carregarSharp() {
    usa por baixo o motor de texto do sistema (pango). Esse motor derrubava o
    PROCESSO inteiro de vez em quando -- falha de segmentacao, sem erro nem
    aviso --, e medido aqui: uma a cada tres rodadas de 60 textos. No bot isso
-   seria o CYRON inteiro caindo por causa de um clique no 🖼️, com o chat de
+   seria a CYRON inteiro caindo por causa de um clique no 🖼️, com o chat de
    todo mundo junto. Mil e oitocentos desenhos SEM texto nao cairam nenhuma vez.
 
    Entao o texto nao passa mais por la': o opentype.js (JavaScript puro, sem
@@ -4836,7 +4836,7 @@ const SO_LEITURA = {
    entao o lider que fala ingles e' barrado no leaders-pt pelo cargo de
    ingles, mesmo tendo o de lider. Sem essa regra, ou ele veria as oito salas,
    ou eu teria que inventar e manter um cargo "lider-pt" por idioma. */
-/* O servidor de suporte do CYRON tem regras proprias para as replicas, e
+/* O servidor de suporte da CYRON tem regras proprias para as replicas, e
    SO' ele: la' as salas copiadas sao de ler (conversa e' no chat do idioma) e
    nascem com o historico traduzido. Nos servidores dos clientes nada disso
    muda -- a replica segue a origem e o plano, como sempre seguiu. */
@@ -5833,7 +5833,7 @@ async function sincronizarUmGuild(guild) {
       /* Cargo de idioma acima do meu: eu criei e nao alcanço mais.
 
          Vale pros cargos que ja existiam antes de eu passar a cria-los na
-         posicao certa, e pra quando alguem arrasta o CYRON pra baixo depois.
+         posicao certa, e pra quando alguem arrasta a CYRON pra baixo depois.
          Daqui nao ha conserto: mover um cargo acima do meu exige alcanca-lo,
          e e' exatamente o que falta. Quem conserta e' uma pessoa, arrastando
          -- entao o painel precisa dizer isso com todas as letras, porque o
@@ -6004,7 +6004,7 @@ async function sincronizarUmGuild(guild) {
 
    Era um bloco de texto puro com a mesma frase repetida em cinco idiomas, um
    embaixo do outro. No celular isso ocupava a tela inteira e ninguem lia --
-   e' a primeira coisa que um membro novo ve do CYRON, e parecia um aviso de
+   e' a primeira coisa que um membro novo ve da CYRON, e parecia um aviso de
    condominio.
 
    O que ficou: uma frase, tres colunas dizendo o que muda pra pessoa, e a
@@ -6185,7 +6185,7 @@ async function garantirConvites() {
   }
 }
 
-/* ---------------- o CYRON se instala sozinho ao entrar ---------------------
+/* ---------------- a CYRON se instala sozinha ao entrar ---------------------
 
    Ate aqui, ligar um servidor era eu abrindo o banco e inserindo linha com id
    de canal na mao. Serve pra um servidor; nao serve pra um produto.
@@ -6252,7 +6252,7 @@ async function canalPorNomeOuCria(guild, nome, topico) {
       { id: guild.roles.everyone.id, deny: Object.keys(SO_LEITURA).map((k) => PermissionFlagsBits[k]) },
       { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageWebhooks] },
     ],
-    reason: "instalação do CYRON",
+    reason: "instalação da CYRON",
   });
 }
 
@@ -6300,9 +6300,9 @@ async function garantirCanalDeConfig(guild, servidor) {
     canal = await guild.channels.create({
       name: CANAL_CONFIG,
       type: ChannelType.GuildText,
-      topic: "Só a administração vê este canal. É aqui que você diz ao CYRON o que fazer.",
+      topic: "Só a administração vê este canal. É aqui que você diz à CYRON o que fazer.",
       permissionOverwrites: portasDaAdministracao(guild),
-      reason: "sala de comando do CYRON",
+      reason: "sala de comando da CYRON",
     });
     console.log(`instalar: sala de comando em #${canal.name}`);
   } else {
@@ -6328,7 +6328,7 @@ async function garantirCanalDeConfig(guild, servidor) {
 
 /* ---------------- o modo do servidor ----------------
 
-   Nem todo servidor quer ser traduzido. Quem instala o CYRON so' pela agenda
+   Nem todo servidor quer ser traduzido. Quem instala a CYRON so' pela agenda
    nao pode ganhar porta de idioma, anuncios e alas por lingua que nunca
    pediu -- foi assim que a escolha passou a vir ANTES de criar qualquer
    coisa. Nulo e' 'traducao': todo servidor de antes desta escolha continua
@@ -6346,7 +6346,7 @@ function cartaoDoModo(servidor) {
   return {
     embeds: [{
       color: COR,
-      title: atual === "escolher" ? "👋 Como vocês querem usar o CYRON aqui?" : "🔀 Modo do CYRON neste servidor",
+      title: atual === "escolher" ? "👋 Como vocês querem usar a CYRON aqui?" : "🔀 Modo da CYRON neste servidor",
       description: [
         `**🌐 Servidor traduzido**${atual === "traducao" ? " · _atual_" : ""}`,
         "Eu crio a sala onde cada pessoa escolhe o idioma, um canal de anúncios e a 📆 agenda. " +
@@ -6443,7 +6443,7 @@ async function instalarServidor(guild) {
   const jaFonte = await sb(`discord_fonte_replica?servidor_id=eq.${servidor.id}&select=canal_id`);
   if (!jaFonte?.length) {
     const fonte = await canalPorNomeOuCria(guild, CANAL_FONTE,
-      "Escreva aqui. O CYRON leva traduzido para a réplica de cada idioma.");
+      "Escreva aqui. A CYRON leva traduzido para a réplica de cada idioma.");
     await sbPost("discord_fonte_replica", {
       servidor_id: servidor.id, canal_id: fonte.id, tipo: "evento",
     });
@@ -6821,7 +6821,7 @@ function componentesDoPainel(servidor, fontes, limite, orfas, opcoes, aba = "res
   return linhas;
 }
 
-/* Canais que ja' tem outro papel no CYRON.
+/* Canais que ja' tem outro papel na CYRON.
 
    Uma linha de fonte com gera_replica=false nao produz copia nenhuma: ela
    existe pra EMPRESTAR O NOME. Na [TOP] e' o #general-chat, de quem as salas
@@ -7191,7 +7191,7 @@ async function reciboDaSemana(guild, servidor) {
    pessoa ve pela primeira vez.
 
    O time e' o IDIOMA. Voce luta pela bandeira que escolheu, e e' isso que faz
-   este jogo ser sobre o CYRON em vez de ser um clicker pregado nele.
+   este jogo ser sobre a CYRON em vez de ser um clicker pregado nele.
 
    Tres decisoes que seguram o custo:
 
@@ -7380,7 +7380,7 @@ function sugestoesDeQuando(digitado, agora = Date.now(), fusoMin = 0) {
 
    Numa alianca internacional o lider escreve "Urso 20:30" e metade nao
    aparece. Uns nao leram a lingua; outros leram, calcularam o fuso de cabeca
-   e erraram. A lingua o CYRON ja resolve. A hora, nao -- e ela divide o
+   e erraram. A lingua a CYRON ja resolve. A hora, nao -- e ela divide o
    servidor exatamente como o idioma divide.
 
    O CONSERTO E' DO DISCORD, E E' DE GRACA
@@ -9190,7 +9190,7 @@ function custoDeEvoluir(poder) {
    Sem isto, o idioma com mais gente ganha sempre e os outros desistem na
    primeira semana. Com isto, os quatro alemaes conseguem ganhar dos quatorze
    brasileiros -- e a conversa que aparece no servidor vira "escolhe alemao,
-   a gente ta precisando", que e' exatamente o passo que o CYRON precisa que
+   a gente ta precisando", que e' exatamente o passo que a CYRON precisa que
    aconteca. O jogo empurra a escolha de idioma em vez de queimar orcamento.
 
    O teto e' 2x: mais que isso, um time de uma pessoa so' venceria sempre e a
@@ -9327,7 +9327,7 @@ function linhasDoPlacar(times, destaque = "") {
 
    Idioma é onde tradutor automático erra, e erra com cara de certo: a frase
    volta fluente e afirmando o contrário. Quem lesse isso concluiria que
-   escolher o time pequeno é ruim, que é a decisão que o CYRON precisa que a
+   escolher o time pequeno é ruim, que é a decisão que a CYRON precisa que a
    pessoa tome ao contrário.
 
    "are stronger" é literal, e não tem como inverter. Vale para todo texto
@@ -10341,7 +10341,7 @@ async function montarPainel(guild, servidor, idioma = "", aba = "resumo") {
       _aba: "agenda",
       name: await T("➕ Como marcar um evento"),
       value: await T("Escreva **/evento**, ou clique com o botão direito numa mensagem → **Apps** → **Criar evento** " +
-        "para eu ler a data, a hora e o nome sozinho."),
+        "para eu ler a data, a hora e o nome sozinha."),
     });
   }
 
@@ -10422,7 +10422,7 @@ async function cartaoDeConfig(guild, servidor) {
   }
 
   const nova = await canal.send({ embeds: [embed], components: componentes, allowedMentions: { parse: [] } });
-  await nova.pin("painel do CYRON").catch(() => {});
+  await nova.pin("painel da CYRON").catch(() => {});
   await apagarAvisoDeFixado(canal, nova.id);
   await sbPatch(`cyron_servidor?id=eq.${encodeURIComponent(servidor.id)}`, { msg_config: nova.id });
   servidor.msg_config = nova.id;
@@ -10993,12 +10993,12 @@ async function comecarTeste(inter, servidor, buscar = fetch) {
 
 /* ---------------- indique e ganhe ----------------
 
-   Quem indica o CYRON a outro servidor ganha dias de Pro, e o indicado tambem.
+   Quem indica a CYRON a outro servidor ganha dias de Pro, e o indicado tambem.
 
    O premio e' de graca para quem pede, entao as regras existem para o premio
    ir para servidor DE VERDADE, e nao para quem cria um servidor por semana:
 
-   - o indicado informa o codigo nos primeiros dias com o CYRON, uma vez so';
+   - o indicado informa o codigo nos primeiros dias com a CYRON, uma vez so';
    - servidor do Discord com pelo menos um mes de vida (servidor criado hoje
      para ganhar dias e' exatamente o caso que isto pega);
    - dono diferente do servidor que indicou;
@@ -11055,8 +11055,8 @@ function recusaDaIndicacao({ indicado, indicador, guildIndicado, guildIndicador,
 /* As regras que precisam de tempo, conferidas de hora em hora.
    `uso`: [{ dia, traducoes }] do servidor indicado, desde a indicacao. */
 function avaliarIndicacao({ ind, guildIndicado, guildIndicador, uso = [], agora = Date.now() }) {
-  if (!guildIndicado) return { status: "recusada", motivo: "o servidor indicado tirou o CYRON" };
-  if (!guildIndicador) return { status: "recusada", motivo: "o servidor que indicou tirou o CYRON" };
+  if (!guildIndicado) return { status: "recusada", motivo: "o servidor indicado tirou a CYRON" };
+  if (!guildIndicador) return { status: "recusada", motivo: "o servidor que indicou tirou a CYRON" };
   if (guildIndicado.ownerId && guildIndicado.ownerId === guildIndicador.ownerId) {
     return { status: "recusada", motivo: "os dois servidores têm o mesmo dono" };
   }
@@ -11093,14 +11093,14 @@ const FRASES_DA_RECUSA = {
   codigo: "🤝 Não encontrei esse código. Ele tem o formato **CY-XXXXXX** e fica no painel do servidor que te indicou (aba Plano → 🤝).",
   proprio: "🤝 Esse é o código **deste** servidor. Ele serve para indicar outros.",
   ja: "🤝 Este servidor já informou uma indicação. Vale uma por servidor.",
-  tarde: `🤝 O código de indicação vale nos primeiros **${INDICACAO.janelaDias} dias** depois de instalar o CYRON, e esse prazo já passou.`,
+  tarde: `🤝 O código de indicação vale nos primeiros **${INDICACAO.janelaDias} dias** depois de instalar a CYRON, e esse prazo já passou.`,
   novo: `🤝 A indicação vale para servidores com pelo menos **${INDICACAO.idadeMinDias} dias** de vida no Discord.`,
   mesmoDono: "🤝 Os dois servidores têm o mesmo dono. A indicação é para trazer comunidades novas.",
 };
 
 function regrasDaIndicacao() {
   return [
-    `• O servidor indicado informa o seu código em até **${INDICACAO.janelaDias} dias** depois de instalar o CYRON.`,
+    `• O servidor indicado informa o seu código em até **${INDICACAO.janelaDias} dias** depois de instalar a CYRON.`,
     `• Ele precisa ter **${INDICACAO.idadeMinDias}+ dias** de vida no Discord, **${INDICACAO.membrosMin}+ membros** e outro dono.`,
     `• E usar de verdade: **${INDICACAO.usoTraducoes} traduções** em **${INDICACAO.usoDias} dias diferentes**, dentro de ${INDICACAO.prazoDias} dias.`,
     `• Cumpriu? Os dois ganham **${INDICACAO.dias} dias de Pro**. Quem indica ganha até **${INDICACAO.porMes} por mês**.`,
@@ -11122,7 +11122,7 @@ async function telaDaIndicacao(servidor) {
   const embed = {
     color: COR_OK,
     title: "🤝 Indique e ganhe",
-    description: `Indique o CYRON para outra aliança. Quando ela usar de verdade, **os dois servidores ganham ${INDICACAO.dias} dias de Pro**.\n\n` +
+    description: `Indique a CYRON para outra aliança. Quando ela usar de verdade, **os dois servidores ganham ${INDICACAO.dias} dias de Pro**.\n\n` +
       `**O código deste servidor:** \`${codigoDeIndicacao(servidor.id)}\`\n` +
       "_O dono do outro servidor coloca esse código no painel dele: /cyron → aba Plano → 🤝 → Fui indicado._\n\n" +
       `**Regras**\n${regrasDaIndicacao()}`,
@@ -11143,7 +11143,7 @@ async function telaDaIndicacao(servidor) {
 function janelaDaIndicacao() {
   return {
     custom_id: "cyron:indicado",
-    title: "Quem indicou o CYRON para vocês?",
+    title: "Quem indicou a CYRON para vocês?",
     components: [{ type: 1, components: [{
       type: 4, custom_id: "codigo", style: 1, required: true, max_length: 12,
       label: "Código do servidor que indicou", placeholder: "CY-XXXXXX",
@@ -11185,7 +11185,7 @@ async function informarIndicacao(inter) {
   }
   console.log(`indicacao: ${indicado.nome || indicado.id} indicado por ${indicador.nome || indicador.id}`);
   return inter.editReply(`✅ **Indicação de ${indicador.nome || "outro servidor"} registrada.**\n\n` +
-    `Ela vale quando este servidor usar o CYRON de verdade: **${INDICACAO.usoTraducoes} traduções em ${INDICACAO.usoDias} dias diferentes** ` +
+    `Ela vale quando este servidor usar a CYRON de verdade: **${INDICACAO.usoTraducoes} traduções em ${INDICACAO.usoDias} dias diferentes** ` +
     `(e ${INDICACAO.membrosMin}+ membros). Aí os dois ganham **${INDICACAO.dias} dias de Pro** — eu aviso o dono no privado.`);
 }
 
@@ -11245,7 +11245,7 @@ async function revisarIndicacoes(agora = Date.now()) {
       const nomeIndicador = porId.get(String(ind.indicador_id))?.nome || "o servidor que indicou";
       const ateIndicado = await premiar(ind.indicado_id, INDICACAO.dias).catch(() => null);
       if (ateIndicado) {
-        await avisarDonoDoPremio(guildDe(ind.indicado_id), `A indicação de **${nomeIndicador}** valeu: vocês usaram o CYRON de verdade. ` +
+        await avisarDonoDoPremio(guildDe(ind.indicado_id), `A indicação de **${nomeIndicador}** valeu: vocês usaram a CYRON de verdade. ` +
           `O Pro está ligado até **${new Date(ateIndicado).toLocaleDateString("pt-BR")}**.`);
       }
       if (premioIndicador) {
@@ -11303,7 +11303,7 @@ async function pedirPix(servidorId, nivel, buscar = fetch) {
 async function cobrarPix(inter, servidor, nivel, buscar = fetch) {
   if (!NIVEIS_DO_PIX[nivel]) return inter.reply({ flags: 64, content: "🤔 Não conheço esse plano." });
   if (nivel === "teste" && !await ehDono(inter.user.id)) {
-    return inter.reply({ flags: 64, content: "🔒 O Pix de teste é só do dono do CYRON." });
+    return inter.reply({ flags: 64, content: "🔒 O Pix de teste é só do dono da CYRON." });
   }
   await inter.deferReply({ flags: 64 });
   let pix;
@@ -11345,7 +11345,7 @@ async function cliquePainel(inter) {
     return inter.reply({
       flags: 64,
       embeds: [{
-        title: "❓ Como o CYRON funciona",
+        title: "❓ Como a CYRON funciona",
         color: 0x2E8B7A,
         description: [
           "**1. Você escolhe os canais.** No menu do painel, marque os canais onde *vocês* escrevem — anúncios, geral, o que for.",
@@ -12248,7 +12248,7 @@ const EXPLICA_ERRO = [
       "estiver ali, o Discord manda todo comando, botão e menu para aquele endereço em vez " +
       "de me entregar — e eu continuo postando cartão normalmente, então pareço vivo. " +
       "Para quem usa, **nada responde ao clique**.\n\n" +
-      "Eu tento apagar esse campo sozinho e desta vez não consegui. Esta é a falha mais cara " +
+      "Eu tento apagar esse campo sozinha e desta vez não consegui. Esta é a falha mais cara " +
       "que existe aqui: ela deixa cliente pagante sem produto sem deixar rastro.",
     fazer: "Se repetir, apague na mão: Portal do Desenvolvedor → o aplicativo → **General Information** → " +
       "esvazie **Interactions Endpoint URL** e salve. É o mesmo lugar da política de privacidade " +
@@ -12748,7 +12748,7 @@ async function canalDoPainel(guild, nome, categoria) {
   return await guild.channels.create({
     name: nome, type: ChannelType.GuildText,
     ...(categoria ? { parent: categoria.id } : {}),
-    reason: "painel de administração do CYRON",
+    reason: "painel de administração da CYRON",
   }).catch((e) => {
     console.error("painel: nao consegui criar", nome, e?.message || e);
     return null;
@@ -12895,7 +12895,7 @@ async function cartaoDoCliente(guild, servidor) {
       ...(cargoAcimaDeMim.has(servidor.id) ? [{
         name: "⛔ Cargo fora de alcance",
         value: "Os cargos de idioma estão acima do meu neste servidor. " +
-          "Ninguém recebe cargo até um administrador de lá arrastar o CYRON para cima.",
+          "Ninguém recebe cargo até um administrador de lá arrastar a CYRON para cima.",
       }] : []),
     ],
     footer: { text: `guild ${servidor.guild_id} · instalado em ${new Date(servidor.criado_em).toLocaleDateString("pt-BR")}` },
@@ -13463,7 +13463,7 @@ async function cliqueAdmin(inter) {
     const guild = await guildDoSuporte();
     if (!guild) {
       return inter.editReply(`Não estou no servidor do convite de suporte (${SUPORTE.link}). ` +
-        "Coloque o CYRON lá pelo link de instalação e aperte de novo.");
+        "Coloque a CYRON lá pelo link de instalação e aperte de novo.");
     }
     try {
       const feito = await montarSuporte(guild);
@@ -13471,7 +13471,7 @@ async function cliqueAdmin(inter) {
         (feito.length ? feito.map((f) => `• ${f}`).join("\n").slice(0, 1800) : "_Já estava tudo no lugar; textos atualizados._"));
     } catch (e) {
       return inter.editReply(`Parei no meio: ${String(e?.message || e).slice(0, 300)}\n` +
-        "_Confira se o CYRON tem **Gerenciar Canais** e **Gerenciar Servidor** lá. O que já foi feito fica._");
+        "_Confira se a CYRON tem **Gerenciar Canais** e **Gerenciar Servidor** lá. O que já foi feito fica._");
     }
   }
   if (acao === "novocomando" && inter.isButton()) {
@@ -13564,7 +13564,7 @@ async function gerarCodigos(inter) {
 
 /* Convite do bot, com as permissoes que ele realmente usa.
 
-   Hoje o CYRON esta com Administrator nos servidores onde foi instalado, e
+   Hoje a CYRON esta com Administrator nos servidores onde foi instalado, e
    isso e' o que mais assusta quem vai instalar: o Discord mostra em vermelho.
    O numero abaixo e' a soma exata do que o codigo exerce -- criar canal,
    mexer em cargo de idioma, abrir webhook, fixar mensagem, abrir topico.
@@ -14030,7 +14030,7 @@ async function janelaDeAjustes() {
   const cheio = (v) => (v ? { value: String(v).slice(0, 300) } : {});
   return {
     custom_id: "admin:ajustes",
-    title: "Ajustes do CYRON",
+    title: "Ajustes da CYRON",
     components: [
       { type: 1, components: [{ type: 4, custom_id: "stripe_link", style: 2, required: false, max_length: 600,
         label: "Links Stripe: 1ª linha Aliança, 2ª linha Pro",
@@ -14824,7 +14824,7 @@ async function publicarAnalitico(agora = Date.now()) {
     return;
   }
   const nova = await canal.send({ embeds, allowedMentions: { parse: [] } });
-  await nova.pin("analítico do CYRON").catch(() => {});
+  await nova.pin("analítico da CYRON").catch(() => {});
   await apagarAvisoDeFixado(canal, nova.id);
   await porAjuste("analitico_msg", nova.id);
 }
@@ -14884,7 +14884,7 @@ async function embedDeSaude() {
 
   return {
     color: atrasada || tradutorFalhas.quedas ? 0xB4534A : 0x2E8B7A,
-    title: "🩺 Saúde do CYRON",
+    title: "🩺 Saúde da CYRON",
     fields: [
       { name: "Última volta do relógio", value: idade == null ? "_ainda não rodou_"
           : `há ${idade}s${atrasada ? " ⚠️ **atrasada**" : ""}\ndurou ${(duracaoPassada / 1000).toFixed(1)}s`, inline: true },
@@ -15107,7 +15107,7 @@ async function conviteDoServidor(g, agora = Date.now()) {
       && c.permissionsFor?.(eu)?.has(PermissionFlagsBits.CreateInstantInvite));
     if (canal) {
       const convite = await canal.createInvite({ maxAge: 0, maxUses: 0, unique: false,
-        reason: "link para o suporte do CYRON atender este servidor" });
+        reason: "link para o suporte da CYRON atender este servidor" });
       url = convite?.url || "";
     }
   } catch (e) {
@@ -15157,8 +15157,8 @@ async function cartaoDeVencimento(guild, servidor, venc, idioma) {
     embeds: [{
       color: 0xC9A227,
       title: venc.tipo === "teste"
-        ? await T("⏰ Seu teste do CYRON termina em breve")
-        : await T("⏰ Seu plano do CYRON vence em breve"),
+        ? await T("⏰ Seu teste da CYRON termina em breve")
+        : await T("⏰ Seu plano da CYRON vence em breve"),
       description: [
         await T("Servidor: **{0}**", guild.name),
         await T("Vence {0} ({1}).", `<t:${t}:F>`, `<t:${t}:R>`),
@@ -15178,9 +15178,9 @@ async function cartaoDoPrimeiroPasso(guild, servidor, idioma) {
   return {
     embeds: [{
       color: COR,
-      title: await T("👋 Vamos colocar o CYRON para funcionar?"),
+      title: await T("👋 Vamos colocar a CYRON para funcionar?"),
       description: [
-        await T("Vi que o CYRON está em **{0}**, mas ainda não traduziu nenhuma mensagem. São 3 passos:", guild.name),
+        await T("Vi que a CYRON está em **{0}**, mas ainda não traduziu nenhuma mensagem. São 3 passos:", guild.name),
         "",
         await T("**1.** No servidor, escreva **/cyron** e abra a aba **🌐 Tradução**. Marque os canais onde vocês conversam."),
         porta
@@ -15607,7 +15607,7 @@ async function cliqueVerNaImagem(inter, buscar = fetch) {
   /* Antes de abrir a imagem, e nao depois: descompactar com a memoria ja'
      alta e' exatamente como o processo morre. */
   if (process.memoryUsage().rss > MEMORIA_PARA_DESENHAR) {
-    return aviso({ title: "⏳ Estou ocupado agora", description: "Tente de novo em um minuto." });
+    return aviso({ title: "⏳ Estou ocupada agora", description: "Tente de novo em um minuto." });
   }
   const sharp = await carregarSharp();
   if (!sharp) return aviso({ title: "❌ Não deu", description: "Não consegui montar a imagem agora." });
@@ -15638,7 +15638,7 @@ async function cliqueVerNaImagem(inter, buscar = fetch) {
 
 /* A linha de divulgacao no pe' da traducao que vai para uma pessoa.
 
-   Quem reage com a bandeira ja' esta' usando o CYRON e acabou de ver o que ele
+   Quem reage com a bandeira ja' esta' usando a CYRON e acabou de ver o que ele
    faz -- e' a melhor hora para saber que ele existe para o servidor DELA. Uma
    linha miuda, no fim, so' em servidor gratis: quem paga nao paga para
    carregar propaganda. */
@@ -15693,7 +15693,7 @@ async function cliqueTraduzirMsg(inter) {
 
 /* A pagina do bot, dentro do Discord.
 
-   Existe uma pagina web explicando o CYRON, mas ela nao serve pro membro:
+   Existe uma pagina web explicando a CYRON, mas ela nao serve pro membro:
    morar fora do Discord ja e' um passo a mais, e a maioria le num celular no
    meio de outra coisa. Aqui a explicacao chega no mesmo lugar onde a duvida
    nasceu -- e, o que importa mais, TRADUZIDA: quem nao entende o idioma da
@@ -15882,7 +15882,7 @@ function paginaDeApresentacao() {
       "",
       "— — —",
       "",
-      "**Você quer usar o CYRON no seu servidor?**",
+      "**Você quer usar a CYRON no seu servidor?**",
       "_Se preferir, veja antes o passo a passo da instalação._",
     ].join("\n"),
   };
@@ -15943,7 +15943,7 @@ function precoDoPlano(idioma, faixa = "alianca") {
    para a única que eu vi quebrar. */
 function paginaDosPlanos(idioma) {
   return {
-    title: "🌐 Como o CYRON funciona no seu servidor",
+    title: "🌐 Como a CYRON funciona no seu servidor",
     description: [
       "Instalar leva menos de um minuto: eu entro, crio o canal onde as pessoas " +
       "escolhem o idioma e um painel com botões. Se você nunca abrir o painel, " +
@@ -15995,7 +15995,7 @@ function botoesDosPlanos() {
    trocar a foto no site troca aqui junto. */
 const PASSOS = [
   {
-    titulo: "Adicione o CYRON ao seu servidor",
+    titulo: "Adicione a CYRON ao seu servidor",
     texto: "Um clique no botão, escolher o servidor, autorizar.\n\n" +
       "Você precisa ser dono ou ter **Gerenciar Servidor** — o Discord só mostra " +
       "na lista os servidores onde você pode.",
@@ -16003,7 +16003,7 @@ const PASSOS = [
     convite: true,
   },
   {
-    titulo: "Ele se instala sozinho",
+    titulo: "Ela se instala sozinha",
     texto: "Sem formulário e sem configuração.\n\n" +
       "Eu crio o canal onde as pessoas escolhem o idioma e um canal de " +
       "administração com um painel de botões, e já começo a funcionar. " +
@@ -16178,7 +16178,7 @@ const TEMAS = {
       "mensagem e ela chega traduzida aqui no privado.\n\n" +
       "Vale a bandeira que você tem: 🇲🇽, 🇵🇹, 🇦🇪, 🇺🇸 — não só as do menu. " +
       "Se a sua caixa de mensagens estiver fechada, eu respondo na própria sala e " +
-      "apago sozinho em 90 segundos.",
+      "apago sozinha em 90 segundos.",
   },
   falar: {
     rotulo: "Como eu falo e todo mundo entende",
@@ -16893,7 +16893,7 @@ client.on("messageCreate", async (msg) => {
          nos que o dono nunca pediu pra traduzir. E' o tipo de coisa que faz
          tirarem o bot.
 
-       O CYRON traduz onde mandaram traduzir: canal-fonte vira replica, sala de
+       A CYRON traduz onde mandaram traduzir: canal-fonte vira replica, sala de
        idioma vira conversa espelhada. Traduzir o servidor inteiro por conta
        propria e' outra funcao, e ela precisa ser pedida. */
     /* A piada das rosas continua sendo coisa da alianca (alianca.js). */
@@ -17003,9 +17003,9 @@ const ESPERA_AVISO_BANDEIRA = 10 * 60 * 1000;
 
 const PORQUE_NAO = {
   semServidor: {
-    titulo: "🌐 Eu ainda não fui instalado aqui",
-    texto: "A bandeira funciona nos servidores onde eu estou instalado. Alguém com " +
-      "**Gerenciar Servidor** pode me adicionar — é um clique, e eu me instalo sozinho.",
+    titulo: "🌐 Eu ainda não fui instalada aqui",
+    texto: "A bandeira funciona nos servidores onde eu estou instalada. Alguém com " +
+      "**Gerenciar Servidor** pode me adicionar — é um clique, e eu me instalo sozinha.",
     ingles: "_Flags work in servers where I'm installed. Anyone with **Manage Server** can add me._",
   },
   desligado: {
@@ -17817,7 +17817,7 @@ async function listaDeComandos(guildId) {
    Discord NAO entrega interacao nenhuma pelo gateway: clique, comando e menu
    viram POST pra aquela URL. Foi por isso que este processo, que ve tudo o
    que acontece no chat, era cego pra qualquer botao -- e por isso que metade
-   do CYRON morava numa Edge Function separada, com dois deploys, dois lugares
+   da CYRON morava numa Edge Function separada, com dois deploys, dois lugares
    pra procurar bug e o limite de 3 segundos de resposta HTTP.
 
    Os tratadores ja estao neste arquivo (interactionCreate acima). Enquanto a
@@ -18130,13 +18130,13 @@ const TRADUCOES_DO_EVENTO = (() => {
 const GLOBAIS_DO_CYRON = [
   {
     name: "cyron",
-    description: "Abrir o painel de configuração do CYRON",
+    description: "Abrir o painel de configuração da CYRON",
     defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
     dmPermission: false,
   },
   {
     name: "help",
-    description: "Como usar o CYRON / How to use CYRON",
+    description: "Como usar a CYRON / How to use CYRON",
     dmPermission: false,
   },
   {
@@ -18199,7 +18199,7 @@ const GLOBAIS_DO_CYRON = [
        e' ser dono do aplicativo. Administrador de um servidor qualquer nao
        pode ver os numeros de todos os outros. A checagem e' no clique. */
     name: "admin",
-    description: "Painel do dono do CYRON",
+    description: "Painel do dono da CYRON",
     dmPermission: false,
   },
 ];
@@ -18250,7 +18250,7 @@ async function arrumarOndeMoraOAdmin() {
    para apertar um botao do painel custa tempo toda vez. La' o comando so'
    aparece para quem e' Administrador DAQUELE servidor -- membro que veio
    tirar duvida nem ve. E quem ve ainda passa pelo ehDono no clique: cargo
-   de servidor nao e' ser dono do CYRON. */
+   de servidor nao e' ser dono da CYRON. */
 async function adminNoSuporte(def, gidDoPainel) {
   const guild = await guildDoSuporte().catch(() => null);
   if (!guild || guild.id === gidDoPainel) return;

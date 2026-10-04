@@ -39,7 +39,7 @@ function esc(t) {
 }
 
 /* As duas línguas ficam as duas na página, escondidas por CSS -- é o que as
-   outras páginas do CYRON fazem. Assim a troca é instantânea e o buscador
+   outras páginas da CYRON fazem. Assim a troca é instantânea e o buscador
    enxerga os dois textos. */
 function bi(par) {
   return `<span data-pt>${esc(par.pt)}</span><span data-en>${esc(par.en)}</span>`;
@@ -117,9 +117,9 @@ export function pagina() {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CYRON — tudo que ele faz</title>
-<meta name="description" content="As ${total} funções do CYRON, por categoria: traduzir, quem chega, viver junto, quem administra e confiança.">
+<meta name="description" content="As ${total} funções da CYRON, por categoria: traduzir, quem chega, viver junto, quem administra e confiança.">
 <meta property="og:title" content="CYRON — tudo que ele faz">
-<meta property="og:description" content="As ${total} funções do CYRON, por categoria. ${gratis} delas no plano grátis.">
+<meta property="og:description" content="As ${total} funções da CYRON, por categoria. ${gratis} delas no plano grátis.">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌐</text></svg>">
 
@@ -277,7 +277,7 @@ html[lang="en"] [data-en]{display:revert}
     <a class="marca" href="./">CY<b>RON</b></a>
     <nav>
       <a href="./"><span data-pt>Início</span><span data-en>Home</span></a>
-      <a href="./recursos.html" aria-current="page"><span data-pt>Tudo que ele faz</span><span data-en>Everything it does</span></a>
+      <a href="./recursos.html" aria-current="page"><span data-pt>Tudo que ela faz</span><span data-en>Everything it does</span></a>
       <a href="./#planos"><span data-pt>Planos</span><span data-en>Pricing</span></a>
       <a href="./painel.html"><span data-pt>Meus servidores</span><span data-en>My servers</span></a>
     </nav>
@@ -291,7 +291,7 @@ html[lang="en"] [data-en]{display:revert}
 <div class="topo">
   <div class="env lista">
     <h1>
-      <span data-pt><em>${total} coisas</em> que o CYRON faz</span>
+      <span data-pt><em>${total} coisas</em> que a CYRON faz</span>
       <span data-en><em>${total} things</em> CYRON does</span>
     </h1>
     <p class="abre">
@@ -329,7 +329,7 @@ ${CATEGORIAS.map(secao).join("\n")}
 <div class="fecho">
   <div class="env lista">
     <h2><span data-pt>Põe no seu servidor e vê.</span><span data-en>Put it in your server and see.</span></h2>
-    <a class="bt bt-1 convite" href="./"><span data-pt>Adicionar o CYRON</span><span data-en>Add CYRON</span></a>
+    <a class="bt bt-1 convite" href="./"><span data-pt>Adicionar a CYRON</span><span data-en>Add CYRON</span></a>
   </div>
 </div>
 
