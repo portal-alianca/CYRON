@@ -8719,6 +8719,20 @@ async function inscritosDoEvento(id) {
   return (await presencasDoEvento(id)).filter((p) => p.vai).map((p) => String(p.discord_user_id));
 }
 
+/* Link para uma sala so' serve a quem enxerga a sala.
+
+   A agenda nem sempre e' de todo mundo: num servidor com alas por lingua,
+   quem so' tem a ala dele pode nao ver o canal da agenda, e o botao do
+   lembrete abria "Voce nao tem acesso a este link". Melhor sem botao do que
+   com um botao que da' erro. */
+function podeVerCanal(canal, membro) {
+  try {
+    return !!(canal && membro && canal.permissionsFor?.(membro)?.has(PermissionFlagsBits.ViewChannel));
+  } catch {
+    return false;
+  }
+}
+
 function linkDaMensagem(guildId, canalId, msgId) {
   return guildId && canalId && msgId ? `https://discord.com/channels/${guildId}/${canalId}/${msgId}` : null;
 }
@@ -8747,6 +8761,7 @@ async function lembrarInscritos(guild, ev, inscritos) {
       const nome = membro?.displayName || membro?.user?.username || "";
       const usuario = membro?.user || await client.users.fetch(id).catch(() => null);
       if (!usuario) continue;
+      const linkDele = link && podeVerCanal(canal, membro) ? link : null;
       await usuario.send({
         embeds: [{
           color: COR,
@@ -8755,8 +8770,8 @@ async function lembrarInscritos(guild, ev, inscritos) {
           ...(ev.gif_url ? { image: { url: String(ev.gif_url) } } : {}),
           footer: { text: guild.name.slice(0, 100) },
         }],
-        ...(link ? { components: [{ type: 1, components: [
-          { type: 2, style: 5, url: link, emoji: { name: "📅" }, label: guild.name.slice(0, 70) },
+        ...(linkDele ? { components: [{ type: 1, components: [
+          { type: 2, style: 5, url: linkDele, emoji: { name: "📅" }, label: guild.name.slice(0, 70) },
         ] }] } : {}),
       });
       foram++;

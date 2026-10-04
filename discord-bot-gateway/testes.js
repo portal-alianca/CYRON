@@ -5377,6 +5377,24 @@ function conferirCartao(onde, embed, componentes = []) {
     /lembrete_feito: true \}\);[^]{0,200}lembrarInscritos/.test(ronda));
   verdade("o aviso também", /aviso_feito: true \}\);[^]{0,300}avisarNaHora/.test(ronda));
   verdade("lembrete só antes do início", /if \(agora < t\) \{[^}]*lembrarInscritos/.test(ronda));
+
+  /* O botão 📅 do lembrete abria "Você não tem acesso a este link" para quem
+     só enxerga a ala da língua dele e não vê o canal da agenda. */
+  {
+    const { podeVerCanal } = carregar(["podeVerCanal"]);
+    const sala = (ve) => ({ permissionsFor: () => ({ has: (b) => b === PermissionFlagsBits.ViewChannel && ve }) });
+    verdade("quem vê a agenda ganha o link", podeVerCanal(sala(true), { id: "m" }));
+    verdade("quem não vê, não", !podeVerCanal(sala(false), { id: "m" }));
+    verdade("sem membro (saiu do servidor), não", !podeVerCanal(sala(true), null));
+    verdade("sem canal, não", !podeVerCanal(null, { id: "m" }));
+    verdade("permissão que estoura não derruba o lembrete",
+      !podeVerCanal({ permissionsFor: () => { throw new Error("x"); } }, { id: "m" }));
+    const lembrar = semComentarios(fonte).slice(semComentarios(fonte).indexOf("async function lembrarInscritos"));
+    const corpo = lembrar.slice(0, lembrar.indexOf("\n}\n"));
+    verdade("o lembrete só põe o botão para quem enxerga a agenda",
+      /const linkDele = link && podeVerCanal\(canal, membro\) \? link : null;/.test(corpo) &&
+      /\.\.\.\(linkDele \?/.test(corpo) && !/\.\.\.\(link \?/.test(corpo));
+  }
   verdade("e o lembrete também avisa na sala, não só no privado", /if \(agora < t\) \{[^}]*avisarAntes\(guild, ev, inscritos/.test(ronda));
   verdade("muito atrasado não marca ninguém", /agora - t <= AVISO_ATRASADO/.test(ronda));
   verdade("a ronda não roda duas vezes por cima de si mesma", /if \(agendaRodando\) return/.test(ronda));
