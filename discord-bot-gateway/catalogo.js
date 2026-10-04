@@ -1,4 +1,4 @@
-/* O catálogo do CYRON: tudo que ele faz, numerado e por categoria.
+/* O catálogo da CYRON: tudo que ele faz, numerado e por categoria.
  *
  * Isto não é documentação escrita à parte -- é a LISTA, e a página
  * cyron/recursos.html nasce dela. Uma lista de recursos escrita à mão numa
@@ -188,7 +188,7 @@ export const RECURSOS = [
     categoria: "traduzir",
     plano: "pago",
     nome: { pt: "Salas espelhadas por idioma", en: "Mirrored rooms per language" },
-    como: { pt: "Sozinho, é só escrever", en: "On its own — just type" },
+    como: { pt: "Automático, é só escrever", en: "On its own — just type" },
     oque: {
       pt: "A mesma conversa acontecendo em várias salas, uma por língua. Você escreve na sua e a sua fala aparece na dos outros já traduzida, com o seu nome e a sua foto — inclusive as imagens e os arquivos que você mandou junto.",
       en: "One conversation happening in several rooms, one per language. You type in yours and your line shows up in theirs already translated, with your name and your avatar — images and files you attached come along.",
@@ -200,7 +200,7 @@ export const RECURSOS = [
     categoria: "traduzir",
     plano: "pago",
     nome: { pt: "As reações atravessam as salas", en: "Reactions cross the rooms" },
-    como: { pt: "Sozinho, é só reagir", en: "On its own — just react" },
+    como: { pt: "Automático, é só reagir", en: "On its own — just react" },
     oque: {
       pt: "Um 👍 dado na sala em árabe aparece na sala em português, somado com os das outras. Quem escreveu fica sabendo que gostaram — antes, a reação morria na língua de quem reagiu, longe justamente de quem ela existia para alcançar.",
       en: "A 👍 given in the Arabic room shows up in the Portuguese one, added to the rest. Whoever wrote the line finds out people liked it — before, the reaction died in the reactor's own language, away from the one person it existed to reach.",
@@ -212,7 +212,7 @@ export const RECURSOS = [
     categoria: "traduzir",
     plano: "pago",
     nome: { pt: "Apagar e corrigir atravessam", en: "Deletes and edits carry across" },
-    como: { pt: "Sozinho, é só apagar ou editar", en: "On its own — just delete or edit" },
+    como: { pt: "Automático, é só apagar ou editar", en: "On its own — just delete or edit" },
     oque: {
       pt: "Apagou, some das outras salas também — inclusive numa limpeza de moderação. Corrigiu o horário do evento, a correção chega traduzida em todas. Antes a cópia era pedra: quem apagava achava que tinha apagado, e o horário certo ficava numa língua só.",
       en: "Delete it and it goes from the other rooms too — moderation purges included. Fix the event time and the fix lands translated everywhere. Before, copies were set in stone: you thought you had deleted it, and the right time lived in one language only.",
@@ -224,7 +224,7 @@ export const RECURSOS = [
     categoria: "traduzir",
     plano: "pago",
     nome: { pt: "Figurinha e enquete também passam", en: "Stickers and polls come through too" },
-    como: { pt: "Sozinho, é só mandar", en: "On its own — just send it" },
+    como: { pt: "Automático, é só mandar", en: "On its own — just send it" },
     oque: {
       pt: "Figurinha aparece nas outras salas como imagem, com o nome de quem mandou. Enquete chega com a pergunta e as opções traduzidas, e um botão que leva à enquete de verdade — uma só, com todos os votos juntos, em vez de sete enquetes com os votos partidos.",
       en: "A sticker shows up in the other rooms as an image, under the sender's name. A poll arrives with its question and options translated, plus a link to the real poll — one poll with all the votes, instead of seven with the votes split.",
@@ -236,7 +236,7 @@ export const RECURSOS = [
     categoria: "traduzir",
     plano: "pago",
     nome: { pt: "Vídeo toca nas outras salas", en: "Videos play in the other rooms" },
-    como: { pt: "Sozinho, é só colar o link", en: "On its own — just paste the link" },
+    como: { pt: "Automático, é só colar o link", en: "On its own — just paste the link" },
     oque: {
       pt: "Link de YouTube, Twitch ou Vimeo chega nas outras salas com o player do Discord — dá o play ali mesmo, sem sair do chat. Arquivo grande demais para copiar vira um link para o original.",
       en: "A YouTube, Twitch or Vimeo link reaches the other rooms with Discord's own player — hit play right there, without leaving the chat. A file too big to copy becomes a link to the original.",
@@ -296,7 +296,7 @@ export const RECURSOS = [
     categoria: "traduzir",
     plano: "gratis",
     nome: { pt: "A mesma frase não se paga duas vezes", en: "The same line is never paid for twice" },
-    como: { pt: "Sozinho", en: "On its own" },
+    como: { pt: "Automático", en: "On its own" },
     oque: {
       pt: "Toda tradução fica guardada por 30 dias. O segundo pedido da mesma frase é instantâneo e não custa caractere nenhum — num servidor de verdade isso é a maior parte deles.",
       en: "Every translation is kept for 30 days. The second request for the same line is instant and costs no characters at all — in a real server that is most of them.",
@@ -310,7 +310,7 @@ export const RECURSOS = [
     categoria: "chegar",
     plano: "gratis",
     nome: { pt: "Convite no privado ao entrar", en: "A DM the moment they join" },
-    como: { pt: "Sozinho, quando alguém entra", en: "On its own, when someone joins" },
+    como: { pt: "Automático, quando alguém entra", en: "On its own, when someone joins" },
     oque: {
       pt: "Quem entra no servidor recebe na hora um cartão com as 20 bandeiras. Não precisa achar canal nenhum, e cada língua aparece escrita nela mesma — Deutsch, 한국어, العربية —, que é como a pessoa reconhece a dela.",
       en: "Anyone who joins gets a card with the 20 flags right away. No channel to find, and each language is written in itself — Deutsch, 한국어, العربية — which is how a person recognises their own.",
@@ -322,7 +322,7 @@ export const RECURSOS = [
     categoria: "chegar",
     plano: "gratis",
     nome: { pt: "O idioma adivinhado pelo que a pessoa escreve", en: "The language guessed from what they type" },
-    como: { pt: "Sozinho, na primeira frase", en: "On its own, on their first line" },
+    como: { pt: "Automático, na primeira frase", en: "On its own, on their first line" },
     oque: {
       pt: "Quem escreveu e nunca escolheu bandeira recebe uma oferta discreta — já na língua que ele parece falar. Na dúvida o bot cala a boca: adivinhar errado é pior do que não adivinhar.",
       en: "Someone who typed but never picked a flag gets a quiet offer — already in the language they seem to speak. When in doubt the bot says nothing: a wrong guess is worse than no guess.",
@@ -334,7 +334,7 @@ export const RECURSOS = [
     categoria: "chegar",
     plano: "gratis",
     nome: { pt: "O bot fala com cada um na língua dele", en: "The bot speaks to each person in their language" },
-    como: { pt: "Sozinho, depois da escolha", en: "On its own, once they choose" },
+    como: { pt: "Automático, depois da escolha", en: "On its own, once they choose" },
     oque: {
       pt: "Não é só o chat: os cartões, os botões, os menus e os avisos do próprio bot chegam na língua de quem está lendo. Quem escolheu 🇻🇳 não vê uma palavra de português.",
       en: "Not just the chat: the bot's own cards, buttons, menus and notices arrive in the reader's language. Someone who picked 🇻🇳 never sees a word of Portuguese.",
@@ -420,7 +420,7 @@ export const RECURSOS = [
     categoria: "viver",
     plano: "gratis",
     nome: { pt: "Recibo da semana", en: "The week's receipt" },
-    como: { pt: "Toda segunda, sozinho", en: "Every Monday, on its own" },
+    como: { pt: "Toda segunda, automático", en: "Every Monday, on its own" },
     oque: {
       pt: "Quantas traduções, para quantas pessoas, e se foi mais ou menos que a semana passada. Semana sem tradução nenhuma não vira cartão: um recibo dizendo “zero” é o bot lembrando que não serviu para nada.",
       en: "How many translations, for how many people, and whether it beat last week. A week with no translations produces no card at all: a receipt saying “zero” is the bot reminding you it was useless.",
@@ -470,7 +470,7 @@ export const RECURSOS = [
     categoria: "mandar",
     plano: "ambos",
     nome: { pt: "Teto de canais respeitado", en: "The channel ceiling is respected" },
-    como: { pt: "Sozinho, antes de criar", en: "On its own, before it builds" },
+    como: { pt: "Automático, antes de criar", en: "On its own, before it builds" },
     oque: {
       pt: "O Discord aceita 500 canais por servidor. O bot conta antes de criar, para quando fica apertado e avisa quem manda — em vez de deixar o servidor no limite e descobrir na hora errada.",
       en: "Discord allows 500 channels per server. The bot counts before it builds, stops when it gets tight and tells whoever is in charge — instead of parking your server at the limit and finding out the hard way.",
@@ -508,7 +508,7 @@ export const RECURSOS = [
     categoria: "confiar",
     plano: "gratis",
     nome: { pt: "Um servidor não gasta a cota do vizinho", en: "One server cannot spend its neighbour's quota" },
-    como: { pt: "Sozinho", en: "On its own" },
+    como: { pt: "Automático", en: "On its own" },
     oque: {
       pt: "As chaves gratuitas são uma bolsa só para todos os servidores, então cada um tem o seu teto por dia. Tradutor que falha entra de castigo e o próximo assume — o servidor não para porque um provedor caiu.",
       en: "The free keys are one shared purse for every server, so each one has its own daily ceiling. A translator that fails is benched and the next one takes over — your server does not stop because a provider went down.",
@@ -605,7 +605,7 @@ export const RECURSOS = [
     nome: { pt: "O cartão do dia", en: "The daily card" },
     como: { pt: "Canal 📊-diário", en: "The 📊-diário channel" },
     oque: {
-      pt: "Todo dia, sozinho: traduções, caracteres, servidores novos e a variação em relação a ontem. O canal de erros conta o que quebrou; este conta o que funcionou.",
+      pt: "Todo dia, automático: traduções, caracteres, servidores novos e a variação em relação a ontem. O canal de erros conta o que quebrou; este conta o que funcionou.",
       en: "Every day, on its own: translations, characters, new servers and how it moved against yesterday. The errors channel says what broke; this one says what worked.",
     },
     prova: "cartaoDoDia",

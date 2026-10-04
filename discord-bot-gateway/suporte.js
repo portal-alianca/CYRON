@@ -1,4 +1,4 @@
-/* O servidor de suporte do CYRON: montado pelo proprio bot, e porta de entrada
+/* O servidor de suporte da CYRON: montado pelo proprio bot, e porta de entrada
    para o teste e para o pagamento.
 
    Duas coisas moram aqui:
@@ -95,7 +95,7 @@ export async function exigirSuporte(inter, oque) {
   const embed = await d.traduzirEmbed({
     color: d.COR,
     title: "💬 Falta um passo",
-    description: `Para ${oque}, entre antes no servidor de suporte do CYRON. ` +
+    description: `Para ${oque}, entre antes no servidor de suporte da CYRON. ` +
       "Lá você tira dúvidas, recebe as novidades e fala com a gente se o pagamento der errado.\n\n" +
       "Depois de entrar, clique de novo no mesmo botão.",
   }, idioma).catch(() => null);
@@ -140,13 +140,13 @@ const CONTATO = `[@cyron02](${LINK_DO_CONTATO})`;
 export const TEXTOS = {
   boas: {
     pt: {
-      title: "👋 Bem-vindo ao suporte do CYRON",
+      title: "👋 Bem-vindo ao suporte da CYRON",
       description: "O **CYRON** traduz o seu servidor do Discord: cada pessoa escreve na língua dela, e todo mundo lê na sua.",
       fields: [
         { name: "1️⃣ Escolha o seu idioma", value: "As salas aparecem na sua língua, só para você." },
         { name: "2️⃣ Leia as regras e o modo de usar", value: "📜 regras · 📖 como usar · 💳 planos" },
         { name: "3️⃣ Precisa de ajuda?", value: "Escreva no **💬 chat** do seu idioma, na sua língua. A equipe lê traduzido e responde." },
-        { name: "💳 Quer assinar?", value: `Chame no privado o contato oficial ${CONTATO}. É o único que vende o CYRON.` },
+        { name: "💳 Quer assinar?", value: `Chame no privado o contato oficial ${CONTATO}. É o único que vende a CYRON.` },
         { name: "💡 Ideias e 🐞 defeitos", value: "Abra um post no fórum de sugestões ou no de bugs." },
       ],
     },
@@ -169,9 +169,9 @@ export const TEXTOS = {
       fields: [
         { name: "🤝 Respeito", value: "Sem ofensa, preconceito ou provocação." },
         { name: "🚫 Sem spam", value: "Sem propaganda de outros servidores ou bots." },
-        { name: "🌐 Qualquer língua", value: "Escreva na sua. O CYRON traduz." },
+        { name: "🌐 Qualquer língua", value: "Escreva na sua. A CYRON traduz." },
         { name: "🔑 Nada de senha", value: "Nunca poste token, senha ou chave de API. A equipe **nunca** pede isso." },
-        { name: "⚠️ Cuidado com golpe", value: `Só o contato oficial ${CONTATO} vende o CYRON, e ele **nunca** chama primeiro: quem começa a conversa é você. Se outra conta oferecer plano ou pedir dinheiro, é golpe. Avise a gente.` },
+        { name: "⚠️ Cuidado com golpe", value: `Só o contato oficial ${CONTATO} vende a CYRON, e ele **nunca** chama primeiro: quem começa a conversa é você. Se outra conta oferecer plano ou pedir dinheiro, é golpe. Avise a gente.` },
         { name: "📍 Cada coisa no seu lugar", value: "Dúvida no 💬 chat · compra no privado do contato oficial · ideia no 💡 fórum de sugestões · defeito no 🐞 fórum de bugs." },
         { name: "🚪 Quem não cumprir", value: "Quem não cumprir as regras pode ser removido do servidor." },
       ],
@@ -192,7 +192,7 @@ export const TEXTOS = {
   },
   uso: {
     pt: {
-      title: "📖 Como usar o CYRON",
+      title: "📖 Como usar a CYRON",
       description: "Do zero ao servidor traduzido em três passos.",
       fields: [
         { name: "1️⃣ Instale", value: "Use o link de instalação e escolha o seu servidor. O bot cria o canal 🌐 de idiomas e um painel para a administração." },
@@ -226,7 +226,7 @@ export const TEXTOS = {
         { name: "🏆 Aliança · R$ 79 ou US$ 15 por mês", value: "Até 20 idiomas, 10 canais copiados e o triplo de tradução e de áudio." },
         { name: "🇧🇷 Pagar no Brasil", value: "No /cyron, toque em 💠 Pagar com Pix. O plano liga sozinho quando o Pix cai." },
         { name: "🌍 Pagar de fora do Brasil", value: `Chame no privado o contato oficial ${CONTATO} com o plano e o nome do seu servidor. A gente combina com você, sem expor seus dados no chat.` },
-        { name: "🔒 Segurança", value: `Só ${CONTATO} vende o CYRON, e ele nunca chama primeiro. Não mande dados de pagamento em chat público.` },
+        { name: "🔒 Segurança", value: `Só ${CONTATO} vende a CYRON, e ele nunca chama primeiro. Não mande dados de pagamento em chat público.` },
       ]
     },
     en: {
@@ -243,11 +243,11 @@ export const TEXTOS = {
     },
   },
   novidades: {
-    pt: { title: "📣 Novidades", description: "Aqui saem as novidades do CYRON: recursos novos, correções e avisos importantes.\n\nToque em **Seguir** para receber no seu servidor." },
+    pt: { title: "📣 Novidades", description: "Aqui saem as novidades da CYRON: recursos novos, correções e avisos importantes.\n\nToque em **Seguir** para receber no seu servidor." },
     en: { title: "📣 News", description: "CYRON news lands here: new features, fixes and important notices.\n\nTap **Follow** to get them in your own server." },
   },
   sugestoes: {
-    pt: { title: "💡 Sugestões", description: "Tem uma ideia para o CYRON? Abra um post, um por ideia.\n\nReaja com 👍 nas ideias que você também quer: as mais votadas vêm primeiro." },
+    pt: { title: "💡 Sugestões", description: "Tem uma ideia para a CYRON? Abra um post, um por ideia.\n\nReaja com 👍 nas ideias que você também quer: as mais votadas vêm primeiro." },
     en: { title: "💡 Suggestions", description: "Got an idea for CYRON? Open a post, one per idea.\n\nReact 👍 on the ideas you want too: the most voted come first." },
   },
   bugs: {
