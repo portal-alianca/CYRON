@@ -5389,11 +5389,31 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("sem canal, não", !podeVerCanal(null, { id: "m" }));
     verdade("permissão que estoura não derruba o lembrete",
       !podeVerCanal({ permissionsFor: () => { throw new Error("x"); } }, { id: "m" }));
+    /* E o botão leva ao cartão na agenda da LÍNGUA da pessoa: com alas por
+       idioma, quem só tem a ala dele não vê a agenda original. */
+    const { salaDaAgendaPara } = carregar(["podeVerCanal", "linkDaMensagem", "salaDaAgendaPara"]);
+    const canal = (id, ve) => ({ id, guild: { id: "G" }, ...sala(ve) });
+    const original = { canal: canal("orig", false), idioma: null, msgId: "m0" };
+    const pt = { canal: canal("pt", true), idioma: "pt", msgId: "m1" };
+    const en = { canal: canal("en", true), idioma: "en", msgId: "m2" };
+    ok("quem é da ala pt vai ao cartão da agenda-pt",
+      salaDaAgendaPara([original, pt, en], { id: "m" }, "pt"), "https://discord.com/channels/G/pt/m1");
+    ok("quem é da ala en, ao da agenda-en",
+      salaDaAgendaPara([original, pt, en], { id: "m" }, "en"), "https://discord.com/channels/G/en/m2");
+    ok("quem vê a original (admin, sem sala da língua dele) vai à original",
+      salaDaAgendaPara([{ ...original, canal: canal("orig", true) }, pt], { id: "m" }, "ja"),
+      "https://discord.com/channels/G/orig/m0");
+    ok("sem o id do cartão, leva à sala", salaDaAgendaPara([original, { ...pt, msgId: null }], { id: "m" }, "pt"),
+      "https://discord.com/channels/G/pt");
+    ok("quem não vê nenhuma sala fica sem botão", salaDaAgendaPara([original], { id: "m" }, "pt"), null);
+    ok("e sem agenda nenhuma também", salaDaAgendaPara([], { id: "m" }, "pt"), null);
+
     const lembrar = semComentarios(fonte).slice(semComentarios(fonte).indexOf("async function lembrarInscritos"));
     const corpo = lembrar.slice(0, lembrar.indexOf("\n}\n"));
-    verdade("o lembrete só põe o botão para quem enxerga a agenda",
-      /const linkDele = link && podeVerCanal\(canal, membro\) \? link : null;/.test(corpo) &&
+    verdade("o lembrete escolhe a sala da agenda por pessoa",
+      /const linkDele = salaDaAgendaPara\(opcoes, membro, idioma\);/.test(corpo) &&
       /\.\.\.\(linkDele \?/.test(corpo) && !/\.\.\.\(link \?/.test(corpo));
+    verdade("e conhece as salas de idioma da agenda", /salasDaAgenda\(guild, ev\.servidor_id, canal\)/.test(corpo));
   }
   verdade("e o lembrete também avisa na sala, não só no privado", /if \(agora < t\) \{[^}]*avisarAntes\(guild, ev, inscritos/.test(ronda));
   verdade("muito atrasado não marca ninguém", /agora - t <= AVISO_ATRASADO/.test(ronda));
