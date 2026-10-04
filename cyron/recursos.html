@@ -15,10 +15,10 @@
      Um teste compara este arquivo com o que o gerador produz agora. -->
 <style>
 :root{
-  --fundo:#0B0D11; --painel:#13161C; --painel-2:#1A1E26; --painel-3:#222833;
+  --fundo:#07080F; --painel:#13161C; --painel-2:#1A1E26; --painel-3:#222833;
   --borda:#232935; --borda-viva:#333B49;
   --texto:#EDEFF3; --fraco:#98A1AE; --fraquinho:#6C7583;
-  --ambar:#F5A623; --ambar-claro:#FFC768; --verde:#5EBB83; --azul:#5865F2;
+  --ambar:#7B8CFF; --ambar-claro:#A9B4FF; --verde:#5EBB83; --azul:#5865F2;
   --r:16px;
 }
 *{box-sizing:border-box}
@@ -43,7 +43,7 @@ h1,h2,h3{line-height:1.15; margin:0; letter-spacing:-.022em}
 .barra nav a[aria-current]{color:var(--texto); background:var(--painel-2)}
 .idioma{display:flex; border:1px solid var(--borda-viva); border-radius:9px; overflow:hidden; margin-left:6px; flex:0 0 auto}
 .idioma button{background:none; border:0; color:var(--fraco); font:700 12px/1 inherit; padding:8px 10px; cursor:pointer}
-.idioma button[aria-pressed="true"]{background:var(--ambar); color:#1a1206}
+.idioma button[aria-pressed="true"]{background:var(--ambar); color:#0B0D1A}
 @media (max-width:760px){
   .barra .env{height:auto; padding:9px 16px 0; flex-wrap:wrap; gap:0 10px}
   .barra nav{order:3; width:100%; margin:6px -16px 0; padding:0 16px 8px;
@@ -89,7 +89,7 @@ h1,h2,h3{line-height:1.15; margin:0; letter-spacing:-.022em}
 .chip{background:var(--painel); border:1px solid var(--borda-viva); color:var(--fraco);
   border-radius:999px; padding:9px 13px; font:600 13.5px/1 inherit; cursor:pointer; white-space:nowrap}
 .chip:hover{color:var(--texto)}
-.chip[aria-pressed="true"]{background:var(--ambar); border-color:var(--ambar); color:#1a1206}
+.chip[aria-pressed="true"]{background:var(--ambar); border-color:var(--ambar); color:#0B0D1A}
 @media (max-width:760px){
   .filtros{top:auto; position:static}
   .chips{width:100%; padding-bottom:2px}
@@ -120,7 +120,7 @@ main{padding:0 0 80px}
 .linha .n{flex:0 0 auto; color:var(--fraquinho); font:600 13px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
 .linha .nome{flex:1; font-size:16px; font-weight:600; min-width:0}
 .linha .pago{flex:0 0 auto; font-size:11.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
-  color:var(--ambar); border:1px solid rgba(245,166,35,.32); border-radius:999px; padding:3px 8px}
+  color:var(--ambar); border:1px solid rgba(123,140,255,.32); border-radius:999px; padding:3px 8px}
 .linha .seta{flex:0 0 auto; color:var(--fraquinho); font-size:19px; line-height:1;
   transition:transform .15s ease}
 .linha[aria-expanded="true"]{background:var(--painel)}
