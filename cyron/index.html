@@ -9,7 +9,8 @@
 <meta property="og:description" content="Bot de tradução para Discord. Cada pessoa escreve na língua dela e lê todo mundo na dela — sem comando nenhum.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#1E1F22">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌐</text></svg>">
+<link rel="icon" href="./img/cyron.png">
+<meta property="og:image" content="https://portal-alianca.github.io/cyron/img/cyron.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -48,7 +49,9 @@ code{font-family:Consolas,"Andale Mono WT","Andale Mono",ui-monospace,monospace;
 .servidores{background:var(--servidores); padding:12px 0; display:flex; flex-direction:column; align-items:center; gap:8px; position:sticky; top:0; height:100vh}
 .servidores a{width:48px; height:48px; border-radius:16px; display:grid; place-items:center; font-weight:700; color:#fff; font-size:15px}
 .servidores a:hover{text-decoration:none; border-radius:14px}
-.servidores .eu{background:var(--blurple)}
+.servidores .eu{overflow:hidden}
+.servidores .eu img{width:48px; height:48px; display:block}
+img.av{object-fit:cover; background:#000}
 .servidores .outro{background:var(--fundo); color:var(--verde); font-size:24px; font-weight:400; border-radius:50%}
 .servidores .outro:hover{background:var(--verde); color:#fff; border-radius:16px}
 .servidores hr{width:32px; border:0; border-top:2px solid var(--fundo); margin:0}
@@ -194,7 +197,7 @@ html[lang="en"] [data-en]{display:revert}
 <div class="app">
 
 <nav class="servidores" aria-label="Servidores">
-  <a class="eu" href="./" title="CYRON">CY</a>
+  <a class="eu" href="./" title="CYRON"><img src="./img/cyron.png" alt="CYRON" width="48" height="48"></a>
   <hr>
   <a class="outro convite" href="#" title="Adicionar ao Discord / Add to Discord">+</a>
 </nav>
@@ -253,7 +256,7 @@ html[lang="en"] [data-en]{display:revert}
   </div>
 
   <div class="msg">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <span class="nome bot-nome">CYRON</span><span class="tag">BOT</span><span class="hora"><span data-pt>Hoje às 20:41</span><span data-en>Today at 8:41 PM</span></span>
       <p><span data-pt>Oi! Eu deixo cada pessoa escrever na língua dela e ler todo mundo na dela. A mesma conversa, ao mesmo tempo, e ninguém precisa digitar comando nenhum.</span><span data-en>Hi! I let everyone write in their own language and read everyone else in theirs. Same conversation, same moment, and nobody has to type a command.</span></p>
@@ -311,7 +314,7 @@ html[lang="en"] [data-en]{display:revert}
   </div>
 
   <div class="msg cont">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <!-- Números medidos no banco, não estimados. -->
       <div class="embed verde">
@@ -342,7 +345,7 @@ html[lang="en"] [data-en]{display:revert}
   </div>
 
   <div class="msg">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <span class="nome bot-nome">CYRON</span><span class="tag">BOT</span><span class="hora">20:44</span>
       <p><span data-pt>Eu copio os canais que você já tem, uma vez por idioma, e cada pessoa só vê a ala da língua dela:</span><span data-en>I copy the channels you already have, once per language, and each person only sees their own language's wing:</span></p>
@@ -372,7 +375,7 @@ html[lang="en"] [data-en]{display:revert}
   </div>
 
   <div class="msg">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <span class="nome bot-nome">CYRON</span><span class="tag">BOT</span><span class="hora">20:45</span>
       <p><span data-pt>Isso. <span class="mencao">@Mike</span> nem percebe que eu existo — e é essa a ideia.</span><span data-en>Exactly. <span class="mencao">@Mike</span> barely notices I exist — and that's the point.</span></p>
@@ -391,7 +394,7 @@ html[lang="en"] [data-en]{display:revert}
   </div>
 
   <div class="msg">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <span class="nome bot-nome">CYRON</span><span class="tag">BOT</span><span class="hora">20:47</span>
       <div class="embed largo">
@@ -417,7 +420,7 @@ html[lang="en"] [data-en]{display:revert}
   </div>
 
   <div class="msg">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <span class="nome bot-nome">CYRON</span><span class="tag">BOT</span><span class="hora">20:50</span>
       <!-- O preço troca de moeda junto com a língua, e não só de palavra: um dono
@@ -458,7 +461,7 @@ html[lang="en"] [data-en]{display:revert}
     </div>
   </div>
   <div class="msg">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <span class="nome bot-nome">CYRON</span><span class="tag">BOT</span><span class="hora">21:02</span>
       <p><span data-pt>Não. Eu entro, crio o canal onde as pessoas escolhem o idioma e um painel com botões, e começo a funcionar. Se você nunca abrir o painel, continuo funcionando.</span><span data-en>No. I join, create the channel where people pick their language plus a panel with buttons, and start working. If you never open the panel, I keep working.</span></p>
@@ -473,7 +476,7 @@ html[lang="en"] [data-en]{display:revert}
     </div>
   </div>
   <div class="msg">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <span class="nome bot-nome">CYRON</span><span class="tag">BOT</span><span class="hora">21:05</span>
       <p><span data-pt>Só os canais que você mandou traduzir — é o que traduzir quer dizer. O texto vai ao tradutor e volta; fica só um cache de frases curtas repetidas. Nada de mensagem privada, e nada é vendido a ninguém. <a href="./privacidade.html">Privacidade</a></span><span data-en>Only the channels you told me to translate — that's what translating means. The text goes to the translator and comes back; only a cache of short repeated phrases is kept. No DMs, and nothing is sold to anyone. <a href="./privacidade.html">Privacy</a></span></p>
@@ -488,7 +491,7 @@ html[lang="en"] [data-en]{display:revert}
     </div>
   </div>
   <div class="msg">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <span class="nome bot-nome">CYRON</span><span class="tag">BOT</span><span class="hora">21:09</span>
       <p><span data-pt>Às vezes vai sair — tradução automática erra. O glossário guarda nomes e siglas que não devem ser traduzidos, e cada mensagem mostra de que língua veio. E quando um tradutor cai, eu passo para o próximo da fila: uma mensagem sem tradução ainda chega, uma que não chega some da conversa.</span><span data-en>Sometimes it will — machine translation gets things wrong. The glossary keeps names and tags untranslated, and every message shows which language it came from. And when a translator goes down, I move to the next one in line: an untranslated message still arrives, one that never arrives is gone from the conversation.</span></p>
@@ -503,7 +506,7 @@ html[lang="en"] [data-en]{display:revert}
     </div>
   </div>
   <div class="msg">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <span class="nome bot-nome">CYRON</span><span class="tag">BOT</span><span class="hora">21:12</span>
       <p><span data-pt>Só copio os canais que <em>você</em> apontar, e só das línguas que alguém escolheu — cada uma numa categoria fechada para os outros. No grátis não crio nada. E serve para qualquer assunto: quem tem <code>#receitas</code> ganha <code>receitas-pt</code> e <code>receitas-en</code>.</span><span data-en>I only copy the channels <em>you</em> point at, and only for languages someone picked — each in a category closed to everyone else. On Free I create nothing. And it fits any subject: a <code>#recipes</code> becomes <code>recipes-pt</code> and <code>recipes-en</code>.</span></p>
@@ -518,7 +521,7 @@ html[lang="en"] [data-en]{display:revert}
     </div>
   </div>
   <div class="msg">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <span class="nome bot-nome">CYRON</span><span class="tag">BOT</span><span class="hora">21:15</span>
       <p><span data-pt>Pode. No fim do período pago o servidor volta ao grátis, e os canais que existem não são apagados.</span><span data-en>Yes. At the end of the paid period the server falls back to Free, and the channels that exist are not deleted.</span></p>
@@ -528,7 +531,7 @@ html[lang="en"] [data-en]{display:revert}
   <div class="divisa"><span data-pt>novas mensagens</span><span data-en>new messages</span></div>
 
   <div class="msg">
-    <div class="av bot">CY</div>
+    <img class="av bot" src="./img/cyron.png" alt="" width="40" height="40">
     <div>
       <span class="nome bot-nome">CYRON</span><span class="tag">BOT</span><span class="hora"><span data-pt>agora</span><span data-en>now</span></span>
       <p><span data-pt>Me põe no seu servidor e vê. Instalo sozinho, traduzo na mesma hora, e o plano grátis não vence nunca.</span><span data-en>Put me in your server and see. I set myself up, translate right away, and the free plan never expires.</span></p>
