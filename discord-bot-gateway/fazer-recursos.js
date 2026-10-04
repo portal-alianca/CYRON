@@ -121,7 +121,7 @@ export function pagina() {
 <meta property="og:title" content="CYRON — tudo que ele faz">
 <meta property="og:description" content="As ${total} funções da CYRON, por categoria. ${gratis} delas no plano grátis.">
 <meta property="og:type" content="website">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌐</text></svg>">
+<link rel="icon" href="./img/cyron.png">
 
 <!-- ESTA PÁGINA É GERADA. Não edite à mão: quem manda é
      discord-bot-gateway/catalogo.js, e o gerador é fazer-recursos.js.
