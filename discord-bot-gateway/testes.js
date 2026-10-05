@@ -2119,10 +2119,12 @@ function conferirCartao(onde, embed, componentes = []) {
      mandou "oi" e olhou o primeiro cartão não via a expressão em lugar nenhum
      e concluiu que não existia. Estes três testes prendem a superfície, que é
      onde o defeito estava -- o passo a passo em si já era testado inteiro. */
-  /* Agora o passo a passo da primeira tela é o VÍDEO: quarenta segundos com
-     voz e legenda no lugar de cinco cartões para ir clicando. */
-  const naPergunta = botoesDaPergunta().components.filter((c) => c.custom_id === PASSO.video);
-  ok("a primeira tela abre o passo a passo em vídeo, e num botão só", naPergunta.length, 1);
+  /* O passo a passo da primeira tela são os CARTÕES, e não o vídeo: o texto
+     dos cartões se traduz para quem lê, e o vídeo falado só existe em
+     português e em inglês. */
+  const naPergunta = botoesDaPergunta().components.filter((c) => c.custom_id === `${PASSO.passo}:1`);
+  ok("a primeira tela abre o passo a passo em cartões, e num botão só", naPergunta.length, 1);
+  verdade("e não manda direto para o vídeo", !botoesDaPergunta().components.some((c) => c.custom_id === PASSO.video));
   verdade("e o botão diz que é o passo a passo", /passo a passo/i.test(naPergunta[0].label));
   verdade("a pergunta anuncia o passo a passo no texto, não só no botão",
     /passo a passo/i.test(paginaDeApresentacao().description));
@@ -2156,7 +2158,7 @@ function conferirCartao(onde, embed, componentes = []) {
      qualquer coisa: um id adulterado ou um passo removido no futuro dariam
      `undefined.titulo`, e a conversa morreria com "Esta interação falhou". */
   const { PASSOS, passoValido, paginaDoPasso, botoesDoPasso, fotoDoPasso, TEMA_INSTALAR, SITE_DO_CYRON: site } =
-    carregar(["SITE_DO_CYRON", "PASSOS", "passoValido", "paginaDoPasso", "botoesDoPasso", "fotoDoPasso", "TEMA_INSTALAR"]);
+    carregar(["SITE_DO_CYRON", "PASSOS", "passoValido", "paginaDoPasso", "temVideoNaLingua", "botoesDoPasso", "fotoDoPasso", "TEMA_INSTALAR"]);
 
   ok("o primeiro passo é 1", passoValido(1), 1);
   ok("abaixo do primeiro volta para o primeiro", passoValido(0), 1);
@@ -2228,7 +2230,7 @@ function conferirCartao(onde, embed, componentes = []) {
   {
     const { videoDoTutorial, botoesDoVideo, telaDoVideo, botoesDosPlanos: planos } = carregar([
       "SITE_DO_CYRON", "PASSO", "PERMISSOES_DO_CONVITE", "linkDeConvite", "botaoDeSuporte", "botoesDeConvite",
-      "botoesDosPlanos", "traduzirLinha", "videoDoTutorial", "botoesDoVideo", "telaDoVideo"]);
+      "botoesDosPlanos", "traduzirLinha", "temVideoNaLingua", "videoDoTutorial", "botoesDoVideo", "telaDoVideo"]);
     ok("em português, o vídeo português", videoDoTutorial("pt"), `${site}video/tutorial-pt.mp4`);
     ok("em qualquer outra língua, o inglês", videoDoTutorial("ar"), `${site}video/tutorial-en.mp4`);
     const VID = new URL("../cyron/video/", import.meta.url);
@@ -2243,8 +2245,18 @@ function conferirCartao(onde, embed, componentes = []) {
     const ids = botoesDoVideo().flatMap((l) => l.components.map((c) => c.custom_id)).filter(Boolean);
     verdade("dali dá para ver foto por foto, a partir do passo 1", ids.includes(`${PASSO.passo}:1`));
     verdade("e voltar aos planos", ids.includes(PASSO.sim));
-    verdade("os planos levam ao vídeo",
-      planos().flatMap((l) => l.components).some((c) => c.custom_id === PASSO.video));
+    verdade("os planos levam ao passo a passo em cartões",
+      planos().flatMap((l) => l.components).some((c) => c.custom_id === `${PASSO.passo}:1`));
+    verdade("e não ao vídeo", !planos().flatMap((l) => l.components).some((c) => c.custom_id === PASSO.video));
+
+    /* O vídeo vira um botão no primeiro passo, só onde ele fala a língua. */
+    const idsDoPasso = (n, idioma) => botoesDoPasso(n, idioma).flatMap((l) => l.components.map((c) => c.custom_id));
+    verdade("em português, o passo 1 oferece o vídeo", idsDoPasso(1, "pt").includes(PASSO.video));
+    verdade("em inglês também", idsDoPasso(1, "en").includes(PASSO.video));
+    verdade("em árabe não: o vídeo não fala árabe", !idsDoPasso(1, "ar").includes(PASSO.video));
+    verdade("e só no primeiro passo", !idsDoPasso(2, "pt").includes(PASSO.video));
+    for (const idioma of ["pt", "ar"]) for (const l of botoesDoPasso(1, idioma)) linhaCabe(`passo 1 (${idioma})`, l);
+    verdade("o passo 1 cabe nas 5 linhas do Discord", botoesDoPasso(1, "pt").length <= 5);
 
     /* A conversa é um cartão só que se transforma, e o vídeo é a única tela
        que usa o texto da mensagem. Sem limpar o texto a cada troca, o player
@@ -2255,7 +2267,8 @@ function conferirCartao(onde, embed, componentes = []) {
       /const editar = \(tela\) => inter\.editReply\(\{ content: "", \.\.\.tela \}\)/.test(corpo));
     verdade("e nenhuma troca passa por fora dessa limpeza", !/inter\.editReply\(await/.test(corpo));
     verdade("o botão do vídeo tem rota", /customId === PASSO\.video\) return editar\(await telaDoVideo/.test(corpo));
-    verdade("e o tema \"como instalar\" abre o vídeo", /TEMA_INSTALAR\) return editar\(await telaDoVideo/.test(corpo));
+    verdade("e o tema \"como instalar\" abre o passo a passo em cartões",
+      /TEMA_INSTALAR\) return editar\(await telaDoPasso\(idioma, 1\)/.test(corpo));
   }
 
   /* ---- a apresentação não se repete, mas só depois de acontecer ----
