@@ -332,6 +332,12 @@ function trocar(code) {
     history.replaceState(null, "", VOLTA);
     return telaDeEntrada();
   }
+  /* Veio do botão "Entrar" do site: vai direto para o Discord, sem a tela
+     intermediária com outro botão "Entrar" para apertar. */
+  if (!code && q.get("entrar") === "1") {
+    history.replaceState(null, "", VOLTA);
+    return entrar();
+  }
   if (!code) return telaDeEntrada();
 
   var guardado = null;

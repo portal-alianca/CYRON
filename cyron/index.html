@@ -85,6 +85,8 @@ img.av{object-fit:cover; background:#000}
 .topo-canal .hash{color:var(--fraquinho); font-size:22px; font-weight:400}
 .topo-canal .tema{color:var(--fraco); font-weight:500; font-size:14px; border-left:1px solid var(--borda); padding-left:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .topo-canal .bt{margin-left:auto}
+#canal-atual{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0}
+.nome-conta{max-width:110px; overflow:hidden; text-overflow:ellipsis}
 .topo-canal .idioma{display:none}
 
 .mensagens{max-width:880px; padding:8px 0 40px}
@@ -275,7 +277,7 @@ html[lang="en"] [data-en]{display:revert}
       <button type="button" data-troca="pt" aria-pressed="true">PT</button>
       <button type="button" data-troca="en" aria-pressed="false">EN</button>
     </div>
-    <a class="bt bt-1 convite" href="#"><span data-pt>Adicionar</span><span data-en>Add</span></a>
+    <a class="bt bt-1" id="entrar" href="./painel.html?entrar=1"><span data-pt>Entrar</span><span data-en>Sign in</span></a>
   </div>
   <nav class="faixa-canais" aria-label="Canais / Channels">
     <a href="#funciona"># <span data-pt>como-funciona</span><span data-en>how-it-works</span></a>
@@ -649,6 +651,12 @@ document.addEventListener("keydown", function (e) { if (e.key === "Escape") gave
     caixa.style.display = "contents";
   }
   if (conta.nome) {
+    /* Já entrou: o botão do topo vira a própria pessoa, e leva aos
+       servidores dela. */
+    var entrar = document.getElementById("entrar");
+    entrar.innerHTML = (/^https:\/\/cdn\.discordapp\.com\//.test(conta.avatar || "") ? '<img src="' + esc(conta.avatar) + '" alt="" width="20" height="20" style="border-radius:50%">' : "") +
+      '<span class="nome-conta">' + esc(conta.nome) + '</span>';
+    entrar.title = "Meus servidores / My servers";
     var quem = document.getElementById("quem");
     quem.innerHTML = (/^https:\/\/cdn\.discordapp\.com\//.test(conta.avatar || "") ? '<img src="' + esc(conta.avatar) + '" alt="">' : "") +
       "<span>" + esc(conta.nome) + "</span>";
