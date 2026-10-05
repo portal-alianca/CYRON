@@ -263,6 +263,17 @@ function linha(s) {
 
 function mostrar(dados) {
   var u = dados.usuario || {};
+  /* O site mostra os servidores da pessoa na barra da esquerda, como o
+     Discord. Guarda só o que aparece lá -- nome, avatar e os servidores --,
+     neste navegador e em mais lugar nenhum. Nenhum token entra aqui. */
+  try {
+    localStorage.setItem("cyron-conta", JSON.stringify({
+      quando: Date.now(), nome: u.nome || "", avatar: u.avatar || "",
+      servidores: (dados.servidores || []).map(function (s) {
+        return { nome: s.nome || "", icone: s.icone || "", instalado: !!s.instalado };
+      }),
+    }));
+  } catch (e) { /* modo privado: a barra só não mostra os servidores */ }
   var eu = document.getElementById("eu");
   eu.hidden = false;
   eu.innerHTML = (u.avatar ? '<img src="' + esc(u.avatar) + '" alt="">' : "") + esc(u.nome);
