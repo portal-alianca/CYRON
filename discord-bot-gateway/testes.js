@@ -4311,12 +4311,22 @@ function conferirCartao(onde, embed, componentes = []) {
     globalThis.traduzir = async (t) => { traduziu++; return `[${t}]`; };
     globalThis.sbPost = async () => {};
     globalThis.anotarUso = () => {};
-    const C = carregar(["MAX_NA_MEMORIA", "traducoesNaMemoria", "lembrarTraducao", "traduzirComCache"]);
+    const C = carregar(["MAX_NA_MEMORIA", "traducoesNaMemoria", "lembrarTraducao", "textoDoCache", "traduzirComCache", "traduzirNucleo"]);
     ok("a primeira vez traduz", await C.traduzirComCache("kkk", "en"), "[kkk]");
     ok("a segunda sai da memória", await C.traduzirComCache("kkk", "en"), "[kkk]");
     ok("sem ir ao banco de novo nem ao tradutor", [noBanco, traduziu], [1, 1]);
     await C.traduzirComCache("kkk", "es");
     ok("outro idioma é outra frase", traduziu, 2);
+    /* Espaço sobrando não é frase nova: não paga de novo. */
+    ok("espaço repetido no meio sai da memória", await C.traduzirComCache("bom  dia", "en"), "[bom dia]");
+    ok("e não pagou", traduziu, 3);
+    await C.traduzirComCache("bom dia", "en");
+    ok("\"bom dia\" e \"bom  dia\" são a mesma frase", traduziu, 3);
+    ok("as bordas voltam como vieram, para a emenda de pedaços", await C.traduzirComCache("  bom dia ", "en"), "  [bom dia] ");
+    ok("e a borda também não paga", traduziu, 3);
+    ok("a quebra de linha fica: ela separa as linhas de um aviso", C.textoDoCache("a  \n  b"), "a\nb");
+    ok("texto que já vinha limpo tem a mesma chave de antes", C.textoDoCache("rally saindo às 20h"), "rally saindo às 20h");
+    ok("vazio volta vazio, sem chamar o tradutor", [await C.traduzirComCache("   ", "en"), traduziu], ["   ", 3]);
     for (let i = 0; i < C.MAX_NA_MEMORIA + 50; i++) C.lembrarTraducao(`k${i}`, "x");
     verdade("a memória tem teto", C.traducoesNaMemoria.size <= C.MAX_NA_MEMORIA);
   }
