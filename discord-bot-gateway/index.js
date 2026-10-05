@@ -15905,7 +15905,7 @@ function botoesDaPergunta() {
     components: [
       { type: 2, style: 3, custom_id: PASSO.sim, emoji: { name: "✅" }, label: "Sim, quero" },
       { type: 2, style: 2, custom_id: PASSO.nao, emoji: { name: "💬" }, label: "Ainda não" },
-      { type: 2, style: 2, custom_id: PASSO.video, emoji: { name: "🎬" }, label: "Ver o passo a passo em vídeo" },
+      { type: 2, style: 2, custom_id: `${PASSO.passo}:1`, emoji: { name: "🖼️" }, label: "Ver o passo a passo" },
     ],
   };
 }
@@ -15978,7 +15978,7 @@ function botoesDosPlanos() {
   return [
     botoesDeConvite(),
     { type: 1, components: [
-      { type: 2, style: 1, custom_id: PASSO.video, emoji: { name: "🎬" }, label: "Ver o tutorial em vídeo" },
+      { type: 2, style: 1, custom_id: `${PASSO.passo}:1`, emoji: { name: "🖼️" }, label: "Ver o passo a passo" },
       { type: 2, style: 2, custom_id: PASSO.nao, emoji: { name: "💬" }, label: "Tenho outra dúvida" },
     ] },
   ];
@@ -16074,7 +16074,7 @@ function paginaDoPasso(n, idioma) {
    desabilitado, e nao botao ausente: a linha muda de tamanho a cada passo se
    eles sumirem, e os outros dancam de lugar embaixo do dedo de quem esta
    tocando. */
-function botoesDoPasso(n) {
+function botoesDoPasso(n, idioma = "pt") {
   const i = passoValido(n);
   const linhas = [{
     type: 1,
@@ -16086,20 +16086,33 @@ function botoesDoPasso(n) {
       { type: 2, style: 2, custom_id: PASSO.sim, emoji: { name: "↩️" }, label: "Voltar aos planos" },
     ],
   }];
+  /* O video so' existe falado em portugues e em ingles. Para essas duas
+     linguas ele fica a um toque, no primeiro passo; para as outras, o
+     passo a passo em cartoes e' o caminho, porque o texto dele se traduz. */
+  if (i === 1 && temVideoNaLingua(idioma)) {
+    linhas.push({ type: 1, components: [
+      { type: 2, style: 2, custom_id: PASSO.video, emoji: { name: "🎬" }, label: "Ver em vídeo" },
+    ] });
+  }
   if (PASSOS[i - 1].convite) linhas.push(botoesDeConvite());
   return linhas;
 }
 
 /* ---- o tutorial em vídeo ----
 
-   Quarenta segundos com voz e legenda mostram os cinco passos melhor do que
-   cinco cartões que a pessoa tem de ir clicando. O vídeo mora no site, como as
-   fotos: o link no texto da mensagem faz o Discord desenhar o player ali
-   mesmo, sem anexo e sem upload a cada pedido.
+   Extra, e nao a porta de entrada. O video e' falado, e voz nao passa pelo
+   tradutor: ele so' existe em portugues e em ingles, e um video por lingua
+   seriam vinte videos para manter. Os cartoes foto por foto sao o caminho
+   principal porque o texto deles se traduz sozinho para quem le; o video
+   aparece como botao no primeiro passo so' para quem fala portugues ou
+   ingles.
 
-   Duas versões, como os desenhos: português para quem fala português, inglês
-   para o resto. Os cartões foto por foto continuam a um botão de distância,
-   para quem não pode dar play agora. */
+   O video mora no site, como as fotos: o link no texto da mensagem faz o
+   Discord desenhar o player ali mesmo, sem anexo e sem upload a cada pedido. */
+function temVideoNaLingua(idioma) {
+  return idioma === "pt" || idioma === "en";
+}
+
 function videoDoTutorial(idioma) {
   return `${SITE_DO_CYRON}video/tutorial-${idioma === "pt" ? "pt" : "en"}.mp4`;
 }
@@ -16122,7 +16135,7 @@ async function telaDoVideo(idioma) {
 
 async function telaDoPasso(idioma, n) {
   const linhas = [];
-  for (const l of botoesDoPasso(n)) linhas.push(await traduzirLinha(l, idioma));
+  for (const l of botoesDoPasso(n, idioma)) linhas.push(await traduzirLinha(l, idioma));
   return {
     embeds: [{ color: COR, ...(await traduzirEmbed(paginaDoPasso(n, idioma), idioma, MOTOR_AUTO)) }],
     components: linhas,
@@ -16286,7 +16299,7 @@ async function cliqueNoPrivado(inter) {
     /* Instalar nao e' uma explicacao de um paragrafo: e' uma sequencia. Por
        isso ele aparece no menu como qualquer tema e sai daqui por outro
        caminho. */
-    if (tema === TEMA_INSTALAR) return editar(await telaDoVideo(idioma));
+    if (tema === TEMA_INSTALAR) return editar(await telaDoPasso(idioma, 1));
     return editar(await telaDeAjuda(idioma, tema));
   }
 }
