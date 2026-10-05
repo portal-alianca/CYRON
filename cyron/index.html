@@ -646,7 +646,7 @@ document.addEventListener("keydown", function (e) { if (e.key === "Escape") gave
     var caixa = document.getElementById("meus");
     caixa.innerHTML = meus.map(function (s) {
       var inicial = esc(String(s.nome || "?").trim().slice(0, 2));
-      return '<a class="meu" href="./painel.html" title="' + esc(s.nome) + '">' +
+      return '<a class="meu" href="./painel.html' + (s.id ? "#g=" + esc(s.id) : "") + '" title="' + esc(s.nome) + '">' +
         (/^https:\/\/cdn\.discordapp\.com\//.test(s.icone || "") ? '<img src="' + esc(s.icone) + '" alt="' + esc(s.nome) + '" width="48" height="48">' : inicial) +
         "</a>";
     }).join("") + "<hr>";
