@@ -4331,6 +4331,29 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("a memória tem teto", C.traducoesNaMemoria.size <= C.MAX_NA_MEMORIA);
   }
 
+  /* ---- a configuração na memória: quem escreve, esquece ---- */
+  {
+    const M = carregar(["CONFIG_NA_MEMORIA", "cacheEspelho", "cacheFontes", "cacheReplicas", "cacheComandos",
+      "CACHE_DA_TABELA", "esquecerCacheDe"]);
+    M.cacheEspelho.set("s1", { v: [1], t: Date.now() });
+    M.cacheReplicas.set("s1", { v: [2], t: Date.now() });
+    M.esquecerCacheDe("discord_chat_espelho?id=eq.9");
+    ok("gravar no espelho esquece a memória do espelho", M.cacheEspelho.size, 0);
+    ok("e não mexe na das réplicas", M.cacheReplicas.size, 1);
+    M.esquecerCacheDe("discord_canal_idioma");
+    ok("o POST (sem ?) também esquece", M.cacheReplicas.size, 0);
+    M.cacheComandos.set("g", { v: [], t: Date.now() });
+    M.esquecerCacheDe("cyron_uso_diario?dia=eq.x");
+    ok("tabela que não é configuração não apaga nada", M.cacheComandos.size, 1);
+    verdade("a configuração fica bem mais que um minuto", M.CONFIG_NA_MEMORIA >= 10 * 60 * 1000);
+    const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
+    for (const f of ["sbPost", "sbPatch", "sbDel"]) {
+      verdade(`${f} esquece a memória antes de gravar`,
+        new RegExp(`async function ${f}\\([^)]*\\) \\{\\s*esquecerCacheDe\\(caminho\\);`).test(idx));
+    }
+    verdade("o servidor fica de fora (o pagamento grava por fora do bot)", !("cyron_servidor" in M.CACHE_DA_TABELA));
+  }
+
   /* ---- a Azure: uma chamada para todos os idiomas da mesma frase ---- */
   {
     globalThis.AZURE_IDIOMA = { "zh-CN": "zh-Hans" };

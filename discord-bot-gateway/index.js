@@ -137,6 +137,20 @@ function comPrazo(extra = {}) {
   return { ...extra, signal: AbortSignal.timeout(PRAZO_BANCO) };
 }
 
+/* Toda escrita do bot numa tabela de configuracao esquece o que a memoria
+   guardava dela -- em UM lugar, e nao espalhado pelas funcoes que gravam.
+
+   Com isso a memoria pode segurar a configuracao por muito mais tempo: ela
+   era relida a cada minuto por servidor, em toda mensagem que passava, e
+   quase nunca tinha mudado (a do espelho foi lida 597 mil vezes e alterada
+   143). O prazo longo que sobra e' so' a rede embaixo, para mudanca feita
+   por fora do bot. */
+function esquecerCacheDe(caminho) {
+  const tabela = String(caminho).split("?")[0];
+  if (typeof CACHE_DA_TABELA === "undefined") return;
+  CACHE_DA_TABELA[tabela]?.clear();
+}
+
 async function sb(caminho) {
   const r = await fetch(`${SB_URL}/rest/v1/${caminho}`, comPrazo({
     headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
@@ -146,6 +160,7 @@ async function sb(caminho) {
 }
 
 async function sbPost(caminho, corpo, prefer = "") {
+  esquecerCacheDe(caminho);
   const r = await fetch(`${SB_URL}/rest/v1/${caminho}`, comPrazo({
     method: "POST",
     headers: {
@@ -185,6 +200,7 @@ async function idsVivos(guild) {
 }
 
 async function sbDel(caminho) {
+  esquecerCacheDe(caminho);
   const r = await fetch(`${SB_URL}/rest/v1/${caminho}`, comPrazo({
     method: "DELETE",
     headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, Prefer: "return=minimal" },
@@ -221,6 +237,7 @@ const GUARDO_POR = [
 ];
 
 async function sbPatch(caminho, corpo) {
+  esquecerCacheDe(caminho);
   const r = await fetch(`${SB_URL}/rest/v1/${caminho}`, comPrazo({
     method: "PATCH",
     headers: {
@@ -739,10 +756,13 @@ client.on("threadUpdate", async (antes, depois) => {
    GENTE é espelhada, e o espelho sai por webhook. Espelho de espelho não
    existe porque webhook nunca entra aqui. */
 
+/* Configuracao que so' o bot escreve: a escrita ja limpa a memoria
+   (esquecerCacheDe), entao o prazo e' so' a rede de seguranca. */
+const CONFIG_NA_MEMORIA = 30 * 60 * 1000;
 const cacheEspelho = new Map(); // servidorId -> { v, t }
 async function canaisEspelho(servidorId) {
   const achado = cacheEspelho.get(servidorId);
-  if (achado && Date.now() - achado.t < 60 * 1000) return achado.v;
+  if (achado && Date.now() - achado.t < CONFIG_NA_MEMORIA) return achado.v;
   let v = [];
   try {
     /* So idioma que TEM sala de conversa entra aqui. Depois que a linha passou
@@ -4789,7 +4809,7 @@ function nomeDaReplica(modelo, rotulo, idioma) {
 const cacheFontes = new Map(); // servidorId -> { v: Map(canal_id -> tipo), t }
 async function fontesReplica(servidorId) {
   const achado = cacheFontes.get(servidorId);
-  if (achado && Date.now() - achado.t < 60 * 1000) return achado.v;
+  if (achado && Date.now() - achado.t < CONFIG_NA_MEMORIA) return achado.v;
   let v = new Map();
   try {
     const r = await sb(`discord_fonte_replica?servidor_id=eq.${servidorId}&select=canal_id,tipo,gera_replica&order=criado_em.asc`) || [];
@@ -4806,7 +4826,7 @@ async function fontesReplica(servidorId) {
 const cacheReplicas = new Map(); // servidorId -> { v, t }
 async function replicasDoIdioma(servidorId) {
   const achado = cacheReplicas.get(servidorId);
-  if (achado && Date.now() - achado.t < 60 * 1000) return achado.v;
+  if (achado && Date.now() - achado.t < CONFIG_NA_MEMORIA) return achado.v;
   let v = [];
   try {
     v = await sb(`discord_canal_idioma?servidor_id=eq.${servidorId}&select=canal_id,idioma,tipo,webhook`) || [];
@@ -17251,9 +17271,20 @@ async function separarComandos() {
      codigo que nenhum dos dois viu. */
 
 const cacheComandos = new Map(); // guildId -> { v, t }
+
+/* Qual memoria cada tabela alimenta (ver esquecerCacheDe). O servidor fica
+   de fora de proposito: o plano dele muda por fora do bot -- o pagamento do
+   Stripe e do Pix grava direto no banco --, entao ele segue com os cinco
+   minutos de antes. */
+const CACHE_DA_TABELA = {
+  discord_chat_espelho: cacheEspelho,
+  discord_fonte_replica: cacheFontes,
+  discord_canal_idioma: cacheReplicas,
+  cyron_comando: cacheComandos,
+};
 async function comandosDoDono(guildId) {
   const achado = cacheComandos.get(guildId);
-  if (achado && Date.now() - achado.t < 30 * 1000) return achado.v;
+  if (achado && Date.now() - achado.t < CONFIG_NA_MEMORIA) return achado.v;
   let v = [];
   try {
     /* `select=*` de proposito. Nomear as colunas parecia mais caprichado ate'
