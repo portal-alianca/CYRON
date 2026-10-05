@@ -626,8 +626,10 @@ botaoMenu.addEventListener("click", function () { gaveta(!document.body.classLis
 veu.addEventListener("click", function () { gaveta(false); });
 document.addEventListener("keydown", function (e) { if (e.key === "Escape") gaveta(false); });
 /* Tocou num canal, foi para ele: a gaveta sai da frente sozinha. */
-[].forEach.call(document.querySelectorAll(".lateral a, .servidores a"), function (a) {
-  a.addEventListener("click", function () { gaveta(false); });
+/* Um ouvinte só, e não um por link: os servidores de quem entrou são
+   desenhados depois daqui e também precisam fechar a gaveta. */
+document.addEventListener("click", function (e) {
+  if (e.target.closest && e.target.closest(".lateral a, .servidores a")) gaveta(false);
 });
 
 /* ---- os servidores de quem já entrou ----

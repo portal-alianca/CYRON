@@ -107,8 +107,12 @@
     botao.addEventListener("click", function () { gaveta(!raiz.classList.contains("gaveta")); });
     veu.addEventListener("click", function () { gaveta(false); });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") gaveta(false); });
-    [].forEach.call(app.querySelectorAll(".lateral a, .servidores a"), function (a) {
-      a.addEventListener("click", function () { gaveta(false); });
+    /* Um ouvinte só, na casca inteira, e não um por link: os servidores de
+       quem entrou são desenhados DEPOIS desta linha, e um link criado depois
+       ficava sem fechar a gaveta. No painel, trocar de servidor só muda o #
+       (a página não recarrega), então a gaveta ficava aberta por cima. */
+    app.addEventListener("click", function (e) {
+      if (e.target.closest && e.target.closest(".lateral a, .servidores a")) gaveta(false);
     });
 
     /* ---- quem já entrou (o painel guarda isto; ver painel.html) ---- */
