@@ -7201,8 +7201,9 @@ function conferirCartao(onde, embed, componentes = []) {
         if (!meus.has(href.slice(1))) mortos.push(`${pag.nome} → ${href}`);
         continue;
       }
-      /* Âncora noutra página (`./#planos` é a home). */
-      const [alvo, ancora] = href.replace(/^\.\//, "").split("#");
+      /* Âncora noutra página (`./#planos` é a home). Parâmetro de busca
+         (`painel.html?entrar=1`) não muda o arquivo de destino. */
+      const [alvo, ancora] = href.replace(/^\.\//, "").replace(/\?[^#]*/, "").split("#");
       const destino = alvo ? porNome.get(alvo) : porNome.get("index.html");
       if (alvo && !destino) {
         /* Arquivo fora da lista (uma imagem, a pasta de cima): só confiro que
