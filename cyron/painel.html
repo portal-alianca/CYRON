@@ -97,9 +97,11 @@ html[lang="en"] [data-en]{display:revert}
 .conta-barra .bt{padding:6px 12px; font-size:13px}
 .voltar{margin:0 0 6px; font-size:14px}
 .botoes-servidor{display:flex; gap:8px; margin:14px 0}
+.dados a.abrir{color:inherit}
+.dados a.abrir:hover{text-decoration:underline}
 </style>
-<link rel="stylesheet" href="./casca.css">
-<script src="./casca.js" defer></script>
+<link rel="stylesheet" href="./casca.css?v=20261005b">
+<script src="./casca.js?v=20261005b" defer></script>
 </head>
 <body>
 
@@ -267,7 +269,8 @@ function linha(s) {
   }
 
   return '<div class="item' + (s.instalado ? "" : " fora") + '">' + icone +
-    '<div class="dados"><b>' + esc(s.nome) + "</b><small>" + detalhe + "</small></div>" +
+    '<div class="dados"><b>' + (s.guild_id ? '<a class="abrir" href="#g=' + esc(s.guild_id) + '">' + esc(s.nome) + "</a>" : esc(s.nome)) +
+      "</b><small>" + detalhe + "</small></div>" +
     cracha + acao + "</div>";
 }
 
@@ -384,6 +387,7 @@ function barraDaConta(quando) {
 
 window.addEventListener("hashchange", function () {
   if (ULTIMO) { mostrar(ULTIMO[0], ULTIMO[1]); window.scrollTo(0, 0); }
+  else location.reload();
 });
 
 function trocar(code) {
