@@ -183,12 +183,10 @@ img.av{object-fit:cover; background:#000}
 /* ---------- telefone: o Discord do celular ---------- */
 @media (max-width:900px){
   .app{grid-template-columns:minmax(0,1fr)}
-  .servidores,.lateral{display:none}
   .topo-canal{padding:0 12px}
   .topo-canal .tema{display:none}
   .topo-canal .idioma{display:flex; margin-left:auto}
   .topo-canal .bt{margin-left:8px}
-  .faixa-canais{display:flex !important}
   .campos{grid-template-columns:1fr 1fr}
   .anexos figure{max-width:calc(50% - 4px)}
   .anexos img{height:260px}
@@ -196,6 +194,27 @@ img.av{object-fit:cover; background:#000}
   .banner-cel{display:block}
   .inicio-canal h1,.inicio-canal h2{font-size:26px}
   .msg{padding:2px 12px; gap:0 12px}
+}
+/* O menu ☰ do celular: abre a mesma barra de servidores e a mesma lateral
+   de canais do computador, por cima da conversa -- como o Discord do
+   celular faz ao arrastar da esquerda. */
+.menu-bt{display:none; background:none; border:0; color:var(--texto); font-size:22px; line-height:1; padding:6px 8px 6px 0; cursor:pointer}
+.veu{display:none}
+/* Os servidores de quem já entrou em "meus-servidores": ficam na barra da
+   esquerda, como no Discord, e levam ao painel. */
+.servidores .meu{overflow:hidden; background:var(--fundo); color:var(--texto); font-size:14px}
+.servidores .meu img{width:48px; height:48px; display:block}
+.voce .quem{display:flex; align-items:center; gap:6px; min-width:0; color:var(--texto); font-size:13px; font-weight:600}
+.voce .quem img{width:24px; height:24px; border-radius:50%}
+.voce .quem span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+@media (max-width:900px){
+  .menu-bt{display:block}
+  .servidores,.lateral{display:flex; position:fixed; top:0; height:100%; z-index:41; transition:transform .2s ease}
+  .servidores{left:0; width:72px; transform:translateX(-100%); overflow-y:auto}
+  .lateral{left:72px; width:min(280px, calc(100vw - 72px)); transform:translateX(calc(-100% - 72px))}
+  .gaveta .servidores,.gaveta .lateral{transform:none}
+  .gaveta .veu{display:block; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:40}
+  .gaveta{overflow:hidden}
 }
 .faixa-canais{display:none; position:sticky; top:48px; z-index:19; background:var(--lateral); gap:4px; padding:6px 10px; overflow-x:auto; scrollbar-width:none; border-bottom:1px solid var(--linha)}
 .faixa-canais::-webkit-scrollbar{display:none}
@@ -211,17 +230,19 @@ html[lang="en"] [data-en]{display:revert}
 <body>
 
 <div class="app">
+<div class="veu" hidden></div>
 
 <nav class="servidores" aria-label="Servidores">
   <a class="eu" href="./" title="CYRON"><img src="./img/cyron.png" alt="CYRON" width="48" height="48"></a>
   <hr>
+  <div id="meus" hidden></div>
   <a class="outro convite" href="#" title="Adicionar ao Discord / Add to Discord">+</a>
 </nav>
 
 <aside class="lateral">
   <img class="banner" src="./img/banner.jpg" alt="" width="240" height="85">
   <header>CYRON</header>
-  <nav class="canais" aria-label="Canais / Channels">
+  <nav class="canais" id="canais" aria-label="Canais / Channels">
     <div class="categoria"><span data-pt>Comece aqui</span><span data-en>Start here</span></div>
     <a class="canal ativo" href="#boas-vindas"><span data-pt>boas-vindas</span><span data-en>welcome</span></a>
     <a class="canal" href="#funciona"><span data-pt>como-funciona</span><span data-en>how-it-works</span></a>
@@ -236,7 +257,8 @@ html[lang="en"] [data-en]{display:revert}
     <a class="canal fora" href="https://discord.gg/yDwePceB38" rel="noopener"><span data-pt>suporte</span><span data-en>support</span></a>
   </nav>
   <div class="voce">
-    <small><span data-pt>Idioma da página</span><span data-en>Page language</span></small>
+    <a class="quem" id="quem" href="./painel.html" hidden></a>
+    <small id="rotulo-idioma"><span data-pt>Idioma da página</span><span data-en>Page language</span></small>
     <div class="idioma" role="group" aria-label="Idioma / Language">
       <button type="button" data-troca="pt" aria-pressed="true">PT</button>
       <button type="button" data-troca="en" aria-pressed="false">EN</button>
@@ -246,6 +268,7 @@ html[lang="en"] [data-en]{display:revert}
 
 <main class="conversa">
   <div class="topo-canal">
+    <button type="button" class="menu-bt" aria-label="Menu" aria-expanded="false" aria-controls="canais">☰</button>
     <span class="hash">#</span><span id="canal-atual"><span data-pt>boas-vindas</span><span data-en>welcome</span></span>
     <span class="tema"><span data-pt>Bot de tradução para Discord · grátis para sempre</span><span data-en>Translation bot for Discord · free forever</span></span>
     <div class="idioma" role="group" aria-label="Idioma / Language">
@@ -585,6 +608,54 @@ var CONVITE = "https://discord.com/oauth2/authorize?client_id=" + CLIENT_ID +
   "&permissions=" + PERMISSOES + "&scope=bot%20applications.commands";
 
 [].forEach.call(document.querySelectorAll(".convite"), function (a) { a.href = CONVITE; });
+
+/* ---- o menu ☰ do celular ---- */
+var botaoMenu = document.querySelector(".menu-bt");
+var veu = document.querySelector(".veu");
+function gaveta(aberta) {
+  document.body.classList.toggle("gaveta", aberta);
+  veu.hidden = !aberta;
+  botaoMenu.setAttribute("aria-expanded", String(aberta));
+}
+botaoMenu.addEventListener("click", function () { gaveta(!document.body.classList.contains("gaveta")); });
+veu.addEventListener("click", function () { gaveta(false); });
+document.addEventListener("keydown", function (e) { if (e.key === "Escape") gaveta(false); });
+/* Tocou num canal, foi para ele: a gaveta sai da frente sozinha. */
+[].forEach.call(document.querySelectorAll(".lateral a, .servidores a"), function (a) {
+  a.addEventListener("click", function () { gaveta(false); });
+});
+
+/* ---- os servidores de quem já entrou ----
+
+   O painel ("meus-servidores") guarda neste navegador o nome, o avatar e os
+   servidores com a CYRON de quem fez login, e só isso: nada sai daqui, e
+   nenhum token fica guardado. Com isso a barra da esquerda mostra os
+   servidores da pessoa, como no Discord. Depois de 30 dias, some. */
+(function () {
+  var conta = null;
+  try { conta = JSON.parse(localStorage.getItem("cyron-conta") || "null"); } catch (e) { /* modo privado */ }
+  if (!conta || !conta.quando || Date.now() - conta.quando > 30 * 864e5) return;
+  var esc = function (t) { return String(t || "").replace(/[&<>"']/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; }); };
+  var meus = (conta.servidores || []).filter(function (s) { return s.instalado; }).slice(0, 12);
+  if (meus.length) {
+    var caixa = document.getElementById("meus");
+    caixa.innerHTML = meus.map(function (s) {
+      var inicial = esc(String(s.nome || "?").trim().slice(0, 2));
+      return '<a class="meu" href="./painel.html" title="' + esc(s.nome) + '">' +
+        (/^https:\/\/cdn\.discordapp\.com\//.test(s.icone || "") ? '<img src="' + esc(s.icone) + '" alt="' + esc(s.nome) + '" width="48" height="48">' : inicial) +
+        "</a>";
+    }).join("") + "<hr>";
+    caixa.hidden = false;
+    caixa.style.display = "contents";
+  }
+  if (conta.nome) {
+    var quem = document.getElementById("quem");
+    quem.innerHTML = (/^https:\/\/cdn\.discordapp\.com\//.test(conta.avatar || "") ? '<img src="' + esc(conta.avatar) + '" alt="">' : "") +
+      "<span>" + esc(conta.nome) + "</span>";
+    quem.hidden = false;
+    document.getElementById("rotulo-idioma").hidden = true;
+  }
+})();
 
 /* A troca de idioma é CSS, não reescrita de texto: os dois idiomas já estão na
    página, o buscador vê os dois, e a troca é instantânea. */
