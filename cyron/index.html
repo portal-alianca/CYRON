@@ -94,6 +94,15 @@ img.av{object-fit:cover; background:#000}
 .inicio-canal .grande-hash{width:68px; height:68px; border-radius:50%; background:#41434A; display:grid; place-items:center; font-size:40px; color:var(--forte); margin-bottom:8px}
 .inicio-canal h1,.inicio-canal h2{font-size:32px; font-weight:800; color:var(--forte); line-height:1.25}
 .inicio-canal p{color:var(--fraco); margin:6px 0 0}
+/* A CYRON de corpo inteiro, ao lado da primeira mensagem: só em tela larga.
+   O texto e a demo ao lado dela ganham uma margem à direita para não
+   passarem por baixo da figura. */
+.mascote{display:none}
+@media (min-width:1300px){
+  #boas-vindas{position:relative; padding-right:260px}
+  #boas-vindas + .msg{padding-right:260px}
+  .mascote{display:block; position:absolute; right:24px; top:20px; width:auto; height:420px; pointer-events:none; filter:drop-shadow(0 10px 24px rgba(0,0,0,.35)); z-index:1}
+}
 .divisa{display:flex; align-items:center; gap:8px; margin:20px 16px 8px; color:var(--fraquinho); font-size:12px; font-weight:600}
 .divisa::before,.divisa::after{content:""; flex:1; border-top:1px solid var(--borda)}
 
@@ -259,6 +268,7 @@ html[lang="en"] [data-en]{display:revert}
   <!-- ======================= BOAS-VINDAS ======================= -->
   <div id="boas-vindas" class="inicio-canal">
     <img class="banner-cel" src="./img/banner.jpg" alt="" width="960" height="339">
+    <img class="mascote" src="./img/cyron-corpo.webp" alt="A CYRON acenando, com o planetinha ao lado" width="420" height="847">
     <div class="grande-hash">#</div>
     <h1><span data-pt>Um servidor. Todas as línguas.</span><span data-en>One server. Every language.</span></h1>
     <p><span data-pt>Este é o começo do canal #boas-vindas. A CYRON é um bot de tradução para Discord.</span><span data-en>This is the start of the #welcome channel. CYRON is a translation bot for Discord.</span></p>
