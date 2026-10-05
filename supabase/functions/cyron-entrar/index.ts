@@ -22,6 +22,7 @@ const CLIENT_SECRET = Deno.env.get("DISCORD_CLIENT_SECRET") ?? "";
    copia da nossa tela de login, receber o code de um cliente nosso e ler os
    servidores dele daqui. */
 const ORIGENS = new Set([
+  "https://hicyron.github.io",
   "https://portal-alianca.github.io",
   "http://localhost:8000",
   "http://127.0.0.1:8000",

@@ -10605,7 +10605,7 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("servidor grátis leva a linha do CYRON", /CYRON/.test(I.rodapeDeDivulgacao({ plano: "gratis" })));
   ok("quem paga não carrega propaganda", I.rodapeDeDivulgacao({ plano: "pago" }), "");
   ok("sem servidor, sem linha", I.rodapeDeDivulgacao(null), "");
-  verdade("a linha é miúda e leva ao site", /^\n-# 🌐 \[CYRON\]\(https:\/\/portal-alianca\.github\.io\/cyron\/\)/.test(I.rodapeDeDivulgacao({})));
+  verdade("a linha é miúda e leva ao site", /^\n-# 🌐 \[CYRON\]\(https:\/\/hicyron\.github\.io\/\)/.test(I.rodapeDeDivulgacao({})));
   verdade("as regras falam dos números de verdade",
     I.regrasDaIndicacao().includes(String(I.INDICACAO.usoTraducoes)) && I.regrasDaIndicacao().includes(String(I.INDICACAO.membrosMin)));
 

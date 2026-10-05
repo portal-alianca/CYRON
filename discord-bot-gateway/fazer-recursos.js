@@ -114,6 +114,9 @@ export function pagina() {
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
+<script>/* endereço antigo → hicyron.github.io (mesma página, mesmos parâmetros) */
+if (location.hostname === "portal-alianca.github.io") location.replace("https://hicyron.github.io" + location.pathname.replace(/^\\/cyron/, "") + location.search + location.hash);
+</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CYRON — tudo que ele faz</title>

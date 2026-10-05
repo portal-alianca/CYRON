@@ -4263,9 +4263,9 @@ function planoDe(servidor) {
 
 /* A data, se ela ainda esta no futuro. Nula quando ja venceu -- assim o plano
    cai sozinho no dia seguinte, sem nada precisar rodar pra derrubar. */
-function venceEm(quando) {
+function venceEm(quando, agora = Date.now()) {
   const t = quando ? Date.parse(quando) : 0;
-  return t && t > Date.now() ? t : 0;
+  return t && t > agora ? t : 0;
 }
 
 /* Idiomas que alguem escolheu e que nao couberam no plano.
@@ -13260,7 +13260,7 @@ async function embedDoDinheiro() {
       { name: "Em teste", value: String(por.teste.length), inline: true },
       { name: "Liberados na mão", value: String(por.liberado.length), inline: true },
       { name: "⏰ Vencem em 7 dias", value: lista(vencendo, ({ s, ate }) =>
-          `• ${nome(s)} — ${quandoFoi(ate, "R")}${venceEm(s.pago_ate) ? "" : " _(teste)_"}`) },
+          `• ${nome(s)} — ${quandoFoi(ate, "R")}${venceEm(s.pago_ate, agora) ? "" : " _(teste)_"}`) },
       { name: "💸 Não renovaram (30 dias)", value: lista(perdidos, (s) =>
           `• ${nome(s)} — venceu ${quandoFoi(Date.parse(s.pago_ate), "R")}`) },
       { name: "🎟️ Códigos", value: `${livres} livres · ${usados} usados em 30 dias`, inline: true },
@@ -14367,9 +14367,9 @@ async function destaquesDoDia(dia, agora = Date.now()) {
   }
   for (const s of lista) {
     if (s.saiu_em) continue;
-    const ate = venceEm(s.pago_ate) || venceEm(s.teste_ate);
+    const ate = venceEm(s.pago_ate, agora) || venceEm(s.teste_ate, agora);
     if (ate && ate - agora <= 3 * 864e5) {
-      olhar.push(`⏰ **${nome(s.id)}** vence ${quandoFoi(ate, "R")}${venceEm(s.pago_ate) ? "" : " _(teste)_"}`);
+      olhar.push(`⏰ **${nome(s.id)}** vence ${quandoFoi(ate, "R")}${venceEm(s.pago_ate, agora) ? "" : " _(teste)_"}`);
     }
   }
   if (olhar.length) campos.push({ name: "🚩 Para olhar", value: olhar.slice(0, 10).join("\n").slice(0, 1024) });
@@ -15752,7 +15752,7 @@ function paginaDoMembro(souAdmin) {
    num servidor que me tem ("escolha seu idioma, suas salas aparecem"); este
    fala com quem talvez nem tenha servidor, e precisa entender o que eu sou
    antes de qualquer instrucao. */
-const SITE_DO_CYRON = "https://portal-alianca.github.io/cyron/";
+const SITE_DO_CYRON = "https://hicyron.github.io/";
 
 /* O servidor de suporte: onde um cliente fala com o dono sem expor o perfil
    pessoal dele. No Discord, mensagem direta so' chega entre quem divide um
