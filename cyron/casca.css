@@ -26,6 +26,7 @@ html.casca header.barra{display:none}
 .casca .servidores a:hover{border-radius:14px}
 .casca .servidores img{width:48px; height:48px; display:block}
 .casca .servidores .meu{background:var(--fundo); color:var(--texto); font-size:14px}
+.casca .servidores .meu.ativo{border-radius:14px; box-shadow:0 0 0 2px var(--c-forte)}
 .casca .servidores .outro{background:var(--fundo); color:var(--verde); font-size:24px; font-weight:400; border-radius:50%}
 .casca .servidores .outro:hover{background:var(--verde); color:#fff; border-radius:16px}
 .casca .servidores hr{width:32px; border:0; border-top:2px solid var(--fundo); margin:0}

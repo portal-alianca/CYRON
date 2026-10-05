@@ -120,12 +120,18 @@
     if (meus.length) {
       var caixa = app.querySelector("#meus");
       caixa.innerHTML = meus.map(function (s) {
-        return '<a class="meu" href="./painel.html" title="' + esc(s.nome) + '">' +
+        return '<a class="meu' + (pagina === "painel" && location.hash === "#g=" + s.id ? " ativo" : "") + '" href="./painel.html' + (s.id ? "#g=" + esc(s.id) : "") + '" title="' + esc(s.nome) + '">' +
           (doDiscord(s.icone) ? '<img src="' + esc(s.icone) + '" alt="' + esc(s.nome) + '" width="48" height="48">'
             : esc(String(s.nome || "?").trim().slice(0, 2))) + "</a>";
       }).join("") + "<hr>";
       caixa.hidden = false;
       caixa.style.display = "contents";
+      /* No painel, o servidor aberto fica marcado na barra, como no Discord. */
+      window.addEventListener("hashchange", function () {
+        [].forEach.call(caixa.querySelectorAll(".meu"), function (m) {
+          m.classList.toggle("ativo", pagina === "painel" && m.getAttribute("href") === "./painel.html" + location.hash);
+        });
+      });
     }
     if (conta.nome) {
       var foto = doDiscord(conta.avatar) ? '<img src="' + esc(conta.avatar) + '" alt="">' : "";

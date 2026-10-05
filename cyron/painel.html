@@ -95,6 +95,8 @@ html[lang="en"] [data-en]{display:revert}
 .conta-barra{display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; font-size:13px; color:var(--texto-fraco); margin:16px 0 14px}
 .conta-barra span{margin-right:auto}
 .conta-barra .bt{padding:6px 12px; font-size:13px}
+.voltar{margin:0 0 6px; font-size:14px}
+.botoes-servidor{display:flex; gap:8px; margin:14px 0}
 </style>
 <link rel="stylesheet" href="./casca.css">
 <script src="./casca.js" defer></script>
@@ -161,6 +163,9 @@ function sortear() {
 
 function entrar() {
   var estado = sortear();
+  /* O Discord volta para VOLTA, sem o #g=: guardo o servidor escolhido
+     para reabrir nele depois do login. */
+  try { sessionStorage.setItem("cyron-volta", servidorDoEndereco()); } catch (e) { /* segue sem */ }
   try { sessionStorage.setItem("cyron-estado", estado); }
   catch (e) {
     return mostrarErro(pt(
@@ -289,7 +294,31 @@ function haQuanto(ms) {
   return pt("há " + h + " h", h + " h ago");
 }
 
+var ULTIMO = null; // [dados, quando] da última tela, para trocar de servidor sem recarregar
+
+/* O servidor escolhido na barra da esquerda vem no endereço: #g=<id>. */
+function servidorDoEndereco() {
+  var m = /^#g=(\d{5,25})$/.exec(location.hash || "");
+  return m ? m[1] : "";
+}
+
+function telaDoServidor(s, quando) {
+  var discord = "https://discord.com/channels/" + encodeURIComponent(s.guild_id);
+  tela.innerHTML =
+    '<p class="voltar"><a href="#">← ' + pt("Todos os servidores", "All servers") + "</a></p>" +
+    "<h1>" + esc(s.nome) + "</h1>" +
+    '<div class="lista">' + linha(s) + "</div>" +
+    (s.instalado
+      ? '<div class="botoes-servidor"><a class="bt bt-2" href="' + discord + '">' + pt("Abrir no Discord", "Open in Discord") + "</a></div>" +
+        '<div class="aviso calmo">' + pt(
+          "Idiomas, salas e chaves deste servidor se ajustam pelo próprio Discord: use /cyron no servidor.",
+          "Languages, rooms and keys for this server are set inside Discord: use /cyron in the server.") + "</div>"
+      : "");
+  setTimeout(function () { barraDaConta(quando); }, 0);
+}
+
 function mostrar(dados, quando) {
+  ULTIMO = [dados, quando];
   var u = dados.usuario || {};
   if (!quando) {
     try { localStorage.setItem("cyron-painel", JSON.stringify({ quando: Date.now(), dados: dados })); }
@@ -302,7 +331,7 @@ function mostrar(dados, quando) {
     localStorage.setItem("cyron-conta", JSON.stringify({
       quando: Date.now(), nome: u.nome || "", avatar: u.avatar || "",
       servidores: (dados.servidores || []).map(function (s) {
-        return { nome: s.nome || "", icone: s.icone || "", instalado: !!s.instalado };
+        return { id: s.guild_id || "", nome: s.nome || "", icone: s.icone || "", instalado: !!s.instalado };
       }),
     }));
   } catch (e) { /* modo privado: a barra só não mostra os servidores */ }
@@ -321,6 +350,10 @@ function mostrar(dados, quando) {
         pt("Adicionar a CYRON a um servidor", "Add CYRON to a server") + "</a></div>";
     return;
   }
+
+  var escolhido = servidorDoEndereco();
+  var este = escolhido && lista.filter(function (s) { return String(s.guild_id) === escolhido; })[0];
+  if (este) return telaDoServidor(este, quando);
 
   var comBot = lista.filter(function (s) { return s.instalado; }).length;
   setTimeout(function () { barraDaConta(quando); }, 0);
@@ -349,6 +382,10 @@ function barraDaConta(quando) {
   document.getElementById("sair").addEventListener("click", sair);
 }
 
+window.addEventListener("hashchange", function () {
+  if (ULTIMO) { mostrar(ULTIMO[0], ULTIMO[1]); window.scrollTo(0, 0); }
+});
+
 function trocar(code) {
   fetch(FUNCAO, {
     method: "POST",
@@ -361,7 +398,12 @@ function trocar(code) {
         return j;
       });
     })
-    .then(mostrar)
+    .then(function (dados) {
+      var g = "";
+      try { g = sessionStorage.getItem("cyron-volta") || ""; sessionStorage.removeItem("cyron-volta"); } catch (e) { /* idem */ }
+      if (g) history.replaceState(null, "", VOLTA + "#g=" + g);
+      mostrar(dados);
+    })
     .catch(function (e) { mostrarErro(e.message || pt("Falhei ao falar com o servidor.", "Failed to reach the server.")); });
 }
 
