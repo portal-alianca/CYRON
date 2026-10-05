@@ -660,6 +660,7 @@ document.addEventListener("keydown", function (e) { if (e.key === "Escape") gave
     entrar.innerHTML = (/^https:\/\/cdn\.discordapp\.com\//.test(conta.avatar || "") ? '<img src="' + esc(conta.avatar) + '" alt="" width="20" height="20" style="border-radius:50%">' : "") +
       '<span class="nome-conta">' + esc(conta.nome) + '</span>';
     entrar.title = "Meus servidores / My servers";
+    entrar.href = "./painel.html";
     var quem = document.getElementById("quem");
     quem.innerHTML = (/^https:\/\/cdn\.discordapp\.com\//.test(conta.avatar || "") ? '<img src="' + esc(conta.avatar) + '" alt="">' : "") +
       "<span>" + esc(conta.nome) + "</span>";

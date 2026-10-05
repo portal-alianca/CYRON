@@ -120,7 +120,7 @@
     if (meus.length) {
       var caixa = app.querySelector("#meus");
       caixa.innerHTML = meus.map(function (s) {
-        return '<a class="meu" href="./painel.html?entrar=1" title="' + esc(s.nome) + '">' +
+        return '<a class="meu" href="./painel.html" title="' + esc(s.nome) + '">' +
           (doDiscord(s.icone) ? '<img src="' + esc(s.icone) + '" alt="' + esc(s.nome) + '" width="48" height="48">'
             : esc(String(s.nome || "?").trim().slice(0, 2))) + "</a>";
       }).join("") + "<hr>";
@@ -134,7 +134,8 @@
       quem.hidden = false;
       app.querySelector("#rotulo-conta").hidden = true;
       var b = app.querySelector("#entrar");
-      if (b) { b.innerHTML = foto + "<span>" + esc(conta.nome) + "</span>"; b.title = "Meus servidores / My servers"; }
+      quem.href = "./painel.html";
+      if (b) { b.innerHTML = foto + "<span>" + esc(conta.nome) + "</span>"; b.title = "Meus servidores / My servers"; b.href = "./painel.html"; }
     }
   }
 

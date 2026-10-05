@@ -92,6 +92,9 @@ footer nav{margin-left:auto; display:flex; gap:18px; flex-wrap:wrap}
 [data-en]{display:none}
 html[lang="en"] [data-pt]{display:none}
 html[lang="en"] [data-en]{display:revert}
+.conta-barra{display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; font-size:13px; color:var(--texto-fraco); margin:16px 0 14px}
+.conta-barra span{margin-right:auto}
+.conta-barra .bt{padding:6px 12px; font-size:13px}
 </style>
 <link rel="stylesheet" href="./casca.css">
 <script src="./casca.js" defer></script>
@@ -263,8 +266,35 @@ function linha(s) {
     cracha + acao + "</div>";
 }
 
-function mostrar(dados) {
+/* A lista do último login fica guardada neste navegador por um dia: voltar
+   a esta página (pela barra, por um link) mostra ela na hora, sem pedir o
+   Discord de novo. Fica o que esta tela mostra -- nada de token. O botão
+   "Atualizar" refaz o login quando a pessoa quer os dados de agora. */
+var VALE_POR = 24 * 3600e3;
+function lerGuardado() {
+  try {
+    var g = JSON.parse(localStorage.getItem("cyron-painel") || "null");
+    if (g && g.dados && Date.now() - g.quando < VALE_POR) return g;
+  } catch (e) { /* modo privado */ }
+  return null;
+}
+function sair() {
+  try { localStorage.removeItem("cyron-painel"); localStorage.removeItem("cyron-conta"); } catch (e) { /* idem */ }
+  location.href = "./";
+}
+function haQuanto(ms) {
+  var min = Math.max(1, Math.round((Date.now() - ms) / 60000));
+  if (min < 60) return pt("há " + min + " min", min + " min ago");
+  var h = Math.round(min / 60);
+  return pt("há " + h + " h", h + " h ago");
+}
+
+function mostrar(dados, quando) {
   var u = dados.usuario || {};
+  if (!quando) {
+    try { localStorage.setItem("cyron-painel", JSON.stringify({ quando: Date.now(), dados: dados })); }
+    catch (e) { /* modo privado: só não lembra até a próxima visita */ }
+  }
   /* O site mostra os servidores da pessoa na barra da esquerda, como o
      Discord. Guarda só o que aparece lá -- nome, avatar e os servidores --,
      neste navegador e em mais lugar nenhum. Nenhum token entra aqui. */
@@ -293,6 +323,7 @@ function mostrar(dados) {
   }
 
   var comBot = lista.filter(function (s) { return s.instalado; }).length;
+  setTimeout(function () { barraDaConta(quando); }, 0);
   tela.innerHTML =
     '<h1>' + pt("Seus servidores", "Your servers") + "</h1>" +
     '<p class="sub">' + (comBot
@@ -306,6 +337,17 @@ function mostrar(dados) {
 }
 
 /* ---------------- a volta do Discord ---------------- */
+
+function barraDaConta(quando) {
+  var barra = document.createElement("div");
+  barra.className = "conta-barra";
+  barra.innerHTML = '<span>' + pt("Atualizado ", "Updated ") + haQuanto(quando || Date.now()) + "</span>" +
+    '<button type="button" class="bt bt-2" id="atualizar">🔄 ' + pt("Atualizar", "Refresh") + "</button>" +
+    '<button type="button" class="bt bt-2" id="sair">' + pt("Sair", "Sign out") + "</button>";
+  tela.insertBefore(barra, tela.firstChild);
+  document.getElementById("atualizar").addEventListener("click", entrar);
+  document.getElementById("sair").addEventListener("click", sair);
+}
 
 function trocar(code) {
   fetch(FUNCAO, {
@@ -336,11 +378,14 @@ function trocar(code) {
   }
   /* Veio do botão "Entrar" do site: vai direto para o Discord, sem a tela
      intermediária com outro botão "Entrar" para apertar. */
-  if (!code && q.get("entrar") === "1") {
-    history.replaceState(null, "", VOLTA);
-    return entrar();
+  if (!code) {
+    var g = lerGuardado();
+    if (q.get("entrar") === "1") history.replaceState(null, "", VOLTA);
+    /* Já entrou há pouco: mostra o que guardou, sem outra volta ao Discord. */
+    if (g) return mostrar(g.dados, g.quando);
+    if (q.get("entrar") === "1") return entrar();
+    return telaDeEntrada();
   }
-  if (!code) return telaDeEntrada();
 
   var guardado = null;
   try { guardado = sessionStorage.getItem("cyron-estado"); } catch (e) { /* modo privado */ }
