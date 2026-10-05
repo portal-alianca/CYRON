@@ -760,7 +760,10 @@ async function canaisEspelho(servidorId) {
    sobreviveu ao bloqueio, e um dia o bloqueio pode chegar aqui tambem. */
 /* Acima disso nao vale guardar: mensagem longa e' quase sempre unica, e
    encheria a tabela com frase que nunca mais sera lida. */
-const MAX_CACHE = 400;
+/* 800 e' o teto do que vai traduzido pro canal (porQueNaoTraduzir): o aviso
+   de evento que a alianca repete toda semana mora entre 400 e 800, e era
+   justamente o que pagava de novo a cada vez -- e nas vinte linguas. */
+const MAX_CACHE = 800;
 
 async function doCache(chave) {
   try {
@@ -1145,7 +1148,7 @@ async function usoDoMes(servidorId, hoje = hojeISO()) {
    perguntado pelo que a memoria nao viu. Tres mil traducoes curtas sao menos
    de um mega. */
 const traducoesNaMemoria = new Map(); // chave -> traducao, a mais recente por ultimo
-const MAX_NA_MEMORIA = 3000;
+const MAX_NA_MEMORIA = 10000; // ~2 MB: barato perto de uma ida ao banco por fala
 
 function lembrarTraducao(chave, traduzido) {
   traducoesNaMemoria.delete(chave);
@@ -1155,7 +1158,27 @@ function lembrarTraducao(chave, traduzido) {
   }
 }
 
+/* Espaco sobrando nao muda a traducao, e mudava a chave: "bom dia " e
+   "bom  dia" pagavam cada um a sua. No meio, espacos repetidos viram um --
+   quebra de linha fica, porque ela separa as linhas de um aviso e o
+   tradutor a respeita. Texto que ja vinha limpo tem a mesma chave de antes,
+   entao o que o banco guardou continua valendo. */
+function textoDoCache(texto) {
+  return String(texto ?? "").trim().replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n");
+}
+
 async function traduzirComCache(texto, alvo, motor = MOTOR_AUTO) {
+  /* As bordas voltam como vieram: ha quem traduza pedacos de uma frase e
+     cole um no outro, e o espaco da emenda nao pode sumir no caminho. */
+  const bruto = String(texto ?? "");
+  const nucleo = textoDoCache(bruto);
+  if (!nucleo) return bruto;
+  const antes = bruto.match(/^\s*/)[0], depois = bruto.match(/\s*$/)[0];
+  const saiu = await traduzirNucleo(nucleo, alvo, motor);
+  return saiu ? antes + saiu + depois : saiu;
+}
+
+async function traduzirNucleo(texto, alvo, motor) {
   if (texto.length > MAX_CACHE) return await traduzir(texto, alvo, motor);
 
   /* O motor entra na chave do cache.
