@@ -8602,6 +8602,16 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("os comandos novos são de todos", /COMANDOS_DE_TODOS = new Set\([^)]*"sorteio", "abraco", "beijo", "tapa", "cafune"/.test(f));
 }
 
+/* ============ o elenco do Duelo ============ */
+{
+  const elenco = await import(`${aqui}/duelo-elenco.js`);
+  ok("o elenco inteiro respeita os moldes de equilíbrio", elenco.problemasDoElenco(), []);
+  ok("12 personagens", elenco.PERSONAGENS.length, 12);
+  ok("os níveis vão de 1 a 10", elenco.NIVEIS_DO_PERSONAGEM.length, 10);
+  verdade("um golpe fora do molde é reprovado", elenco.problemasDoElenco([{ ...elenco.PERSONAGENS[0],
+    kit: { ...elenco.PERSONAGENS[0].kit, especial: [{ emoji: "💥", nome: "Forte demais", dano: 60, efeito: null }, elenco.PERSONAGENS[0].kit.especial[1]] } }]).length === 1);
+}
+
 /* A IMAGEM TRADUZIDA (🖼️ Ver na imagem).
  *
  * O print volta com o texto trocado no lugar. O desenho aqui roda DE VERDADE,
