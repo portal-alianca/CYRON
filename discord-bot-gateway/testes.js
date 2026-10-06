@@ -8777,10 +8777,23 @@ function conferirCartao(onde, embed, componentes = []) {
     const FONTE = new URL("./fontes/DejaVuSans-Bold.ttf", import.meta.url).pathname;
     const pasta = new URL("./img/duelo/", import.meta.url).pathname;
     const c = carregar(["soLetrasDaFonte", "temLetra", "FONTES_LIDAS", "fonteDoDesenho", "DU_LARGURA", "DU_ALTURA", "DU_FOTO_L",
-      "DU_FOTO_A", "textoCentradoEm", "desenharDuelo"]);
-    const jpg = await c.desenharDuelo(sharp, P("cleopatra"), P("napoleao"), pasta, FONTE);
+      "DU_FOTO_A", "DU_TOPO", "DU_MARGEM", "xDoLado", "textoCentradoEm", "desenharDuelo", "corDaVida", "desenharQuadroDoDuelo",
+      "DUELO_VIDA", "DUELO_ENERGIA_MAX"]);
+    const base = await c.desenharDuelo(sharp, P("cleopatra"), P("napoleao"), pasta, FONTE, [3, 1]);
+    const jpg = await c.desenharQuadroDoDuelo(sharp, base, [{ hp: 64, en: 50 }, { hp: 12, en: 100 }], 0, null, FONTE);
     const meta = await sharp(jpg).metadata();
-    ok("o cartaz sai em 1024x480", [meta.width, meta.height], [1024, 480]);
+    ok("o cartaz sai em 1024x540", [meta.width, meta.height], [1024, 540]);
+    const fim = await c.desenharQuadroDoDuelo(sharp, base, [{ hp: 0, en: 0 }, { hp: 30, en: 20 }], 0, 1, FONTE);
+    verdade("o quadro do fim também sai", fim.length > 0);
+    /* A barra de vida tem que mudar de verdade: o pixel no meio da barra e'
+       verde com 64 e escuro (vazio) com 12. */
+    const pixel = async (img, x, y) => [...(await sharp(img).extract({ left: x, top: y, width: 1, height: 1 }).raw().toBuffer())];
+    const yVida = c.DU_TOPO + c.DU_FOTO_A + 58 + 6;
+    const [r1, g1] = await pixel(jpg, c.xDoLado(0) - 20 + 150, yVida);
+    const [r2, g2] = await pixel(jpg, c.xDoLado(1) - 20 + 150, yVida);
+    verdade(`a vida de 64 aparece cheia até o meio (${r1},${g1})`, g1 > 150 && g1 > r1);
+    verdade(`a vida de 12 aparece vazia no meio (${r2},${g2})`, g2 < 90);
+    ok("vida baixa fica vermelha", c.corDaVida(10), "#E74C3C");
     for (const p of elenco.PERSONAGENS) {
       const r = await sharp(`${pasta}${p.id}.jpg`).metadata().catch(() => null);
       verdade(`retrato de ${p.id} existe em 384x512`, r?.width === 384 && r?.height === 512);
@@ -8789,6 +8802,9 @@ function conferirCartao(onde, embed, componentes = []) {
     ok("todo retrato tem crédito", elenco.PERSONAGENS.filter((p) => !creditos.includes(`${p.id}.jpg`)).map((p) => p.id), []);
     const tela = m.telaDoDuelo(Object.assign(duelo(), { limite: 0, imagem: true }));
     ok("a tela aponta para o anexo", tela.embeds[0].image.url, "attachment://duelo.jpg");
+    verdade("com o quadro, as barras saem do texto", !tela.embeds[0].description.includes("▰"));
+    const semImagem = m.telaDoDuelo(Object.assign(duelo(), { limite: 0, imagem: false }));
+    verdade("sem o quadro, as barras voltam para o texto", semImagem.embeds[0].description.includes("▰"));
   }
 
   const idx = readFileSync(`${aqui}/index.js`, "utf8");
