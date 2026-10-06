@@ -10439,6 +10439,220 @@ async function comandoXp(inter) {
     allowedMentions: { parse: [] } });
 }
 
+/* ---------------- /sorteio ----------------
+
+   O botao "Participar" e' igual em qualquer lingua, e sorteio e' o que faz
+   gente chamar gente para o servidor. Tudo em simbolo (🎁 ⏰ 🏆 🎉): o
+   cartao nao precisa de tradutor nenhum.
+
+   Quem participa fica numa tabela propria (uma linha por pessoa e sorteio),
+   e o sorteio encerrado some depois de 30 dias. A ronda de um minuto encerra
+   os que venceram -- reinicio no meio nao perde sorteio, porque a hora de
+   acabar esta' no banco e nao num relogio do processo. */
+const SORTEIO_MIN = 60;                 // segundos
+const SORTEIO_MAX = 30 * 24 * 3600;
+const SORTEIO_GANHADORES_MAX = 20;
+
+function cartaoDoSorteio(s, agora = Date.now()) {
+  const fim = Math.floor(new Date(s.termina_em).getTime() / 1000);
+  const vencedores = Array.isArray(s.vencedores) ? s.vencedores : [];
+  const acabou = !!s.encerrado;
+  return {
+    color: acabou ? 0x9aa0a6 : 0xEB459E,
+    title: `🎁 ${String(s.premio).slice(0, 240)}`,
+    description: acabou
+      ? `🏆 ${vencedores.length ? vencedores.map((id) => `<@${id}>`).join(" ") : "😶 —"}\n⏰ <t:${fim}:f>`
+      : `⏰ <t:${fim}:R> · <t:${fim}:f>\n🏆 × ${s.ganhadores}\n👤 <@${s.criado_por}>`,
+    footer: { text: "CYRON" },
+  };
+}
+
+function botoesDoSorteio(s, quantos = 0) {
+  const linha = [{ type: 2, custom_id: `sorteio:entrar:${s.id}`, style: s.encerrado ? 2 : 1, emoji: { name: "🎉" },
+    label: String(quantos), disabled: !!s.encerrado }];
+  if (s.encerrado) linha.push({ type: 2, custom_id: `sorteio:refazer:${s.id}`, style: 2, emoji: { name: "🔁" } });
+  return [{ type: 1, components: linha }];
+}
+
+/* Sorteio justo: embaralha com o gerador de numeros do sistema (nao o
+   Math.random) e pega os primeiros. Puro, para o teste. */
+function sortear(ids, quantos, aleatorio = (n) => crypto.getRandomValues(new Uint32Array(1))[0] % n) {
+  const lista = [...new Set(ids.map(String))];
+  for (let i = lista.length - 1; i > 0; i--) {
+    const j = aleatorio(i + 1);
+    [lista[i], lista[j]] = [lista[j], lista[i]];
+  }
+  return lista.slice(0, Math.max(0, quantos));
+}
+
+async function participantes(sorteioId) {
+  return ((await sb(`cyron_sorteio_entrada?sorteio_id=eq.${Number(sorteioId)}&select=user_id`).catch(() => null)) || [])
+    .map((l) => String(l.user_id));
+}
+
+async function comandoSorteio(inter) {
+  await inter.deferReply({ flags: 64 });
+  const idioma = await linguaDe(inter);
+  const premio = String(inter.options.getString("premio") || "").trim().slice(0, 200);
+  const dur = duracaoDoTexto(inter.options.getString("duracao"));
+  const ganhadores = Math.min(SORTEIO_GANHADORES_MAX, Math.max(1, inter.options.getInteger("ganhadores") || 1));
+  if (!premio || dur === null || dur < SORTEIO_MIN || dur > SORTEIO_MAX) {
+    const [t] = await nalingua(idioma, inter.guildId, "Não entendi a duração. Exemplos: 30m · 2h · 1d12h · 7d (de 1 minuto a 30 dias).");
+    return inter.editReply({ content: `⏰ ${t}` });
+  }
+  const linha = { guild_id: inter.guildId, canal_id: inter.channelId, premio, ganhadores,
+    termina_em: new Date(Date.now() + dur * 1000).toISOString(), criado_por: inter.user.id };
+  const criado = await sbPost("cyron_sorteio", linha).catch((e) => { console.error("sorteio: nao gravei:", e?.message || e); return null; });
+  const s = Array.isArray(criado) ? criado[0] : criado;
+  if (!s?.id) return inter.editReply({ content: "❌" });
+  const msg = await inter.channel.send({ embeds: [cartaoDoSorteio(s)], components: botoesDoSorteio(s, 0),
+    allowedMentions: { parse: [] } }).catch(() => null);
+  if (!msg) {
+    await sbDel(`cyron_sorteio?id=eq.${s.id}`).catch(() => {});
+    const [t] = await nalingua(idioma, inter.guildId, "Não consegui mandar mensagem neste canal. Confira minhas permissões aqui.");
+    return inter.editReply({ content: `⚠️ ${t}` });
+  }
+  await sbPatch(`cyron_sorteio?id=eq.${s.id}`, { msg_id: msg.id }).catch(() => {});
+  const [ok] = await nalingua(idioma, inter.guildId, "Sorteio criado.");
+  return inter.editReply({ content: `🎁 ${ok} ${msg.url}` });
+}
+
+async function cliqueSorteio(inter) {
+  const [, acao, id] = inter.customId.split(":");
+  const idioma = await linguaDe(inter);
+  const s = (await sb(`cyron_sorteio?id=eq.${Number(id)}&select=*`).catch(() => null))?.[0];
+  if (!s) return inter.reply({ flags: 64, content: "😶" });
+
+  if (acao === "refazer") {
+    if (!inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+      const [t] = await nalingua(idioma, inter.guildId, "Só quem administra o servidor pode sortear de novo.");
+      return inter.reply({ flags: 64, content: t });
+    }
+    await inter.deferUpdate();
+    return encerrarSorteio(inter.guild, s, true);
+  }
+
+  if (s.encerrado || new Date(s.termina_em).getTime() <= Date.now()) {
+    const [t] = await nalingua(idioma, inter.guildId, "Este sorteio já acabou.");
+    return inter.reply({ flags: 64, content: `⏰ ${t}` });
+  }
+  /* Tocar de novo sai: um botao so' para entrar e desistir. */
+  const ja = (await sb(`cyron_sorteio_entrada?sorteio_id=eq.${s.id}&user_id=eq.${inter.user.id}&select=user_id`).catch(() => null))?.length;
+  if (ja) await sbDel(`cyron_sorteio_entrada?sorteio_id=eq.${s.id}&user_id=eq.${inter.user.id}`).catch(() => {});
+  else await sbPost("cyron_sorteio_entrada", { sorteio_id: s.id, user_id: inter.user.id }, "resolution=ignore-duplicates").catch(() => {});
+  const quantos = (await participantes(s.id)).length;
+  const [entrou, saiu] = await nalingua(idioma, inter.guildId, "Você está participando! Toque de novo para sair.", "Você saiu do sorteio.");
+  await inter.reply({ flags: 64, content: ja ? `👋 ${saiu}` : `🎉 ${entrou}` });
+  await inter.message.edit({ components: botoesDoSorteio(s, quantos) }).catch(() => {});
+}
+
+/* Encerra: sorteia, mostra no cartao e anuncia marcando so' quem ganhou. */
+async function encerrarSorteio(guild, s, deNovo = false) {
+  const ids = await participantes(s.id);
+  const vencedores = sortear(ids, s.ganhadores);
+  await sbPatch(`cyron_sorteio?id=eq.${s.id}`, { encerrado: true, vencedores });
+  const fechado = { ...s, encerrado: true, vencedores };
+  const canal = guild.channels.cache.get(String(s.canal_id));
+  if (!canal) return;
+  const msg = s.msg_id ? await canal.messages.fetch(String(s.msg_id)).catch(() => null) : null;
+  if (msg) await msg.edit({ embeds: [cartaoDoSorteio(fechado)], components: botoesDoSorteio(fechado, ids.length) }).catch(() => {});
+  await canal.send({
+    content: vencedores.length
+      ? `${deNovo ? "🔁 " : ""}🎉 ${vencedores.map((v) => `<@${v}>`).join(" ")} · 🎁 **${String(s.premio).slice(0, 200)}**`
+      : `😶 🎁 **${String(s.premio).slice(0, 200)}** · 👥 0`,
+    allowedMentions: { users: vencedores },
+    ...(msg ? { reply: { messageReference: msg.id, failIfNotExists: false } } : {}),
+  }).catch((e) => console.error("sorteio: nao anunciei:", e?.message || e));
+}
+
+let rondasDoSorteio = 0;
+async function rodarSorteios(agora = Date.now()) {
+  const vencidos = await sb(`cyron_sorteio?encerrado=eq.false&termina_em=lte.${new Date(agora).toISOString()}&select=*&limit=20`)
+    .catch(() => null) || [];
+  for (const s of vencidos) {
+    const guild = client.guilds.cache.get(String(s.guild_id));
+    if (!guild) continue;
+    await encerrarSorteio(guild, s).catch((e) => console.error("sorteio: nao encerrei:", e?.message || e));
+  }
+  /* De hora em hora, o que acabou ha' mais de 30 dias sai do banco (as
+     entradas vao junto, em cascata). */
+  if (++rondasDoSorteio % 60 === 0) {
+    await sbDel(`cyron_sorteio?encerrado=eq.true&termina_em=lt.${new Date(agora - 30 * 864e5).toISOString()}`).catch(() => {});
+  }
+}
+
+/* ---------------- interacoes com GIF ----------------
+
+   /abraco, /beijo, /tapa, /cafune: o GIF de anime e o nome da acao na lingua
+   de quem mandou E na de quem recebeu, lado a lado -- escritos aqui, uma
+   vez, sem tradutor. E' o que fez o Nekotina chegar a quatro milhoes de
+   servidores, com o tempero da CYRON: cada um le na sua lingua. */
+const INTERACOES = {
+  abraco: { reacao: "hug", emoji: "🤗", nomes: { pt: "Abraço", en: "Hug", es: "Abrazo", fr: "Câlin", de: "Umarmung", it: "Abbraccio",
+    ru: "Объятие", uk: "Обійми", pl: "Uścisk", tr: "Sarılma", nl: "Knuffel", id: "Pelukan", vi: "Cái ôm", tl: "Yakap",
+    ko: "포옹", ja: "ハグ", "zh-CN": "拥抱", ar: "عناق", hi: "झप्पी", th: "กอด" } },
+  beijo: { reacao: "kiss", emoji: "💋", nomes: { pt: "Beijo", en: "Kiss", es: "Beso", fr: "Bisou", de: "Kuss", it: "Bacio",
+    ru: "Поцелуй", uk: "Поцілунок", pl: "Buziak", tr: "Öpücük", nl: "Kus", id: "Ciuman", vi: "Nụ hôn", tl: "Halik",
+    ko: "뽀뽀", ja: "キス", "zh-CN": "亲亲", ar: "قبلة", hi: "चुंबन", th: "จูบ" } },
+  tapa: { reacao: "slap", emoji: "👋", nomes: { pt: "Tapa", en: "Slap", es: "Bofetada", fr: "Gifle", de: "Ohrfeige", it: "Schiaffo",
+    ru: "Пощёчина", uk: "Ляпас", pl: "Plaskacz", tr: "Tokat", nl: "Klap", id: "Tamparan", vi: "Cái tát", tl: "Sampal",
+    ko: "따귀", ja: "ビンタ", "zh-CN": "巴掌", ar: "صفعة", hi: "थप्पड़", th: "ตบ" } },
+  cafune: { reacao: "pat", emoji: "🫳", nomes: { pt: "Cafuné", en: "Headpat", es: "Caricia", fr: "Caresse", de: "Streicheln", it: "Carezza",
+    ru: "Поглаживание", uk: "Погладжування", pl: "Głaskanie", tr: "Okşama", nl: "Aai", id: "Elusan", vi: "Xoa đầu", tl: "Haplos",
+    ko: "쓰담쓰담", ja: "なでなで", "zh-CN": "摸摸头", ar: "تربيت", hi: "सहलाना", th: "ลูบหัว" } },
+};
+
+/* O nome da acao nas linguas de quem mandou, de quem recebeu, e em ingles
+   (a lingua que sobra quando ninguem escolheu). Sem repetir. Puro. */
+function nomesDaInteracao(chave, ...linguas) {
+  const it = INTERACOES[chave];
+  if (!it) return [];
+  const fora = [];
+  for (const l of [...linguas, "en"]) {
+    const n = it.nomes[l] || it.nomes[String(l || "").split("-")[0]];
+    if (n && !fora.includes(n)) fora.push(n);
+  }
+  return fora;
+}
+
+/* O GIF: otakugifs, e o purrbot se o primeiro falhar. Nenhum dos dois pede
+   chave. Sem GIF, a interacao sai assim mesmo -- so' sem a imagem. */
+async function gifDaInteracao(reacao) {
+  const tentativas = [
+    [`https://api.otakugifs.xyz/gif?reaction=${reacao}`, (j) => j?.url],
+    [`https://purrbot.site/api/img/sfw/${reacao}/gif`, (j) => j?.link],
+  ];
+  for (const [url, pega] of tentativas) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (!r.ok) continue;
+      const g = pega(await r.json());
+      if (/^https:\/\/\S+\.(gif|webp|png)$/i.test(String(g || ""))) return g;
+    } catch { /* tenta o proximo */ }
+  }
+  return null;
+}
+
+async function comandoInteracao(inter, chave) {
+  const it = INTERACOES[chave];
+  await inter.deferReply();
+  const alvo = inter.options.getMember("membro");
+  const alvoUser = inter.options.getUser("membro");
+  if (!alvoUser) return inter.editReply({ content: "—" });
+  const [minha, dele] = await Promise.all([linguaDe(inter), idiomaEscolhido(alvoUser.id).catch(() => "")]);
+  const gif = await gifDaInteracao(it.reacao);
+  const limpo = (t) => String(t || "").replace(/([*_`~|>\\])/g, "\\$1");
+  const de = limpo(inter.member?.displayName || inter.user.username);
+  const para = limpo(alvo?.displayName || alvoUser.username);
+  const marcar = alvoUser.id !== inter.user.id && !alvoUser.bot;
+  return inter.editReply({
+    content: marcar ? `<@${alvoUser.id}>` : "",
+    embeds: [{ color: 0xEB459E, title: `${it.emoji} ${nomesDaInteracao(chave, minha, dele).join(" · ")}`,
+      description: `**${de}** → **${para}**`, ...(gif ? { image: { url: gif } } : {}) }],
+    allowedMentions: { users: marcar ? [alvoUser.id] : [] },
+  });
+}
+
 /* A terceira camada: quem escreveu antes de tocar em qualquer botão.
 
    E aqui a oferta vai NA LÍNGUA DELA, que é o ponto inteiro. Um convite em
@@ -17776,6 +17990,10 @@ async function comandoDeInteracao(inter) {
   if (nome === "admin") return comandoAdmin(inter);
   if (nome === "arena") return inter.reply({ flags: 64, content: ARENA_ENCERRADA });
   if (nome === "hora") return comandoHora(inter);
+  if (nome === "sorteio" || INTERACOES[nome]) {
+    if (!inter.guildId) return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
+    return nome === "sorteio" ? comandoSorteio(inter) : comandoInteracao(inter, nome);
+  }
   if (nome === "perfil" || nome === "top" || nome === "niveis" || nome === "xp") {
     if (!inter.guildId) return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
     return nome === "perfil" ? comandoPerfil(inter) : nome === "top" ? comandoTop(inter)
@@ -17915,6 +18133,9 @@ client.on("interactionCreate", async (inter) => {
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("evento:")) {
       return await cliqueEvento(inter);
+    }
+    if (inter.isMessageComponent() && inter.customId.startsWith("sorteio:")) {
+      return await cliqueSorteio(inter);
     }
     if ((inter.isMessageComponent() || inter.isModalSubmit()) && inter.customId.startsWith("nv:")) {
       return await cliqueNiveis(inter);
@@ -18495,7 +18716,8 @@ client.on("messageReactionAdd", async (reacao, quem) => {
    A lista diz "nao mexa nisto", e nao "todo mundo usa". Sem ele aqui,
    separarComandos leria /admin como comando do jogo e o empurraria pros
    servidores com alianca -- exatamente o contrario do que ele e'. */
-const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento", "hora", "boas-vindas", "perfil", "top", "niveis", "xp"]);
+const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento", "hora", "boas-vindas", "perfil", "top", "niveis", "xp",
+  "sorteio", "abraco", "beijo", "tapa", "cafune"]);
 
 async function separarComandos() {
   try {
@@ -18930,6 +19152,7 @@ async function janelaDeComando(existente) {
 const NOMES_MEUS = new Set([
   "cyron", "help", "admin", "mylanguage", "arena", "evento", "settings", "portal", "player", "events", "ranking",
   "hora", "time", "boas-vindas", "welcome-card", "perfil", "profile", "top", "niveis", "levels", "xp",
+  "sorteio", "giveaway", "abraco", "hug", "beijo", "kiss", "tapa", "slap", "cafune", "pat",
 ]);
 
 /* Uma linha do formulario que carrega duas respostas: "todos 60".
@@ -19619,6 +19842,49 @@ const GLOBAIS_DO_CYRON = [
     ],
   },
   {
+    /* De quem administra: sorteio e' do servidor, nao de qualquer um. */
+    name: "sorteio",
+    nameLocalizations: { "en-US": "giveaway", "en-GB": "giveaway", "es-ES": "sorteo" },
+    description: "Criar um sorteio com botão / Start a giveaway",
+    descriptionLocalizations: { "en-US": "Start a giveaway with a button", "en-GB": "Start a giveaway with a button",
+      "es-ES": "Crear un sorteo con botón", "pt-BR": "Criar um sorteio com botão" },
+    defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
+    dmPermission: false,
+    options: [
+      { type: 3, name: "premio", required: true, max_length: 200, description: "O prêmio / The prize" },
+      { type: 3, name: "duracao", required: true, max_length: 20, description: "Quanto tempo: 30m · 2h · 1d · 7d / How long" },
+      { type: 4, name: "ganhadores", required: false, min_value: 1, max_value: 20, description: "Quantos ganham (padrão 1) / Winners (default 1)" },
+    ],
+  },
+  {
+    name: "abraco",
+    nameLocalizations: { "en-US": "hug", "en-GB": "hug", "es-ES": "abrazo" },
+    description: "Dar um abraço / Give a hug",
+    dmPermission: false,
+    options: [{ type: 6, name: "membro", required: true, description: "Em quem / Who" }],
+  },
+  {
+    name: "beijo",
+    nameLocalizations: { "en-US": "kiss", "en-GB": "kiss", "es-ES": "beso" },
+    description: "Dar um beijo / Give a kiss",
+    dmPermission: false,
+    options: [{ type: 6, name: "membro", required: true, description: "Em quem / Who" }],
+  },
+  {
+    name: "tapa",
+    nameLocalizations: { "en-US": "slap", "en-GB": "slap", "es-ES": "bofetada" },
+    description: "Dar um tapa / Slap someone",
+    dmPermission: false,
+    options: [{ type: 6, name: "membro", required: true, description: "Em quem / Who" }],
+  },
+  {
+    name: "cafune",
+    nameLocalizations: { "en-US": "pat", "en-GB": "pat", "es-ES": "caricia" },
+    description: "Fazer cafuné / Headpat someone",
+    dmPermission: false,
+    options: [{ type: 6, name: "membro", required: true, description: "Em quem / Who" }],
+  },
+  {
     name: "perfil",
     nameLocalizations: { "en-US": "profile", "en-GB": "profile", "es-ES": "perfil" },
     description: "Seu cartão: nível, XP e posição / Your card: level, XP and rank",
@@ -20231,6 +20497,7 @@ client.once("clientReady", () => {
     sincronizarRecentes().catch((e) => console.error("espelho: passada curta falhou:", e?.message || e));
     descarregarUso().catch((e) => console.error("uso: descarga falhou:", e?.message || e));
     rodarXpDeVoz().catch((e) => console.error("niveis: voz falhou:", e?.message || e));
+    rodarSorteios().catch((e) => console.error("sorteio: ronda falhou:", e?.message || e));
     descarregarXp().catch((e) => console.error("niveis: descarga falhou:", e?.message || e));
     /* A agenda precisa do minuto: lembrete "10 min antes" numa ronda de dez
        em dez chegaria na hora do evento. */

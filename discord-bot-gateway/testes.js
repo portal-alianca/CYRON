@@ -5605,7 +5605,7 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("muito atrasado não marca ninguém", /agora - t <= AVISO_ATRASADO/.test(ronda));
   verdade("a ronda não roda duas vezes por cima de si mesma", /if \(agendaRodando\) return/.test(ronda));
   verdade("e roda de minuto em minuto",
-    /setInterval\(\(\) => \{[^]{0,400}rodarAgendaDeEventos\(\)[^]{0,120}\}, 60 \* 1000\)/.test(f));
+    /setInterval\(\(\) => \{[^]{0,800}rodarAgendaDeEventos\(\)[^]{0,120}\}, 60 \* 1000\)/.test(f));
 
   const aviso = f.slice(f.indexOf("async function avisarNaHora"), f.indexOf("async function rodarAgendaDeEventos"));
   verdade("na hora sai um aviso NOVO marcando (editar não faz o celular apitar)",
@@ -8560,6 +8560,46 @@ function conferirCartao(onde, embed, componentes = []) {
     /COMANDOS_DE_TODOS = new Set\([^)]*"perfil", "top", "niveis"/.test(f));
   verdade("o /niveis é só de quem administra", /name: "niveis",[^]{0,700}defaultMemberPermissions: PermissionFlagsBits\.ManageGuild/.test(f));
   verdade("o anúncio de nível só marca quem subiu", /content: textoDeNivel\([^]{0,200}allowedMentions: \{ users: \[userId\] \}/.test(f));
+}
+
+/* ============ /sorteio e interações ============ */
+{
+  const s = carregar(["SORTEIO_MIN", "SORTEIO_MAX", "SORTEIO_GANHADORES_MAX", "cartaoDoSorteio", "botoesDoSorteio", "sortear",
+    "INTERACOES", "nomesDaInteracao"]);
+  const base = { id: 7, premio: "Nitro", ganhadores: 2, termina_em: "2026-10-07T12:00:00Z", criado_por: "1", encerrado: false };
+  const c = s.cartaoDoSorteio(base);
+  verdade("o cartão é só símbolo e o Discord desenha a hora no relógio de cada um",
+    c.title === "🎁 Nitro" && c.description.includes("<t:1791374400:R>"));
+  ok("o botão mostra quantos participam", s.botoesDoSorteio(base, 12)[0].components[0].label, "12");
+  ok("e não tem 🔁 enquanto está aberto", s.botoesDoSorteio(base, 12)[0].components.length, 1);
+  const fim = { ...base, encerrado: true, vencedores: ["5", "6"] };
+  verdade("encerrado: mostra quem ganhou, desliga o botão e oferece 🔁",
+    s.cartaoDoSorteio(fim).description.includes("<@5> <@6>") && s.botoesDoSorteio(fim)[0].components[0].disabled === true &&
+    s.botoesDoSorteio(fim)[0].components[1].custom_id === "sorteio:refazer:7");
+  verdade("sem ninguém: 😶", s.cartaoDoSorteio({ ...base, encerrado: true, vencedores: [] }).description.includes("😶"));
+
+  const gente = ["a", "b", "c", "d", "e"];
+  ok("sorteia a quantidade pedida", s.sortear(gente, 2).length, 2);
+  ok("sem repetir ninguém", new Set(s.sortear([...gente, ...gente], 5)).size, 5);
+  ok("mais ganhadores que gente: todo mundo ganha", s.sortear(["a", "b"], 5).sort(), ["a", "b"]);
+  ok("ninguém participando: ninguém ganha", s.sortear([], 3), []);
+  const contagem = { a: 0, b: 0, c: 0 };
+  for (let i = 0; i < 3000; i++) contagem[s.sortear(["a", "b", "c"], 1)[0]]++;
+  verdade("justo: cada um ganha mais ou menos 1/3 das vezes", Object.values(contagem).every((n) => n > 850 && n < 1150));
+
+  ok("interação: a língua de quem mandou, a de quem recebeu e inglês", s.nomesDaInteracao("abraco", "pt", "ru"), ["Abraço", "Объятие", "Hug"]);
+  ok("sem repetir quando é a mesma língua", s.nomesDaInteracao("beijo", "en", "en"), ["Kiss"]);
+  ok("língua desconhecida cai no inglês", s.nomesDaInteracao("tapa", "xx", ""), ["Slap"]);
+  for (const k of Object.keys(s.INTERACOES)) {
+    ok(`${k}: as 20 línguas do menu têm nome`, Object.keys(s.INTERACOES[k].nomes).length, 20);
+  }
+
+  const f = readFileSync(`${aqui}/index.js`, "utf8");
+  verdade("o sorteio encerra na ronda de um minuto", /rodarSorteios\(\)\.catch/.test(f));
+  verdade("o anúncio só marca quem ganhou", /allowedMentions: \{ users: vencedores \}/.test(f));
+  verdade("o /sorteio é só de quem administra", /name: "sorteio",[^]{0,500}defaultMemberPermissions: PermissionFlagsBits\.ManageGuild/.test(f));
+  verdade("o 🔁 é conferido no clique", /acao === "refazer"[^]{0,200}memberPermissions\?\.has\(PermissionFlagsBits\.ManageGuild\)/.test(f));
+  verdade("os comandos novos são de todos", /COMANDOS_DE_TODOS = new Set\([^)]*"sorteio", "abraco", "beijo", "tapa", "cafune"/.test(f));
 }
 
 /* A IMAGEM TRADUZIDA (🖼️ Ver na imagem).
