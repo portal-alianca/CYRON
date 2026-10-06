@@ -8800,6 +8800,24 @@ function conferirCartao(onde, embed, componentes = []) {
     }
     const creditos = readFileSync(`${pasta}CREDITOS.md`, "utf8");
     ok("todo retrato tem crédito", elenco.PERSONAGENS.filter((p) => !creditos.includes(`${p.id}.jpg`)).map((p) => p.id), []);
+    /* A ficha do /codex, desenhada de verdade com as fontes do repositorio. */
+    const fi = carregar(["ESPACOS_ORDEM", "kitEquipado", "FI_LARGURA", "FI_ALTURA", "FI_TINTA", "FI_SEPIA", "descricaoDaHabilidade",
+      "linhasDoTexto", "escreverEm", "enfeite", "tituloDeSecao", "desenharFicha"]);
+    const fontesDaFicha = Object.fromEntries(Object.entries({ titulo: "Cinzel_700Bold", livro: "EBGaramond_400Regular",
+      italico: "EBGaramond_400Regular_Italic", negrito: "EBGaramond_700Bold" }).map(([k, v]) => [k, new URL(`./fontes/${v}.ttf`, import.meta.url).pathname]));
+    for (const [nome, liberadas] of [["cleopatra", 6], ["musashi", 0], ["zumbi", 10]]) {
+      const ficha = await fi.desenharFicha(sharp, { p: P(nome), nivel: Math.max(1, liberadas), xp: 0, vitorias: 1, derrotas: 2,
+        kit: fi.kitEquipado(P(nome), Math.max(1, liberadas), {}), liberadas }, pasta, fontesDaFicha);
+      const mf = await sharp(ficha).metadata();
+      ok(`a ficha de ${nome} sai em 900x1350`, [mf.width, mf.height], [900, 1350]);
+    }
+    ok("a habilidade se explica numa linha", fi.descricaoDaHabilidade({ dano: 18, efeito: "queimar" }), "18 de dano · queima 5 por 2 turnos");
+    ok("defesa sem dano", fi.descricaoDaHabilidade({ dano: 0, efeito: "escudo" }), "escudo de 25 até a próxima vez");
+    const fonteLivro = await c.fonteDoDesenho(fontesDaFicha.livro);
+    verdade("as fontes da ficha têm os acentos (ã ç ū)", [..."ãçūéô"].every((l) => fonteLivro.charToGlyphIndex(l) > 0));
+    for (const lic of ["LICENCA-Cinzel.txt", "LICENCA-EBGaramond.txt"]) {
+      verdade(`${lic} acompanha a fonte`, /Open Font License/.test(readFileSync(new URL(`./fontes/${lic}`, import.meta.url), "utf8")));
+    }
     const tela = m.telaDoDuelo(Object.assign(duelo(), { limite: 0, imagem: true }));
     ok("a tela aponta para o anexo", tela.embeds[0].image.url, "attachment://duelo.jpg");
     verdade("com o quadro, as barras saem do texto", !tela.embeds[0].description.includes("▰"));
