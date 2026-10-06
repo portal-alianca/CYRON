@@ -563,10 +563,14 @@ function idiomaDaBandeira(emoji) {
 
    So' quando a fala foi traduzida de fato (o selo tem seta): na propria
    lingua nao ha' o que creditar. */
+const NOME_MIUDO = "ᶜʸʳᵒⁿ";
 function creditoDaCyron(selo) {
   const id = typeof client !== "undefined" ? client?.user?.id : null;
   if (!id || !String(selo || "").includes("→")) return "";
-  return ` · [CYRON](https://discord.com/users/${id})`;
+  /* Em letras sobrescritas: o "-#" ja' e' o menor tamanho que o Discord
+     desenha, e o nome em tamanho de texto ainda chamava mais atencao que a
+     propria assinatura de quem falou. */
+  return ` · [${NOME_MIUDO}](https://discord.com/users/${id})`;
 }
 
 function seloDeOrigem(idiomaOrigem, idiomaDestino, traduziu) {
