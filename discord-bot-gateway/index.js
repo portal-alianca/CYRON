@@ -10909,12 +10909,13 @@ async function progressoDoDuelista(userId, personagemId) {
   return r?.[0] || { xp: 0, kit: {}, vitorias: 0, derrotas: 0 };
 }
 
-/* O PAINEL DO DUELO (/duelo sem oponente): so' quem pediu ve. Tres abas,
-   cada uma com o seu card:
+/* O PAINEL DO DUELO (/duelo sem oponente): so' quem pediu ve. Duas abas,
+   cada uma com o seu card, e o botao de duelar:
      🦸 Herois      -- a ficha de cada heroi, ◀ ▶ para passar, ⭐ para usar
      ✨ Habilidades -- as oito do heroi, equipada em dourado, trancada com o
                        criterio; um botao por espaco troca uma pela outra
-     ⚔️ Duelar      -- treino, desafio aberto ou alguem escolhido
+     ⚔️ Duelar      -- publica o desafio no canal: qualquer um aceita, ou
+                       quem desafiou treina contra a CYRON
    So' o duelo em si vai para o canal. */
 const heroisAtivos = new Map();   // userId -> id do heroi
 const cardsDoPainel = new Map();  // chave -> imagem (os ultimos desenhados)
@@ -10963,7 +10964,8 @@ async function progressoDeTodos(userId) {
 function abasDoPainel(aba, idx) {
   const aba1 = (id, emoji, label) => ({ type: 2, custom_id: `dp:aba:${id}:${idx}`, style: aba === id ? 1 : 2,
     emoji: { name: emoji }, label, disabled: aba === id });
-  return { type: 1, components: [aba1("herois", "🦸", "Heróis"), aba1("hab", "✨", "Habilidades"), aba1("duelar", "⚔️", "Duelar")] };
+  return { type: 1, components: [aba1("herois", "🦸", "Heróis"), aba1("hab", "✨", "Habilidades"),
+    { type: 2, custom_id: `dp:duelar:${idx}`, style: 3, emoji: { name: "⚔️" }, label: "Duelar" }] };
 }
 
 /* A tela inteira do painel. Monta o card certo e os botoes da aba. */
@@ -10978,7 +10980,8 @@ async function telaDoPainel(userId, aba, idx, aviso = "") {
   const duelou = (Number(r?.vitorias) || 0) + (Number(r?.derrotas) || 0) > 0;
   const escolha = r?.kit || {};
   const linhas = [];
-  let card = null, nomeDoCard = "card.jpg";
+  let card = null;
+  const nomeDoCard = "card.jpg";
   const navegar = (destino) => [
     { type: 2, custom_id: `dp:aba:${destino}:${idx - 1}`, style: 2, emoji: { name: "◀️" } },
     { type: 2, custom_id: `dp:nada:${idx}`, style: 2, label: `${idx + 1} / ${total}`, disabled: true },
@@ -10986,7 +10989,8 @@ async function telaDoPainel(userId, aba, idx, aviso = "") {
   ];
   const linhasDeBotoes = [];
 
-  if (aba === "herois") {
+  if (aba !== "hab") {
+    aba = "herois";
     card = await cardDoPainel(`ficha:${p.id}:${xp}:${r?.vitorias || 0}:${r?.derrotas || 0}:${JSON.stringify(escolha)}`,
       (sharp) => desenharFicha(sharp, { p, nivel, xp, vitorias: Number(r?.vitorias) || 0, derrotas: Number(r?.derrotas) || 0,
         kit: kitEquipado(p, nivel, escolha), liberadas: duelou ? nivel : 0 }));
@@ -11011,25 +11015,6 @@ async function telaDoPainel(userId, aba, idx, aviso = "") {
         emoji: { name: trancada ? "🔒" : "🔄" }, label: trancada ? `${nomes[espaco]} · Nv ${libera}` : nomes[espaco], disabled: trancada };
     }) });
     linhasDeBotoes.push({ type: 1, components: navegar("hab") });
-  } else {
-    const h = personagemPorId(ativo);
-    const ra = todos.find((x) => x.personagem === h.id);
-    const nivelAtivo = nivelDoPersonagem(Number(ra?.xp) || 0);
-    card = await cardDoPainel(`ficha:${h.id}:${Number(ra?.xp) || 0}:${ra?.vitorias || 0}:${ra?.derrotas || 0}:${JSON.stringify(ra?.kit || {})}`,
-      (sharp) => desenharFicha(sharp, { p: h, nivel: nivelAtivo, xp: Number(ra?.xp) || 0, vitorias: Number(ra?.vitorias) || 0,
-        derrotas: Number(ra?.derrotas) || 0, kit: kitEquipado(h, nivelAtivo, ra?.kit || {}),
-        liberadas: (Number(ra?.vitorias) || 0) + (Number(ra?.derrotas) || 0) > 0 ? nivelAtivo : 0 }));
-    linhas.push(`Seu herói: ${h.bandeira} **${h.nome}** · Nível ${nivelAtivo}`, "",
-      "🤖 **Treinar**: contra a CYRON, na hora. Vale menos XP.",
-      "📣 **Desafio aberto**: qualquer pessoa do canal pode aceitar.",
-      "👤 **Desafiar alguém**: escolha a pessoa na lista.",
-      "-# O duelo aparece no canal para todos verem. Trocar de herói: aba 🦸.");
-    linhasDeBotoes.push({ type: 1, components: [
-      { type: 2, custom_id: `dp:treinar:${idx}`, style: 1, emoji: { name: "🤖" }, label: "Treinar" },
-      { type: 2, custom_id: `dp:aberto:${idx}`, style: 3, emoji: { name: "📣" }, label: "Desafio aberto" },
-    ] });
-    linhasDeBotoes.push({ type: 1, components: [{ type: 5, custom_id: `dp:alvo:${idx}`, placeholder: "👤 Desafiar alguém…", min_values: 1, max_values: 1 }] });
-    nomeDoCard = "heroi.jpg";
   }
   if (aviso) linhas.push("", aviso);
   linhasDeBotoes.push(abasDoPainel(aba, idx));
@@ -11060,7 +11045,7 @@ async function cliqueDoPainel(inter) {
   const p = PERSONAGENS[((idx % PERSONAGENS.length) + PERSONAGENS.length) % PERSONAGENS.length];
 
   /* dp:aba:<aba>:<heroi> */
-  if (acao === "aba") return inter.editReply(await telaDoPainel(eu, ["herois", "hab", "duelar"].includes(idxTxt) ? idxTxt : "herois", extra));
+  if (acao === "aba") return inter.editReply(await telaDoPainel(eu, idxTxt === "hab" ? "hab" : "herois", extra));
   if (acao === "usar") {
     await usarHeroi(eu, p.id);
     return inter.editReply(await telaDoPainel(eu, "herois", idx, `⭐ ${p.curto} ${await fala("agora é o seu herói.")}`));
@@ -11078,50 +11063,26 @@ async function cliqueDoPainel(inter) {
     return inter.editReply(await telaDoPainel(eu, "hab", idx));
   }
 
-  /* Daqui para baixo, o duelo vai para o canal. */
-  if (!inter.guildId) return inter.editReply(await telaDoPainel(eu, "duelar", idx, `⚠️ ${await fala("O duelo só funciona dentro de um servidor.")}`));
-  if (duelistaEm.has(eu)) return inter.editReply(await telaDoPainel(eu, "duelar", idx, `⚠️ ${await fala("Você já está num duelo. Termine ele primeiro.")}`));
+  /* ⚔️ Duelar: o desafio vai para o canal. */
+  if (acao !== "duelar") return;
+  if (!inter.guildId) return inter.editReply(await telaDoPainel(eu, "herois", idx, `⚠️ ${await fala("O duelo só funciona dentro de um servidor.")}`));
+  if (duelistaEm.has(eu)) return inter.editReply(await telaDoPainel(eu, "herois", idx, `⚠️ ${await fala("Você já está num duelo. Termine ele primeiro.")}`));
   const heroi = personagemPorId(await heroiAtivo(eu));
+  const estado = novoDuelo(inter, [{ userId: eu, nome }, null], { 0: heroi.id }, { fixo: { 0: true } });
   /* No canal, a' vista de todos. Sem permissao de mandar ali (app
      instalado so' pela pessoa), vai como resposta publica da interacao. */
-  const publicar = async (conteudo) => {
-    const noCanal = await inter.channel?.send(conteudo).catch(() => null);
-    if (noCanal) return noCanal;
-    return await inter.followUp({ ...conteudo, flags: 0 }).catch((e) => { console.error("duelo: nao publiquei:", e?.message || e); return null; });
-  };
-
-  if (acao === "treinar") {
-    const outros = PERSONAGENS.filter((x) => x.id !== heroi.id);
-    const estado = novoDuelo(inter, [{ userId: eu, nome }, { bot: true }],
-      { 0: heroi.id, 1: outros[Math.floor(Math.random() * outros.length)].id }, { treino: true, fixo: { 0: true } });
-    estado.msg = await publicar({ content: `⚔️ <@${eu}> vai treinar com ${heroi.bandeira} **${heroi.curto}** contra 🤖 CYRON…`, allowedMentions: { parse: [] } });
-    if (!estado.msg) return cancelarDuelo(estado.id);
-    estado.comecando = true;
-    await comecarDuelo(estado);
-    return inter.editReply(await telaDoPainel(eu, "duelar", idx, `✅ ${await fala("Treino aberto no canal.")}`));
+  const conteudo = { content: `⚔️ <@${eu}> quer duelar com ${heroi.bandeira} **${heroi.curto}**! Quem aceita?\n-# O desafio fica aberto por 2 minutos.`,
+    components: [{ type: 1, components: [
+      { type: 2, custom_id: `duelo:aceitar:${estado.id}`, style: 3, emoji: { name: "⚔️" }, label: "Aceitar" },
+      { type: 2, custom_id: `duelo:treino:${estado.id}`, style: 2, emoji: { name: "🤖" }, label: "Treinar com a CYRON" },
+    ] }], allowedMentions: { parse: [] } };
+  estado.msg = await inter.channel?.send(conteudo).catch(() => null) ||
+    await inter.followUp({ ...conteudo, flags: 0 }).catch((e) => { console.error("duelo: nao publiquei:", e?.message || e); return null; });
+  if (!estado.msg) {
+    cancelarDuelo(estado.id);
+    return inter.editReply(await telaDoPainel(eu, "herois", idx, `⚠️ ${await fala("Não consegui mandar o desafio neste canal.")}`));
   }
-  if (acao === "aberto") {
-    const estado = novoDuelo(inter, [{ userId: eu, nome }, null], { 0: heroi.id }, { fixo: { 0: true } });
-    estado.msg = await publicar({ content: `📣 <@${eu}> desafia quem tiver coragem, com ${heroi.bandeira} **${heroi.curto}**!\\n-# O desafio fica aberto por 2 minutos.`,
-      components: [{ type: 1, components: [{ type: 2, custom_id: `duelo:aceitar:${estado.id}`, style: 3, emoji: { name: "⚔️" }, label: "Aceitar o desafio" }] }],
-      allowedMentions: { parse: [] } });
-    if (!estado.msg) return cancelarDuelo(estado.id);
-    return inter.editReply(await telaDoPainel(eu, "duelar", idx, `✅ ${await fala("Desafio aberto no canal. Agora é esperar alguém aceitar.")}`));
-  }
-  if (acao === "alvo") {
-    const alvoId = inter.values?.[0];
-    const alvo = alvoId ? inter.users?.get?.(alvoId) || await inter.client.users.fetch(alvoId).catch(() => null) : null;
-    if (!alvo || alvo.id === eu || alvo.bot) {
-      return inter.editReply(await telaDoPainel(eu, "duelar", idx, `⚠️ ${await fala("Escolha outra pessoa (nem você, nem um bot). Para treinar contra a CYRON, use 🤖 Treinar.")}`));
-    }
-    if (duelistaEm.has(alvo.id)) return inter.editReply(await telaDoPainel(eu, "duelar", idx, `⚠️ ${await fala("Essa pessoa já está num duelo agora.")}`));
-    const nomeAlvo = inter.members?.get?.(alvo.id)?.displayName || alvo.globalName || alvo.username;
-    const estado = novoDuelo(inter, [{ userId: eu, nome }, { userId: alvo.id, nome: nomeAlvo }], { 0: heroi.id }, { fixo: { 0: true } });
-    estado.msg = await publicar({ content: `⚔️ <@${eu}> desafiou <@${alvo.id}> para um duelo, com ${heroi.bandeira} **${heroi.curto}**!\\n-# <@${alvo.id}>, escolha o seu herói abaixo.`,
-      components: escolhaDePersonagem(estado.id, nomeAlvo), allowedMentions: { users: [alvo.id] } });
-    if (!estado.msg) return cancelarDuelo(estado.id);
-    return inter.editReply(await telaDoPainel(eu, "duelar", idx, `✅ ${await fala("Desafio enviado no canal.")}`));
-  }
+  return inter.editReply(await telaDoPainel(eu, "herois", idx, `✅ ${await fala("Seu desafio está no canal!")}`));
 }
 
 async function comandoDuelo(inter) {
@@ -11183,7 +11144,7 @@ async function cliqueDuelo(inter) {
   /* Desafio aberto: o primeiro que aceitar entra na vaga. */
   if (acao === "aceitar") {
     if (estado.pessoas[0].userId === inter.user.id) return inter.reply({ flags: 64, content: `⚔️ ${await fala("Esse desafio é seu: espere alguém aceitar.")}` });
-    if (estado.pessoas[1]) return inter.reply({ flags: 64, content: `⚔️ ${await fala("Alguém já aceitou esse desafio.")}` });
+    if (estado.pessoas[1] || estado.comecando) return inter.reply({ flags: 64, content: `⚔️ ${await fala("Alguém já aceitou esse desafio.")}` });
     if (duelistaEm.has(inter.user.id)) return inter.reply({ flags: 64, content: `⚔️ ${await fala("Você já está num duelo. Termine ele primeiro.")}` });
     estado.pessoas[1] = { userId: inter.user.id, nome: inter.member?.displayName || inter.user.username };
     duelistaEm.set(inter.user.id, id);
@@ -11192,6 +11153,18 @@ async function cliqueDuelo(inter) {
     const h = personagemPorId(estado.escolhas[0]);
     return inter.update({ content: `⚔️ <@${inter.user.id}> aceitou o desafio de <@${estado.pessoas[0].userId}> (${h.bandeira} **${h.curto}**)!\n-# <@${inter.user.id}>, escolha o seu herói abaixo.`,
       components: escolhaDePersonagem(id, estado.pessoas[1].nome), allowedMentions: { parse: [] } });
+  }
+  /* 🤖 no desafio: so' quem desafiou, e so' enquanto ninguem aceitou. */
+  if (acao === "treino") {
+    if (estado.pessoas[0].userId !== inter.user.id) return inter.reply({ flags: 64, content: `🤖 ${await fala("Só quem desafiou pode treinar com a CYRON. Para duelar, toque em Aceitar.")}` });
+    if (estado.pessoas[1] || estado.comecando) return inter.deferUpdate();
+    const outros = PERSONAGENS.filter((x) => x.id !== estado.escolhas[0]);
+    estado.pessoas[1] = { bot: true };
+    estado.escolhas[1] = outros[Math.floor(Math.random() * outros.length)].id;
+    estado.treino = true;
+    estado.comecando = true;
+    await inter.deferUpdate();
+    return comecarDuelo(estado);
   }
   const indice = estado.pessoas.findIndex((p) => p?.userId === inter.user.id);
   if (indice < 0) {
