@@ -8408,6 +8408,8 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("e nunca passa de 2000 letras", tx.textoDeBoasVindas("{ola}".repeat(300), { ...quem, ola: "x".repeat(50) }).length <= 2000);
 
   const f = readFileSync(`${aqui}/index.js`, "utf8");
+  verdade("a janela explica os marcadores lá dentro (texto do Discord, tipo 10)",
+    /custom_id: "bv:janela"[^]{0,200}type: 10, content:[^]{0,200}\{usuario\}[^]{0,300}type: 18, label:/.test(f));
   verdade("o ✏️ é só de quem administra (checado no clique)",
     /async function cliqueBoasVindas[^]{0,400}memberPermissions\?\.has\(PermissionFlagsBits\.ManageGuild\)/.test(f));
   verdade("a mensagem do administrador só marca quem chegou, mesmo com @everyone no texto",

@@ -9805,12 +9805,27 @@ async function cliqueBoasVindas(inter) {
   if (!servidor) return inter.reply({ flags: 64, content: "Ainda não terminei de me instalar aqui." });
 
   if (acao === "editar") {
-    const [rotulo] = await nalingua(idioma, inter.guildId, "Mensagem de boas-vindas");
+    /* A explicacao mora DENTRO da janela (texto do Discord, tipo 10): quem
+       abre para editar nao tem a mensagem do bot na frente, e um marcador
+       que ninguem explicou e' um marcador que ninguem usa. So' as frases
+       passam pelo tradutor -- o marcador fica intacto, entre crases. */
+    const [rotulo, nota, titulo, marca, nome, serv, num, ola, cartao] = await nalingua(idioma, inter.guildId,
+      "Mensagem de boas-vindas",
+      "Só quem chegou é notificado, mesmo com @everyone no texto.",
+      "Marcadores: trocados na hora, para cada pessoa que entra",
+      "marca quem chegou", "o nome da pessoa", "o nome do servidor", "o número de membro",
+      "o bem-vindo em todas as línguas do servidor",
+      "O cartão com a foto vai junto, embaixo da mensagem.");
     return inter.showModal({
       custom_id: "bv:janela", title: "👋",
-      components: [{ type: 1, components: [{ type: 4, custom_id: "texto", label: rotulo.slice(0, 45), style: 2,
-        required: true, max_length: BV_TEXTO_MAX, placeholder: "{usuario} {nome} {servidor} {numero} {ola}",
-        value: String(servidor.boas_vindas_texto || BV_TEXTO_PADRAO).slice(0, BV_TEXTO_MAX) }] }],
+      components: [
+        { type: 10, content: `**${titulo}**\n\`{usuario}\` ${marca}\n\`{nome}\` ${nome}\n\`{servidor}\` ${serv}\n` +
+          `\`{numero}\` ${num}\n\`{ola}\` ${ola}\n-# ${cartao}` },
+        { type: 18, label: rotulo.slice(0, 45), description: nota.slice(0, 100),
+          component: { type: 4, custom_id: "texto", style: 2, required: true, max_length: BV_TEXTO_MAX,
+            placeholder: "{usuario} {nome} {servidor} {numero} {ola}",
+            value: String(servidor.boas_vindas_texto || BV_TEXTO_PADRAO).slice(0, BV_TEXTO_MAX) } },
+      ],
     });
   }
 
