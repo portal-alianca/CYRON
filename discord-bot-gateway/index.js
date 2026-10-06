@@ -9561,8 +9561,8 @@ const SAUDACOES = {
 const SAUDACOES_SO_NO_TEXTO = {
   ar: "أهلاً وسهلاً", hi: "स्वागत है", th: "ยินดีต้อนรับ", ja: "ようこそ", ko: "환영합니다", "zh-CN": "欢迎",
 };
-const BV_LARGURA = 960;
-const BV_ALTURA = 320;
+const BV_LARGURA = 1024;
+const BV_ALTURA = 500;
 /* Entrou muita gente de uma vez (raide, divulgacao): passado disto, ninguem
    mais ganha cartao naquele minuto. Cem cartoes seguidos numa sala sao spam,
    e cem desenhos seguidos numa maquina de 256 MB sao queda. */
@@ -9583,47 +9583,90 @@ function soLetrasDaFonte(fonte, texto) {
     .replace(/\s+/g, " ").trim();
 }
 
-/* Uma linha de texto como caminho SVG, encolhendo ate' caber na largura. */
-function linhaEmCaminho(fonte, texto, x, y, tamanho, largura, cor) {
+/* Uma linha de texto como caminho SVG, CENTRALIZADA, encolhendo ate' caber. */
+function linhaEmCaminho(fonte, texto, y, tamanho, largura, cor, W = BV_LARGURA) {
   let tam = tamanho;
   while (tam > 10 && fonte.getAdvanceWidth(texto, tam) > largura) tam -= 2;
-  return `<path d="${fonte.getPath(texto, x, y, tam).toPathData(2)}" fill="${cor}"/>`;
+  const x = (W - fonte.getAdvanceWidth(texto, tam)) / 2;
+  return `<path d="${fonte.getPath(texto, x, y, tam).toPathData(2)}" fill="${cor}" filter="url(#s)"/>`;
 }
 
-/* O cartao. `foto`: PNG da foto ja' redonda (ou null). Puro o bastante para
-   o teste desenhar um de verdade. */
-async function desenharBoasVindas(sharp, { nome, reserva, saudacoes, servidor, numero, foto }, fontfile = FONTE_DA_IMAGEM) {
+/* O fundo de quem nao tem banner nem icone: o da CYRON. */
+const FUNDO_DA_CYRON = fileURLToPath(new URL("./img/fundo-cyron.jpg", import.meta.url));
+const BV_FOTO = 220;
+
+/* O cartao. `foto`: PNG da foto ja' redonda (ou null). `fundo`: a imagem do
+   servidor (banner, convite ou icone) ou null, que vira o fundo da CYRON.
+   Puro o bastante para o teste desenhar um de verdade. */
+async function desenharBoasVindas(sharp, { nome, reserva, saudacoes, servidor, numero, foto, fundo }, fontfile = FONTE_DA_IMAGEM) {
   const fonte = await fonteDoDesenho(fontfile);
-  const W = BV_LARGURA, H = BV_ALTURA, x = 300, larg = W - x - 40;
-  const titulo = soLetrasDaFonte(fonte, saudacoes.join(" · ")) || "Welcome";
+  const W = BV_LARGURA, H = BV_ALTURA, larg = W - 120, cx = W / 2, cy = 150;
+  /* Espacado e em maiusculas: a linha das linguas e' enfeite, o nome e' que
+     tem que saltar aos olhos. */
+  const titulo = (soLetrasDaFonte(fonte, saudacoes.join(" · ")) || "Welcome").toUpperCase().split("").join(" ");
   /* Apelido todo em japones (ou so' emoji) cai no @usuario, que e' latino. */
   const quem = soLetrasDaFonte(fonte, nome) || soLetrasDaFonte(fonte, reserva) || "?";
   const rodape = soLetrasDaFonte(fonte, `#${Number(numero || 0).toLocaleString("en-US")} · ${servidor}`);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">` +
-    `<defs><linearGradient id="f" x1="0" y1="0" x2="1" y2="1">` +
-    `<stop offset="0" stop-color="#1E1F22"/><stop offset="0.6" stop-color="#2B2D31"/><stop offset="1" stop-color="#3B3F9E"/></linearGradient></defs>` +
-    `<rect width="${W}" height="${H}" rx="28" fill="url(#f)"/>` +
-    `<circle cx="150" cy="160" r="112" fill="none" stroke="#5865F2" stroke-width="8"/>` +
-    (foto ? "" : `<circle cx="150" cy="160" r="104" fill="#404249"/>`) +
-    linhaEmCaminho(fonte, titulo, x, 112, 40, larg, "#949BA4") +
-    linhaEmCaminho(fonte, quem, x, 190, 64, larg, "#FFFFFF") +
-    linhaEmCaminho(fonte, rodape, x, 246, 26, larg, "#B5BAC1") +
-    linhaEmCaminho(fonte, "CYRON", W - 128, H - 22, 20, 100, "#5865F2") +
+  /* O fundo vai desfocado e escurecido: e' a cara do servidor, mas o texto
+     por cima tem que ler em qualquer imagem, clara ou escura. */
+  const base = await sharp(fundo || FUNDO_DA_CYRON).resize(W, H, { fit: "cover" }).blur(6).toBuffer();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
+    `<linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.3"/>` +
+    `<stop offset="1" stop-color="#000" stop-opacity="0.75"/></linearGradient>` +
+    `<filter id="g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10"/></filter>` +
+    `<filter id="s"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000" flood-opacity="0.6"/></filter></defs>` +
+    `<rect width="${W}" height="${H}" fill="url(#v)"/>` +
+    `<circle cx="${cx}" cy="${cy}" r="${BV_FOTO / 2 + 12}" fill="#7FD3FF" opacity="0.8" filter="url(#g)"/>` +
+    `<circle cx="${cx}" cy="${cy}" r="${BV_FOTO / 2 + 8}" fill="#FFFFFF"/>` +
+    (foto ? "" : `<circle cx="${cx}" cy="${cy}" r="${BV_FOTO / 2}" fill="#404249"/>`) +
+    linhaEmCaminho(fonte, titulo, 318, 22, larg, "#E6F4FF") +
+    linhaEmCaminho(fonte, quem, 388, 64, larg, "#FFFFFF") +
+    linhaEmCaminho(fonte, rodape, 440, 24, larg, "#C9D6E3") +
     `</svg>`;
-  const camadas = foto ? [{ input: foto, left: 46, top: 56 }] : [];
-  return await sharp(Buffer.from(svg)).composite(camadas).png().toBuffer();
+  const camadas = [{ input: Buffer.from(svg) }];
+  if (foto) camadas.push({ input: foto, left: cx - BV_FOTO / 2, top: cy - BV_FOTO / 2 });
+  return await sharp(base).composite(camadas).jpeg({ quality: 88 }).toBuffer();
 }
 
-/* A foto de perfil, redonda, 208x208. Falhou (sem rede, sem foto): segue sem. */
-async function fotoRedonda(sharp, url) {
+/* Uma imagem de fora (foto, banner), com prazo. Falhou: null, e segue sem. */
+async function baixarImagem(url) {
+  if (!url) return null;
   try {
     const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!r.ok) return null;
-    const mascara = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="208" height="208"><circle cx="104" cy="104" r="104"/></svg>');
-    return await sharp(Buffer.from(await r.arrayBuffer())).resize(208, 208).composite([{ input: mascara, blend: "dest-in" }]).png().toBuffer();
+    return r.ok ? Buffer.from(await r.arrayBuffer()) : null;
   } catch {
     return null;
   }
+}
+
+/* A foto de perfil, redonda. */
+async function fotoRedonda(sharp, url) {
+  const bytes = await baixarImagem(url);
+  if (!bytes) return null;
+  try {
+    const mascara = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${BV_FOTO}" height="${BV_FOTO}">` +
+      `<circle cx="${BV_FOTO / 2}" cy="${BV_FOTO / 2}" r="${BV_FOTO / 2}"/></svg>`);
+    return await sharp(bytes).resize(BV_FOTO, BV_FOTO).composite([{ input: mascara, blend: "dest-in" }]).png().toBuffer();
+  } catch {
+    return null;
+  }
+}
+
+/* O fundo do servidor: banner, senao a imagem de convite, senao o icone.
+   Guardado uma hora por servidor -- numa entrada em massa, baixar o mesmo
+   banner a cada pessoa seria trabalho jogado fora. O endereco entra na
+   chave: trocou o banner, o cartao seguinte ja' sai com o novo. */
+const fundoDoServidor = new Map(); // guildId -> { url, bytes, t }
+async function fundoDe(guild) {
+  const url = guild.bannerURL?.({ extension: "png", size: 1024 }) || guild.splashURL?.({ extension: "png", size: 1024 }) ||
+    guild.iconURL?.({ extension: "png", size: 512 }) || null;
+  if (!url) return null;
+  const achado = fundoDoServidor.get(guild.id);
+  if (achado && achado.url === url && Date.now() - achado.t < 3600000) return achado.bytes;
+  const bytes = await baixarImagem(url);
+  fundoDoServidor.set(guild.id, { url, bytes, t: Date.now() });
+  while (fundoDoServidor.size > 200) fundoDoServidor.delete(fundoDoServidor.keys().next().value);
+  return bytes;
 }
 
 async function cartaoDeBoasVindas(member, linguas) {
@@ -9631,9 +9674,12 @@ async function cartaoDeBoasVindas(member, linguas) {
   if (!sharp || process.memoryUsage().rss > MEMORIA_PARA_DESENHAR) return null;
   const { naImagem } = saudacoesDoServidor(linguas);
   return await naFilaDeDesenho(async () => {
-    const foto = await fotoRedonda(sharp, member.displayAvatarURL({ extension: "png", size: 256 }));
-    return await desenharBoasVindas(sharp, { nome: member.displayName || member.user?.username, reserva: member.user?.username,
-      saudacoes: naImagem, servidor: member.guild.name, numero: member.guild.memberCount, foto });
+    const [foto, fundo] = await Promise.all([
+      fotoRedonda(sharp, member.displayAvatarURL({ extension: "png", size: 256 })), fundoDe(member.guild)]);
+    const args = { nome: member.displayName || member.user?.username, reserva: member.user?.username,
+      saudacoes: naImagem, servidor: member.guild.name, numero: member.guild.memberCount, foto, fundo };
+    /* Banner que o processador nao le (formato estranho): fundo da CYRON. */
+    return await desenharBoasVindas(sharp, args).catch(() => desenharBoasVindas(sharp, { ...args, fundo: null }));
   });
 }
 
@@ -9655,7 +9701,7 @@ async function mensagemDeBoasVindas(member, linguas) {
   return {
     content: `👋 <@${member.id}> · ${noTexto.join(" · ")}`,
     allowedMentions: { users: [member.id] },
-    ...(imagem ? { files: [{ attachment: imagem, name: "boas-vindas.png" }] } : {}),
+    ...(imagem ? { files: [{ attachment: imagem, name: "boas-vindas.jpg" }] } : {}),
   };
 }
 

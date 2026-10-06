@@ -8357,8 +8357,9 @@ function conferirCartao(onde, embed, componentes = []) {
 {
   const sharp = (await import("sharp")).default;
   const FONTE = new URL("./fontes/DejaVuSans-Bold.ttf", import.meta.url).pathname;
+  globalThis.FUNDO_DA_CYRON = new URL("./img/fundo-cyron.jpg", import.meta.url).pathname;
   const b = carregar(["SAUDACOES", "SAUDACOES_SO_NO_TEXTO", "BV_LARGURA", "BV_ALTURA", "BV_POR_MINUTO", "entradasRecentes",
-    "saudacoesDoServidor", "soLetrasDaFonte", "linhaEmCaminho", "FONTES_LIDAS", "fonteDoDesenho", "desenharBoasVindas",
+    "saudacoesDoServidor", "soLetrasDaFonte", "linhaEmCaminho", "FONTES_LIDAS", "fonteDoDesenho", "BV_FOTO", "desenharBoasVindas",
     "podeDarBoasVindas"]);
 
   const s1 = b.saudacoesDoServidor(["pt", "ru"]);
@@ -8376,11 +8377,18 @@ function conferirCartao(onde, embed, componentes = []) {
   const png = await b.desenharBoasVindas(sharp, { nome: "さくら", reserva: "sakura_01",
     saudacoes: ["Boas-vindas", "Welcome"], servidor: "Kingdom #2311", numero: 1234, foto: null }, FONTE);
   const meta = await sharp(png).metadata();
-  ok("o cartão sai em PNG 960x320", [meta.format, meta.width, meta.height], ["png", 960, 320]);
-  const { data } = await sharp(png).extract({ left: 300, top: 140, width: 300, height: 60 }).raw().toBuffer({ resolveWithObject: true });
+  ok("o cartão sai em JPEG 1024x500 (leve para o celular)", [meta.format, meta.width, meta.height], ["jpeg", 1024, 500]);
+  verdade("e com menos de 250 KB", png.length < 250 * 1024);
+  const { data } = await sharp(png).extract({ left: 362, top: 340, width: 300, height: 60 }).raw().toBuffer({ resolveWithObject: true });
   let claros = 0;
   for (let i = 0; i < data.length; i += 4) if (data[i] > 200 && data[i + 1] > 200 && data[i + 2] > 200) claros++;
   verdade("e o nome está desenhado de verdade (pixels brancos onde vai o nome)", claros > 300);
+  const vermelho = await sharp({ create: { width: 64, height: 64, channels: 3, background: "#C00000" } }).png().toBuffer();
+  const doServidor = await b.desenharBoasVindas(sharp, { nome: "Ana", saudacoes: ["Welcome"], servidor: "X", numero: 1, foto: null, fundo: vermelho }, FONTE);
+  const canto = (await sharp(doServidor).extract({ left: 20, top: 20, width: 1, height: 1 }).raw().toBuffer());
+  verdade("com imagem do servidor, o fundo é ela (vermelho escurecido no canto)", canto[0] > canto[1] + 40 && canto[0] > canto[2] + 40);
+  const semNada = await sharp(png).extract({ left: 20, top: 20, width: 1, height: 1 }).raw().toBuffer();
+  verdade("sem imagem do servidor, o fundo é o da CYRON (azul do céu)", semNada[2] > semNada[0]);
 
   const AG = Date.UTC(2026, 9, 6, 12);
   let deram = 0;
