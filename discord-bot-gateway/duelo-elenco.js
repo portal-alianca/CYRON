@@ -62,7 +62,7 @@ const h = (emoji, nome, dano, efeito = null) => ({ emoji, nome, dano, efeito });
 
 export const PERSONAGENS = [
   {
-    id: "alexandre", nome: "Alexandre, o Grande", bandeira: "🇬🇷", titulo: "O Conquistador",
+    id: "alexandre", curto: "Alexandre", nome: "Alexandre, o Grande", bandeira: "🇬🇷", titulo: "O Conquistador",
     epoca: "Macedônia, 331 a.C.", frase: "O rei que nunca perdeu uma batalha.",
     kit: {
       basica: [h("🗡️", "Golpe de Xiphos", 10), h("🏹", "Dardo Macedônio", 7, "perfurar")],
@@ -84,7 +84,7 @@ export const PERSONAGENS = [
     ],
   },
   {
-    id: "napoleao", nome: "Napoleão Bonaparte", bandeira: "🇫🇷", titulo: "O Estrategista",
+    id: "napoleao", curto: "Napoleão", nome: "Napoleão Bonaparte", bandeira: "🇫🇷", titulo: "O Estrategista",
     epoca: "Austerlitz, 1805", frase: "O imperador que redesenhou o mapa da Europa.",
     kit: {
       basica: [h("⚔️", "Sabre de Cavalaria", 10), h("📯", "Toque de Corneta", 7, "energia")],
@@ -106,7 +106,7 @@ export const PERSONAGENS = [
     ],
   },
   {
-    id: "cleopatra", nome: "Cleópatra", bandeira: "🇪🇬", titulo: "A Rainha do Nilo",
+    id: "cleopatra", curto: "Cleópatra", nome: "Cleópatra", bandeira: "🇪🇬", titulo: "A Rainha do Nilo",
     epoca: "Alexandria, 48 a.C.", frase: "A última faraó, mais esperta que dois impérios.",
     kit: {
       basica: [h("🐍", "Bote da Áspide", 10), h("🍷", "Taça Envenenada", 7, "drenar")],
@@ -128,7 +128,7 @@ export const PERSONAGENS = [
     ],
   },
   {
-    id: "musashi", nome: "Miyamoto Musashi", bandeira: "🇯🇵", titulo: "O Espadachim Invicto",
+    id: "musashi", curto: "Musashi", nome: "Miyamoto Musashi", bandeira: "🇯🇵", titulo: "O Espadachim Invicto",
     epoca: "Ilha Ganryū, 1612", frase: "Sessenta e um duelos. Sessenta e uma vitórias.",
     kit: {
       basica: [h("🗡️", "Corte Duplo", 10), h("⚡", "Corte Rápido", 7, "energia")],
@@ -150,7 +150,7 @@ export const PERSONAGENS = [
     ],
   },
   {
-    id: "joana", nome: "Joana d'Arc", bandeira: "🇫🇷", titulo: "A Donzela de Orléans",
+    id: "joana", curto: "Joana d'Arc", nome: "Joana d'Arc", bandeira: "🇫🇷", titulo: "A Donzela de Orléans",
     epoca: "Orléans, 1429", frase: "Aos 17 anos, comandou um exército.",
     kit: {
       basica: [h("⚔️", "Golpe de Espada", 10), h("🏹", "Flecha no Ombro", 7, "drenar")],
@@ -172,7 +172,7 @@ export const PERSONAGENS = [
     ],
   },
   {
-    id: "gengis", nome: "Gengis Khan", bandeira: "🇲🇳", titulo: "O Senhor das Estepes",
+    id: "gengis", curto: "Gengis Khan", nome: "Gengis Khan", bandeira: "🇲🇳", titulo: "O Senhor das Estepes",
     epoca: "Mongólia, 1206", frase: "Do nada, o maior império contínuo da história.",
     kit: {
       basica: [h("🏹", "Flecha a Galope", 10), h("🐎", "Arqueiro Montado", 7, "perfurar")],
@@ -194,7 +194,7 @@ export const PERSONAGENS = [
     ],
   },
   {
-    id: "leonidas", nome: "Leônidas", bandeira: "🇬🇷", titulo: "O Rei de Esparta",
+    id: "leonidas", curto: "Leônidas", nome: "Leônidas", bandeira: "🇬🇷", titulo: "O Rei de Esparta",
     epoca: "Termópilas, 480 a.C.", frase: "\"Venham buscá-las.\"",
     kit: {
       basica: [h("🛡️", "Golpe de Escudo", 10), h("🔱", "Estocada de Lança", 7, "perfurar")],
@@ -216,7 +216,7 @@ export const PERSONAGENS = [
     ],
   },
   {
-    id: "anibal", nome: "Aníbal Barca", bandeira: "🇹🇳", titulo: "O General de Cartago",
+    id: "anibal", curto: "Aníbal", nome: "Aníbal Barca", bandeira: "🇹🇳", titulo: "O General de Cartago",
     epoca: "Alpes, 218 a.C.", frase: "Atravessou montanhas com elefantes.",
     kit: {
       basica: [h("⚔️", "Falcata Ibérica", 10), h("🪨", "Funda Balear", 7, "perfurar")],
@@ -238,7 +238,7 @@ export const PERSONAGENS = [
     ],
   },
   {
-    id: "zumbi", nome: "Zumbi dos Palmares", bandeira: "🇧🇷", titulo: "O Guerreiro da Liberdade",
+    id: "zumbi", curto: "Zumbi", nome: "Zumbi dos Palmares", bandeira: "🇧🇷", titulo: "O Guerreiro da Liberdade",
     epoca: "Serra da Barriga, 1690", frase: "O último líder de Palmares.",
     kit: {
       basica: [h("👊", "Golpe de Ginga", 10), h("🦶", "Meia-Lua", 7, "energia")],
@@ -260,7 +260,7 @@ export const PERSONAGENS = [
     ],
   },
   {
-    id: "suntzu", nome: "Sun Tzu", bandeira: "🇨🇳", titulo: "O Mestre da Estratégia",
+    id: "suntzu", curto: "Sun Tzu", nome: "Sun Tzu", bandeira: "🇨🇳", titulo: "O Mestre da Estratégia",
     epoca: "China, séc. V a.C.", frase: "Vencer sem lutar é a arte suprema.",
     kit: {
       basica: [h("🎋", "Golpe de Bambu", 10), h("🕵️", "Rede de Espiões", 7, "energia")],
@@ -282,7 +282,7 @@ export const PERSONAGENS = [
     ],
   },
   {
-    id: "ragnar", nome: "Ragnar Lodbrok", bandeira: "🇳🇴", titulo: "O Rei Viking",
+    id: "ragnar", curto: "Ragnar", nome: "Ragnar Lodbrok", bandeira: "🇳🇴", titulo: "O Rei Viking",
     epoca: "Mar do Norte, séc. IX", frase: "Lenda das sagas nórdicas.",
     kit: {
       basica: [h("🪓", "Machado Viking", 10), h("🗡️", "Saque Rápido", 7, "drenar")],
@@ -304,7 +304,7 @@ export const PERSONAGENS = [
     ],
   },
   {
-    id: "tesla", nome: "Nikola Tesla", bandeira: "🇷🇸", titulo: "O Mago da Eletricidade",
+    id: "tesla", curto: "Tesla", nome: "Nikola Tesla", bandeira: "🇷🇸", titulo: "O Mago da Eletricidade",
     epoca: "Colorado Springs, 1899", frase: "O homem que iluminou o mundo.",
     kit: {
       basica: [h("⚡", "Faísca", 10), h("🔋", "Recarga", 7, "energia")],
@@ -345,6 +345,8 @@ export function problemasDoElenco(lista = PERSONAGENS) {
       }
     }
     if (!Array.isArray(p.fatos) || p.fatos.length !== 10) erros.push(`${p.id}: precisa de 10 fatos`);
+    /* O nome curto vai no card do duelo, que no celular tem pouca largura. */
+    if (!p.curto || p.curto.length > 12) erros.push(`${p.id}: precisa de um nome curto (até 12 letras)`);
   }
   return erros;
 }

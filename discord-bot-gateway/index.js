@@ -10739,12 +10739,12 @@ function comecarVez(estado, i) {
   if ((estado.jogadas || 0) >= DUELO_MORTE_SUBITA) {
     const perda = 5 * (1 + Math.floor((estado.jogadas - DUELO_MORTE_SUBITA) / 4));
     l.hp = Math.max(0, l.hp - perda);
-    log.push(`☠️ A arena cobra: ${l.p.nome} −${perda} ❤️`);
+    log.push(`☠️ Arena: ${l.p.curto} −${perda}`);
   }
   if (l.queimando > 0) {
     l.hp = Math.max(0, l.hp - EFEITOS.queimar.valor);
     l.queimando--;
-    log.push(`🔥 ${l.p.nome} queima: −${EFEITOS.queimar.valor} ❤️`);
+    log.push(`🔥 ${l.p.curto} queima −${EFEITOS.queimar.valor}`);
   }
   estado.vez = i;
   return log;
@@ -10757,11 +10757,11 @@ function usarHabilidade(estado, i, hab, sorte = Math.random) {
   const outro = estado.lutadores[1 - i];
   const log = [];
   eu.en -= ESPACOS[hab.espaco].energia;
-  let linha = `${hab.emoji} ${eu.p.nome} usou **${hab.nome}**`;
+  let linha = `${hab.emoji} ${eu.p.curto}: **${hab.nome}**`;
   if (hab.dano > 0) {
     if (eu.confuso) {
       eu.confuso = false;
-      if (sorte() < EFEITOS.confundir.chance) { log.push(`${linha}… e errou! 🌀`); return log; }
+      if (sorte() < EFEITOS.confundir.chance) { log.push(`${linha} errou! 🌀`); return log; }
     }
     let dano = Math.round(hab.dano * (eu.preparado ? EFEITOS.preparar.multiplicador : 1));
     eu.preparado = false;
@@ -10769,21 +10769,21 @@ function usarHabilidade(estado, i, hab, sorte = Math.random) {
     if (perfura && !outro.escudo && !outro.esquiva) dano = Math.round(dano * DUELO_PERFURAR);
     if (outro.esquiva && !perfura) {
       outro.esquiva = false;
-      log.push(`${linha}, mas ${outro.p.nome} desviou! 💨`);
+      log.push(`${linha} · ${outro.p.curto} desviou 💨`);
     } else {
       if (perfura && outro.esquiva) { outro.esquiva = false; linha += " (💨✕)"; }
       if (!perfura && outro.escudo > 0) {
         const absorvido = Math.min(outro.escudo, dano);
         outro.escudo -= absorvido;
         dano -= absorvido;
-        if (absorvido) linha += ` (🛡️ −${absorvido})`;
+        if (absorvido) linha += ` 🛡️${absorvido}`;
       }
       outro.hp = Math.max(0, outro.hp - dano);
-      linha += `! −${dano} ❤️`;
-      if (hab.efeito === "drenar") { const cura = Math.floor(dano / 2); eu.hp = Math.min(DUELO_VIDA, eu.hp + cura); linha += ` · 🩸 +${cura}`; }
-      if (hab.efeito === "atordoar") { outro.atordoado = true; linha += " · 😵"; }
-      if (hab.efeito === "queimar") { outro.queimando = EFEITOS.queimar.turnos; linha += " · 🔥"; }
-      if (hab.efeito === "confundir") { outro.confuso = true; linha += " · 🌀"; }
+      linha += ` −${dano}`;
+      if (hab.efeito === "drenar") { const cura = Math.floor(dano / 2); eu.hp = Math.min(DUELO_VIDA, eu.hp + cura); linha += ` 🩸+${cura}`; }
+      if (hab.efeito === "atordoar") { outro.atordoado = true; linha += " 😵"; }
+      if (hab.efeito === "queimar") { outro.queimando = EFEITOS.queimar.turnos; linha += " 🔥"; }
+      if (hab.efeito === "confundir") { outro.confuso = true; linha += " 🌀"; }
       log.push(linha);
     }
     if (hab.efeito === "preparar") eu.preparado = true;
@@ -10795,7 +10795,7 @@ function usarHabilidade(estado, i, hab, sorte = Math.random) {
   if (hab.efeito === "esquiva") eu.esquiva = true;
   if (hab.efeito === "cura") eu.hp = Math.min(DUELO_VIDA, eu.hp + EFEITOS.cura.valor);
   if (hab.efeito === "preparar") eu.preparado = true;
-  log.push(`${linha} · ${EFEITOS[hab.efeito]?.texto || ""}`);
+  log.push(`${linha} · ${({ escudo: `🛡️${EFEITOS.escudo.valor}`, esquiva: "💨", cura: `+${EFEITOS.cura.valor}`, preparar: "📈" })[hab.efeito] || ""}`);
   return log;
 }
 
@@ -10810,7 +10810,7 @@ function passarVez(estado) {
     if (estado.lutadores[proximo].hp <= 0) break;
     if (estado.lutadores[proximo].atordoado) {
       estado.lutadores[proximo].atordoado = false;
-      log.push(`😵 ${estado.lutadores[proximo].p.nome} está atordoado e perdeu a vez`);
+      log.push(`😵 ${estado.lutadores[proximo].p.curto} perdeu a vez`);
       continue;
     }
     break;
@@ -10845,33 +10845,41 @@ function danoPrevisto(hab, eu, outro) {
   return Math.max(0, dano - (outro.escudo || 0));
 }
 
+/* Oito segmentos, sem bloco de codigo: no celular o bloco de codigo vira
+   uma caixa enorme (o print do Tiago mostrou isso). */
 function barra(valor, max = 100) {
-  const cheio = Math.round((Math.max(0, valor) / max) * 10);
-  return "█".repeat(cheio) + "░".repeat(10 - cheio);
+  const cheio = Math.round((Math.max(0, valor) / max) * 8);
+  return "▰".repeat(cheio) + "▱".repeat(8 - cheio);
 }
 
+/* Duas linhas por lutador: quem e', e a vida/energia. */
 function estadoDoLutador(l) {
   const marcas = [l.escudo ? `🛡️${l.escudo}` : "", l.esquiva ? "💨" : "", l.preparado ? "📈" : "",
     l.confuso ? "🌀" : "", l.atordoado ? "😵" : "", l.queimando ? "🔥" : ""].filter(Boolean).join(" ");
-  return `${l.p.bandeira} **${l.p.nome}** · Nv ${l.nivel} — ${l.bot ? "🤖 CYRON" : `<@${l.userId}>`}\n` +
-    `❤️ \`${barra(l.hp)}\` ${l.hp}/${DUELO_VIDA}\n🔷 \`${barra(l.en)}\` ${l.en}/${DUELO_ENERGIA_MAX}${marcas ? `  ${marcas}` : ""}`;
+  return `${l.p.bandeira} **${l.p.curto}** · Nv ${l.nivel} · ${l.bot ? "🤖 CYRON" : `<@${l.userId}>`}\n` +
+    `❤️ ${barra(l.hp)} **${l.hp}**  🔷 ${l.en}${marcas ? `  ${marcas}` : ""}`;
 }
 
-/* A mensagem inteira do duelo. Pura: so' le o estado. */
+/* A mensagem do duelo. Enxuta de proposito: os dois lutadores, as DUAS
+   ultimas jogadas e de quem e' a vez. Cabe numa tela de celular com o
+   cartaz embaixo. No fim, o historico some e entra o resultado. Pura. */
 function telaDoDuelo(estado, agora = Date.now()) {
   const [a, b] = estado.lutadores;
   const fim = estado.vencedor !== undefined && estado.vencedor !== null;
   const vez = estado.lutadores[estado.vez];
-  const historico = estado.historico.slice(-4).map((t) => `› ${t}`).join("\n") || "› …";
-  const rodape = fim
-    ? `🏆 **${estado.lutadores[estado.vencedor].p.nome}** venceu${estado.lutadores[estado.vencedor].bot ? "" : ` · <@${estado.lutadores[estado.vencedor].userId}>`}` +
-      (estado.motivo ? ` · ${estado.motivo}` : "")
-    : `⏳ Vez de ${vez.bot ? "🤖 CYRON" : `<@${vez.userId}>`} · <t:${Math.floor((estado.limite || agora) / 1000)}:R>`;
+  const linhas = [estadoDoLutador(a), estadoDoLutador(b), ""];
+  if (fim) {
+    const v = estado.lutadores[estado.vencedor];
+    linhas.push(`🏆 **${v.p.curto}** venceu!${v.bot ? "" : ` · <@${v.userId}>`}${estado.motivo ? ` (${estado.motivo})` : ""}`,
+      ...(estado.extra || []));
+  } else {
+    linhas.push(...estado.historico.slice(-2).map((t) => `-# ${t}`),
+      `⏳ ${vez.bot ? "🤖 CYRON está pensando…" : `Vez de <@${vez.userId}> · <t:${Math.floor((estado.limite || agora) / 1000)}:R>`}`);
+  }
   const embed = {
     color: fim ? 0xF5C542 : 0xE74C3C,
-    title: `⚔️ DUELO · ${a.p.epoca} × ${b.p.epoca}`.slice(0, 256),
-    description: [`*${a.p.frase}* ✕ *${b.p.frase}*`, "━━━━━━━━━━━━", estadoDoLutador(a), "━━━━━━━━━━━━", estadoDoLutador(b),
-      "━━━━━━━━━━━━", `📜 Turno ${estado.jogadas + 1}`, historico, "", rodape, ...(estado.extra || [])].join("\n").slice(0, 4000),
+    title: `⚔️ ${a.p.curto} × ${b.p.curto}`,
+    description: linhas.join("\n").slice(0, 4000),
     ...(estado.imagem ? { image: { url: "attachment://duelo.jpg" } } : {}),
   };
   const botoes = fim || vez.bot ? [] : [{ type: 1, components: vez.kit.map((hab, k) => ({
@@ -11001,7 +11009,7 @@ async function comecarDuelo(estado) {
   estado.lutadores = lutadores;
   const primeiro = Math.random() < 0.5 ? 0 : 1;
   estado.vez = 1 - primeiro;
-  estado.historico.push(`🎲 Sorteio: ${lutadores[primeiro].p.nome} começa!`);
+  estado.historico.push(`🎲 ${lutadores[primeiro].p.curto} começa`);
   estado.historico.push(...passarVez(estado));
   estado.cartaz = await cartazDoDuelo(estado);
   estado.imagem = Boolean(estado.cartaz);
@@ -11137,14 +11145,16 @@ async function terminarDuelo(estado) {
     await sbPost("cyron_duelo_personagem", { user_id: l.userId, personagem: l.p.id, xp: xpNovo,
       vitorias: l.vitorias + (venceu ? 1 : 0), derrotas: l.derrotas + (venceu ? 0 : 1), atualizado_em: new Date().toISOString() },
     "resolution=merge-duplicates").catch((e) => console.error("duelo: nao gravei o XP:", e?.message || e));
-    extra.push(`✨ <@${l.userId}> · ${l.p.nome} +${ganho} XP${ganho === 0 && estado.motivo !== "W.O." ? " (limite de hoje)" : ""}`);
+    const proximo = NIVEIS_DO_PERSONAGEM[nivelNovo];
+    extra.push(`✨ ${estado.treino ? "" : `<@${l.userId}> `}+${ganho} XP · ${l.p.curto} Nv ${nivelNovo}` +
+      (proximo !== undefined ? ` (${xpNovo}/${proximo})` : "") + (ganho === 0 && estado.motivo !== "W.O." ? " · limite de hoje" : ""));
     if (nivelNovo > l.nivel) {
-      extra.push(`⬆️ **${l.p.nome} chegou ao nível ${nivelNovo}!**`);
+      extra.push(`⬆️ **${l.p.curto} subiu para o nível ${nivelNovo}!**`);
       extra.push(`📜 *Códex ${nivelNovo}/10:* ${l.p.fatos[nivelNovo - 1]}`);
       for (const espaco of ESPACOS_ORDEM) {
         if (ESPACOS[espaco].nivelAlternativa === nivelNovo) {
           const hab = l.p.kit[espaco][1];
-          extra.push(`🔓 Nova habilidade: ${hab.emoji} **${hab.nome}**. Equipe com /equipar`);
+          extra.push(`🔓 ${hab.emoji} **${hab.nome}** liberada · /equipar`);
         }
       }
     }
@@ -11152,9 +11162,9 @@ async function terminarDuelo(estado) {
   if (!extra.some((t) => t.startsWith("📜"))) {
     /* Na primeira vez com um personagem, a pagina 1 do Codex. */
     const novato = estado.lutadores.find((l) => !l.bot && l.xpAntes === 0);
-    if (novato) extra.push(`📜 *Códex 1/10 · ${novato.p.nome}:* ${novato.p.fatos[0]}`);
+    if (novato) extra.push(`📜 *Códex 1/10:* ${novato.p.fatos[0]}`);
   }
-  estado.extra = ["", ...extra];
+  estado.extra = extra;
   await estado.msg?.edit({ content: "", ...telaDoDuelo(estado), allowedMentions: { parse: [] } }).catch(() => {});
   cancelarDuelo(estado.id);
 }
