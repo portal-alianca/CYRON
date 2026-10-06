@@ -8397,7 +8397,21 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("um minuto depois volta", b.podeDarBoasVindas("g1", AG + 61000 + 20000));
   verdade("e cada servidor conta o seu", b.podeDarBoasVindas("g2", AG));
 
+  const tx = carregar(["BV_TEXTO_PADRAO", "BV_TEXTO_MAX", "textoDeBoasVindas"]);
+  const quem = { id: "123", nome: "Ana_*", servidor: "Kingdom", numero: 1234, ola: "Boas-vindas · Welcome" };
+  ok("sem texto do administrador: o padrão", tx.textoDeBoasVindas(null, quem), "👋 <@123> · Boas-vindas · Welcome");
+  ok("os marcadores viram a pessoa, o servidor e o número",
+    tx.textoDeBoasVindas("Oi {usuario}! {nome} é o #{numero} do {servidor}. {ola}", quem),
+    "Oi <@123>! Ana\\_\\* é o #1,234 do Kingdom. Boas-vindas · Welcome");
+  ok("em inglês também", tx.textoDeBoasVindas("Hi {user} from {server}", quem), "Hi <@123> from Kingdom");
+  ok("nome com $& não vira comando de troca", tx.textoDeBoasVindas("{nome}", { ...quem, nome: "a$&b" }), "a$&b");
+  verdade("e nunca passa de 2000 letras", tx.textoDeBoasVindas("{ola}".repeat(300), { ...quem, ola: "x".repeat(50) }).length <= 2000);
+
   const f = readFileSync(`${aqui}/index.js`, "utf8");
+  verdade("o ✏️ é só de quem administra (checado no clique)",
+    /async function cliqueBoasVindas[^]{0,400}memberPermissions\?\.has\(PermissionFlagsBits\.ManageGuild\)/.test(f));
+  verdade("a mensagem do administrador só marca quem chegou, mesmo com @everyone no texto",
+    /content: textoDeBoasVindas\([^]{0,300}allowedMentions: \{ users: \[member\.id\] \}/.test(f));
   verdade("só liga pelo /boas-vindas: sem canal guardado, ninguém ganha cartão",
     /const canalId = servidor\?\.boas_vindas_canal;\s*if \(!canalId/.test(f));
   verdade("o /boas-vindas é de todos (não vai para os servidores do jogo)", /COMANDOS_DE_TODOS = new Set\([^)]*"boas-vindas"/.test(f));
