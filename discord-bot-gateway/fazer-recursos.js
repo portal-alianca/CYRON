@@ -120,7 +120,7 @@ if (location.hostname === "portal-alianca.github.io") location.replace("https://
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CYRON — tudo que ele faz</title>
-<meta name="description" content="As ${total} funções da CYRON, por categoria: traduzir, quem chega, viver junto, quem administra e confiança.">
+<meta name="description" content="As ${total} funções da CYRON, por categoria: traduzir, quem chega, ferramentas, quem administra e confiança.">
 <meta property="og:title" content="CYRON — tudo que ele faz">
 <meta property="og:description" content="As ${total} funções da CYRON, por categoria. ${gratis} delas no plano grátis.">
 <meta property="og:type" content="website">

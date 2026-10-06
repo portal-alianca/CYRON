@@ -371,6 +371,8 @@ client.on("guildMemberAdd", async (member) => {
        convite que chega depois de a pessoa ja ter aberto o primeiro canal. */
     convidarParaEscolherIdioma(member).catch((e) =>
       console.error("idioma: nao consegui convidar na entrada:", e?.message || e));
+    darBoasVindas(member).catch((e) =>
+      console.error("boas-vindas: falhou:", e?.message || e));
 
     /* O cartao de boas-vindas do Kingshot e' da alianca [TOP]: mora no
        alianca.js, e desiste sozinho em servidor sem alianca ligada. */
@@ -9537,6 +9539,178 @@ async function convidarParaEscolherIdioma(member) {
     : `idioma: nao consegui convidar ${member.user.username} (privado fechado e sem sala de idiomas)`);
 }
 
+/* ---------------- boas-vindas com imagem ----------------
+
+   O caminho por onde o ProBot chegou a dez milhoes de servidores: quem entra
+   ganha um cartao com a propria foto e o proprio nome. Aqui com o que so' a
+   CYRON tem -- o "bem-vindo" vem em TODAS as linguas do servidor, lado a
+   lado. Cada entrada vira uma vitrine do que o bot faz, sem gastar um
+   caractere de cota: as saudacoes sao fixas, escritas uma vez.
+
+   Ligado pelo /boas-vindas, e so' por ele. Bot que comeca a falar sozinho
+   numa sala que ja' tem o boas-vindas de outro bot e' bot que e' expulso. */
+const SAUDACOES = {
+  pt: "Boas-vindas", en: "Welcome", es: "Bienvenido", fr: "Bienvenue", de: "Willkommen", it: "Benvenuto",
+  ru: "Добро пожаловать", uk: "Ласкаво просимо", pl: "Witaj", tr: "Hoş geldin", nl: "Welkom",
+  id: "Selamat datang", vi: "Chào mừng", tl: "Maligayang pagdating",
+};
+/* Arabe, hindi e tailandes ficam de fora da IMAGEM (nao do servidor): a letra
+   deles muda de forma conforme a vizinha, e desenhar letra por letra sairia
+   quebrado -- pior que nao estar la'. Japones, coreano e chines a fonte nao
+   tem. Na mensagem, que o Discord desenha, todas entram. */
+const SAUDACOES_SO_NO_TEXTO = {
+  ar: "أهلاً وسهلاً", hi: "स्वागत है", th: "ยินดีต้อนรับ", ja: "ようこそ", ko: "환영합니다", "zh-CN": "欢迎",
+};
+const BV_LARGURA = 960;
+const BV_ALTURA = 320;
+/* Entrou muita gente de uma vez (raide, divulgacao): passado disto, ninguem
+   mais ganha cartao naquele minuto. Cem cartoes seguidos numa sala sao spam,
+   e cem desenhos seguidos numa maquina de 256 MB sao queda. */
+const BV_POR_MINUTO = 8;
+const entradasRecentes = new Map(); // guildId -> [quando]
+
+function saudacoesDoServidor(linguas) {
+  const lista = [...new Set([...(linguas || []).map((l) => String(l)), "en"])];
+  const naImagem = lista.map((l) => SAUDACOES[l] || SAUDACOES[l.split("-")[0]]).filter(Boolean);
+  const noTexto = lista.map((l) => SAUDACOES[l] || SAUDACOES_SO_NO_TEXTO[l] || SAUDACOES[l.split("-")[0]]).filter(Boolean);
+  return { naImagem: [...new Set(naImagem)].slice(0, 3), noTexto: [...new Set(noTexto)].slice(0, 6) };
+}
+
+/* So' as letras que a fonte sabe desenhar. Nome em japones, emoji, letra
+   enfeitada: sem isto viraria uma fileira de quadradinhos. */
+function soLetrasDaFonte(fonte, texto) {
+  return [...String(texto || "")].filter((c) => c === " " || fonte.charToGlyphIndex(c) > 0).join("")
+    .replace(/\s+/g, " ").trim();
+}
+
+/* Uma linha de texto como caminho SVG, encolhendo ate' caber na largura. */
+function linhaEmCaminho(fonte, texto, x, y, tamanho, largura, cor) {
+  let tam = tamanho;
+  while (tam > 10 && fonte.getAdvanceWidth(texto, tam) > largura) tam -= 2;
+  return `<path d="${fonte.getPath(texto, x, y, tam).toPathData(2)}" fill="${cor}"/>`;
+}
+
+/* O cartao. `foto`: PNG da foto ja' redonda (ou null). Puro o bastante para
+   o teste desenhar um de verdade. */
+async function desenharBoasVindas(sharp, { nome, reserva, saudacoes, servidor, numero, foto }, fontfile = FONTE_DA_IMAGEM) {
+  const fonte = await fonteDoDesenho(fontfile);
+  const W = BV_LARGURA, H = BV_ALTURA, x = 300, larg = W - x - 40;
+  const titulo = soLetrasDaFonte(fonte, saudacoes.join(" · ")) || "Welcome";
+  /* Apelido todo em japones (ou so' emoji) cai no @usuario, que e' latino. */
+  const quem = soLetrasDaFonte(fonte, nome) || soLetrasDaFonte(fonte, reserva) || "?";
+  const rodape = soLetrasDaFonte(fonte, `#${Number(numero || 0).toLocaleString("en-US")} · ${servidor}`);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">` +
+    `<defs><linearGradient id="f" x1="0" y1="0" x2="1" y2="1">` +
+    `<stop offset="0" stop-color="#1E1F22"/><stop offset="0.6" stop-color="#2B2D31"/><stop offset="1" stop-color="#3B3F9E"/></linearGradient></defs>` +
+    `<rect width="${W}" height="${H}" rx="28" fill="url(#f)"/>` +
+    `<circle cx="150" cy="160" r="112" fill="none" stroke="#5865F2" stroke-width="8"/>` +
+    (foto ? "" : `<circle cx="150" cy="160" r="104" fill="#404249"/>`) +
+    linhaEmCaminho(fonte, titulo, x, 112, 40, larg, "#949BA4") +
+    linhaEmCaminho(fonte, quem, x, 190, 64, larg, "#FFFFFF") +
+    linhaEmCaminho(fonte, rodape, x, 246, 26, larg, "#B5BAC1") +
+    linhaEmCaminho(fonte, "CYRON", W - 128, H - 22, 20, 100, "#5865F2") +
+    `</svg>`;
+  const camadas = foto ? [{ input: foto, left: 46, top: 56 }] : [];
+  return await sharp(Buffer.from(svg)).composite(camadas).png().toBuffer();
+}
+
+/* A foto de perfil, redonda, 208x208. Falhou (sem rede, sem foto): segue sem. */
+async function fotoRedonda(sharp, url) {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return null;
+    const mascara = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="208" height="208"><circle cx="104" cy="104" r="104"/></svg>');
+    return await sharp(Buffer.from(await r.arrayBuffer())).resize(208, 208).composite([{ input: mascara, blend: "dest-in" }]).png().toBuffer();
+  } catch {
+    return null;
+  }
+}
+
+async function cartaoDeBoasVindas(member, linguas) {
+  const sharp = await carregarSharp();
+  if (!sharp || process.memoryUsage().rss > MEMORIA_PARA_DESENHAR) return null;
+  const { naImagem } = saudacoesDoServidor(linguas);
+  return await naFilaDeDesenho(async () => {
+    const foto = await fotoRedonda(sharp, member.displayAvatarURL({ extension: "png", size: 256 }));
+    return await desenharBoasVindas(sharp, { nome: member.displayName || member.user?.username, reserva: member.user?.username,
+      saudacoes: naImagem, servidor: member.guild.name, numero: member.guild.memberCount, foto });
+  });
+}
+
+function podeDarBoasVindas(guildId, agora = Date.now()) {
+  const lista = (entradasRecentes.get(guildId) || []).filter((t) => agora - t < 60000);
+  if (lista.length >= BV_POR_MINUTO) { entradasRecentes.set(guildId, lista); return false; }
+  lista.push(agora);
+  entradasRecentes.set(guildId, lista);
+  if (entradasRecentes.size > 5000) entradasRecentes.delete(entradasRecentes.keys().next().value);
+  return true;
+}
+
+async function mensagemDeBoasVindas(member, linguas) {
+  const { noTexto } = saudacoesDoServidor(linguas);
+  const imagem = await cartaoDeBoasVindas(member, linguas).catch((e) => {
+    console.error("boas-vindas: nao consegui desenhar:", e?.message || e);
+    return null;
+  });
+  return {
+    content: `👋 <@${member.id}> · ${noTexto.join(" · ")}`,
+    allowedMentions: { users: [member.id] },
+    ...(imagem ? { files: [{ attachment: imagem, name: "boas-vindas.png" }] } : {}),
+  };
+}
+
+async function darBoasVindas(member) {
+  if (member.user?.bot) return;
+  const servidor = await servidorDoGuild(member.guild.id);
+  const canalId = servidor?.boas_vindas_canal;
+  if (!canalId || !podeDarBoasVindas(member.guild.id)) return;
+  const canal = member.guild.channels.cache.get(String(canalId)) ||
+    await member.guild.channels.fetch(String(canalId)).catch(() => null);
+  if (!canal?.isTextBased?.()) return;
+  const linguas = await linguasDoRelogio(member.guild.id);
+  await canal.send(await mensagemDeBoasVindas(member, linguas)).catch((e) =>
+    console.error(`boas-vindas: nao consegui postar em ${member.guild.name}:`, e?.message || e));
+}
+
+/* /boas-vindas #canal liga (e mostra na hora o cartao de quem pediu);
+   /boas-vindas desligar:true desliga; sem nada, diz como esta'. */
+async function comandoBoasVindas(inter) {
+  await inter.deferReply({ flags: 64 });
+  const idioma = await linguaDe(inter);
+  const servidor = await servidorDoGuild(inter.guildId);
+  if (!servidor) return inter.editReply({ content: (await nalingua(idioma, inter.guildId, "Ainda não terminei de me instalar aqui."))[0] });
+  const canal = inter.options.getChannel("canal");
+  const desligar = inter.options.getBoolean("desligar") === true;
+
+  if (desligar) {
+    await sbPatch(`cyron_servidor?id=eq.${servidor.id}`, { boas_vindas_canal: null });
+    cacheServidor.delete(inter.guildId);
+    const [t] = await nalingua(idioma, inter.guildId, "Boas-vindas com imagem desligadas.");
+    return inter.editReply({ content: `👋 ${t}` });
+  }
+  let alvo = servidor.boas_vindas_canal;
+  if (canal) {
+    const eu = inter.guild.members.me;
+    const pode = canal.permissionsFor?.(eu);
+    if (!pode?.has(PermissionFlagsBits.SendMessages) || !pode?.has(PermissionFlagsBits.AttachFiles) ||
+        !pode?.has(PermissionFlagsBits.ViewChannel)) {
+      const [t] = await nalingua(idioma, inter.guildId, "Eu não consigo mandar imagem nesse canal. Libere para mim: ver o canal, enviar mensagens e anexar arquivos.");
+      return inter.editReply({ content: `⚠️ ${t}` });
+    }
+    await sbPatch(`cyron_servidor?id=eq.${servidor.id}`, { boas_vindas_canal: canal.id });
+    cacheServidor.delete(inter.guildId);
+    alvo = canal.id;
+  }
+  const [ligado, desligadoTxt, exemplo] = await nalingua(idioma, inter.guildId,
+    "Ligado. Quem entrar ganha este cartão em",
+    "Desligado. Para ligar: /boas-vindas e escolha o canal.",
+    "Assim fica, com a sua foto:");
+  if (!alvo) return inter.editReply({ content: `👋 ${desligadoTxt}` });
+  const previa = await mensagemDeBoasVindas(inter.member, await linguasDoRelogio(inter.guildId));
+  return inter.editReply({ content: `✅ ${ligado} <#${alvo}>.\n${exemplo}\n\n${previa.content}`,
+    files: previa.files || [], allowedMentions: { parse: [] } });
+}
+
 /* A terceira camada: quem escreveu antes de tocar em qualquer botão.
 
    E aqui a oferta vai NA LÍNGUA DELA, que é o ponto inteiro. Um convite em
@@ -16874,6 +17048,10 @@ async function comandoDeInteracao(inter) {
   if (nome === "admin") return comandoAdmin(inter);
   if (nome === "arena") return inter.reply({ flags: 64, content: ARENA_ENCERRADA });
   if (nome === "hora") return comandoHora(inter);
+  if (nome === "boas-vindas") {
+    if (!inter.guildId) return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
+    return comandoBoasVindas(inter);
+  }
   if (nome === "evento") {
     if (!inter.guildId) {
       return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
@@ -17574,7 +17752,7 @@ client.on("messageReactionAdd", async (reacao, quem) => {
    A lista diz "nao mexa nisto", e nao "todo mundo usa". Sem ele aqui,
    separarComandos leria /admin como comando do jogo e o empurraria pros
    servidores com alianca -- exatamente o contrario do que ele e'. */
-const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento", "hora"]);
+const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento", "hora", "boas-vindas"]);
 
 async function separarComandos() {
   try {
@@ -18584,6 +18762,33 @@ const TRADUCOES_DO_EVENTO = (() => {
   return fora;
 })();
 
+const TRADUCOES_DAS_BOAS_VINDAS = {
+  comando: {
+    "en-US": "Photo card for newcomers, in every language of the server", "en-GB": "Photo card for newcomers, in every language of the server",
+    "es-ES": "Tarjeta con foto para quien llega, en todos los idiomas", fr: "Carte avec photo pour les nouveaux, dans toutes les langues",
+    de: "Karte mit Foto für Neue, in allen Sprachen", it: "Scheda con foto per chi arriva, in tutte le lingue",
+    ru: "Карточка с фото для новичков на всех языках", uk: "Картка з фото для новачків усіма мовами",
+    tr: "Yeni gelenlere fotoğraflı kart, tüm dillerde", pl: "Karta ze zdjęciem dla nowych, we wszystkich językach",
+    id: "Kartu berfoto untuk anggota baru, dalam semua bahasa", vi: "Thẻ có ảnh cho người mới, bằng mọi ngôn ngữ",
+    th: "การ์ดพร้อมรูปสำหรับคนใหม่ ทุกภาษา", ja: "新メンバーに写真付きカード（全言語）", ko: "새 멤버를 위한 사진 카드, 모든 언어로",
+    "zh-CN": "给新成员的照片卡片，所有语言", "pt-BR": "Cartão com foto para quem entra, em todas as línguas",
+  },
+  canal: {
+    "en-US": "Where the card shows up", "en-GB": "Where the card shows up", "es-ES": "Dónde aparece la tarjeta",
+    fr: "Où la carte apparaît", de: "Wo die Karte erscheint", it: "Dove appare la scheda", ru: "Где появится карточка",
+    uk: "Де з'явиться картка", tr: "Kartın görüneceği yer", pl: "Gdzie pojawi się karta", id: "Tempat kartu muncul",
+    vi: "Nơi thẻ xuất hiện", th: "ช่องที่การ์ดจะขึ้น", ja: "カードを表示する場所", ko: "카드가 올라갈 곳", "zh-CN": "卡片显示的位置",
+    "pt-BR": "Onde o cartão aparece",
+  },
+  desligar: {
+    "en-US": "Turn the welcome card off", "en-GB": "Turn the welcome card off", "es-ES": "Apagar la tarjeta de bienvenida",
+    fr: "Désactiver la carte de bienvenue", de: "Willkommenskarte ausschalten", it: "Disattiva la scheda di benvenuto",
+    ru: "Выключить приветственную карточку", uk: "Вимкнути вітальну картку", tr: "Hoş geldin kartını kapat",
+    pl: "Wyłącz kartę powitalną", id: "Matikan kartu sambutan", vi: "Tắt thẻ chào mừng", th: "ปิดการ์ดต้อนรับ",
+    ja: "ウェルカムカードをオフ", ko: "환영 카드 끄기", "zh-CN": "关闭欢迎卡片", "pt-BR": "Desligar as boas-vindas com imagem",
+  },
+};
+
 const TRADUCOES_DA_HORA = {
   comando: {
     "en-US": "The time now in every country of the server", "en-GB": "The time now in every country of the server",
@@ -18667,6 +18872,23 @@ const GLOBAIS_DO_CYRON = [
       { type: 3, name: "detalhes", required: false, max_length: 800,
         description: "O que mais precisa ser dito",
         descriptionLocalizations: TRADUCOES_DO_EVENTO.detalhes },
+    ],
+  },
+  {
+    /* So' de quem administra: e' ele que decide se o servidor ganha cartao. */
+    name: "boas-vindas",
+    nameLocalizations: { "en-US": "welcome", "en-GB": "welcome", "es-ES": "bienvenida", "fr": "bienvenue", "de": "willkommen" },
+    description: "Cartão com foto para quem entra, em todas as línguas / Welcome card",
+    descriptionLocalizations: TRADUCOES_DAS_BOAS_VINDAS.comando,
+    defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
+    dmPermission: false,
+    options: [
+      { type: 7, name: "canal", required: false, channelTypes: [0, 5],
+        description: "Onde o cartão aparece",
+        descriptionLocalizations: TRADUCOES_DAS_BOAS_VINDAS.canal },
+      { type: 5, name: "desligar", required: false,
+        description: "Desligar as boas-vindas com imagem",
+        descriptionLocalizations: TRADUCOES_DAS_BOAS_VINDAS.desligar },
     ],
   },
   {
