@@ -60,6 +60,7 @@
           '<div class="categoria">' + duas("Links", "Links") + "</div>" +
           canal("./passos.html", "primeiros-passos", "get-started", true, "passos") +
           canal("./recursos.html", "tudo-que-ela-faz", "everything-it-does", true, "recursos") +
+          canal("./recursos.html#ferramentas", "ferramentas", "tools", true) +
           canal("./painel.html", "meus-servidores", "my-servers", true, "painel") +
           canal("https://discord.gg/yDwePceB38", "suporte", "support", true) +
           '<div class="categoria">' + duas("Regras", "Rules") + "</div>" +

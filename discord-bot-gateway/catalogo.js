@@ -51,12 +51,12 @@ export const CATEGORIAS = [
     },
   },
   {
-    chave: "viver",
-    emoji: "🎮",
-    nome: { pt: "Viver junto", en: "Living together" },
+    chave: "ferramentas",
+    emoji: "🧰",
+    nome: { pt: "Ferramentas", en: "Tools" },
     resumo: {
-      pt: "Traduzir tira a barreira; isto dá motivo para atravessar. Jogo, horários que cada um lê no relógio dele, e a conta do que o servidor conseguiu na semana.",
-      en: "Translation removes the wall; this gives people a reason to cross it. A game, times everyone reads on their own clock, and the tally of what the server pulled off this week.",
+      pt: "Fora da tradução, e sem gastar cota: o que todo servidor usa. Boas-vindas com foto, a hora de cada país, eventos com inscrição. Funcionam em qualquer língua — e em servidor que nem precisa de tradutor.",
+      en: "Beyond translation, and using no quota: what every server needs. Welcome cards with photos, the time in every country, events people sign up for. They work in any language — even in a server that needs no translator.",
     },
   },
   {
@@ -378,10 +378,10 @@ export const RECURSOS = [
     prova: "paginaDoPasso",
   },
 
-  /* ------------------------------ viver ----------------------------- */
+  /* --------------------------- ferramentas --------------------------- */
   {
     chave: "eventos",
-    categoria: "viver",
+    categoria: "ferramentas",
     plano: "gratis",
     nome: { pt: "Eventos na hora de cada um", en: "Events in everyone's own time" },
     como: { pt: "/evento", en: "/evento" },
@@ -393,7 +393,7 @@ export const RECURSOS = [
   },
   {
     chave: "boas-vindas",
-    categoria: "chegar",
+    categoria: "ferramentas",
     plano: "gratis",
     nome: { pt: "Boas-vindas com foto, em todas as línguas", en: "Welcome card with photo, in every language" },
     como: { pt: "/boas-vindas #canal", en: "/welcome #channel" },
@@ -405,7 +405,7 @@ export const RECURSOS = [
   },
   {
     chave: "hora",
-    categoria: "viver",
+    categoria: "ferramentas",
     plano: "gratis",
     nome: { pt: "Que horas são lá?", en: "What time is it there?" },
     como: { pt: "/hora · /hora 17:00", en: "/time · /time 17:00" },
@@ -417,7 +417,7 @@ export const RECURSOS = [
   },
   {
     chave: "leitor-de-evento",
-    categoria: "viver",
+    categoria: "ferramentas",
     plano: "gratis",
     nome: { pt: "Evento a partir do print", en: "Event from a screenshot" },
     como: { pt: "Segure a mensagem → Apps → Criar evento", en: "Hold the message → Apps → Create event" },
@@ -429,7 +429,7 @@ export const RECURSOS = [
   },
   {
     chave: "presenca",
-    categoria: "viver",
+    categoria: "ferramentas",
     plano: "gratis",
     nome: { pt: "Inscrição com lembrete no privado", en: "Sign-up with a DM reminder" },
     como: { pt: "Botão 🔔 no cartão do evento", en: "The 🔔 button on the event card" },
@@ -441,7 +441,7 @@ export const RECURSOS = [
   },
   {
     chave: "recibo",
-    categoria: "viver",
+    categoria: "mandar",
     plano: "gratis",
     nome: { pt: "Recibo da semana", en: "The week's receipt" },
     como: { pt: "Toda segunda, automático", en: "Every Monday, on its own" },
