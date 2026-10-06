@@ -5135,6 +5135,64 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("não há mais o 😴", !m.botoesDoEvento(completo, AG)[0].components.some((b) => b.custom_id.startsWith("evento:nao")));
 }
 
+/* ============ /hora: o relógio do servidor ============ */
+{
+  const m = carregar(["TODOS_FUSOS", "MINUTOS_DOS_FUSOS", "textoDoFuso", "partesNoFuso", "ZONAS_DA_LINGUA",
+    "LINGUAS_DO_RELOGIO_PADRAO", "ZONAS_CONHECIDAS", "RELOGIO_MAX", "zonaValida", "minutosDaZona", "rotuloDaZona",
+    "zonasDoRelogio", "cartaoDoRelogio", "componentesDoRelogio"]);
+  globalThis.COR = 0xF5A623;
+  const INVERNO = Date.UTC(2026, 0, 15, 12, 21);   // janeiro: Europa sem horário de verão
+  const VERAO = Date.UTC(2026, 6, 15, 12, 21);     // julho: com
+  ok("Brasília é UTC−3", m.minutosDaZona("America/Sao_Paulo", INVERNO), -180);
+  ok("Lisboa no inverno é UTC+0", m.minutosDaZona("Europe/Lisbon", INVERNO), 0);
+  ok("Lisboa no verão é UTC+1 (fuso de verdade, não número fixo)", m.minutosDaZona("Europe/Lisbon", VERAO), 60);
+  ok("Nova York no verão é UTC−4", m.minutosDaZona("America/New_York", VERAO), -240);
+  ok("Índia tem meia hora", m.minutosDaZona("Asia/Kolkata", INVERNO), 330);
+  ok("o 'outro' do menu: off:-180", m.minutosDaZona("off:-180", INVERNO), -180);
+  for (const z of m.ZONAS_CONHECIDAS.keys()) {
+    verdade(`${z} existe no relógio do Node`, (() => { try { new Intl.DateTimeFormat("en", { timeZone: z }); return true; } catch { return false; } })());
+  }
+
+  ok("fuso nosso passa", m.zonaValida("Europe/Moscow"), "Europe/Moscow");
+  ok("deslocamento da lista passa", m.zonaValida("off:330"), "off:330");
+  ok("deslocamento inventado não", m.zonaValida("off:17"), null);
+  ok("fuso de fora não vai pro banco", m.zonaValida("Mars/Olympus"), null);
+  ok("lixo não", m.zonaValida("'; drop table"), null);
+
+  ok("servidor pt + ru: Brasília, Lisboa, Moscou", m.zonasDoRelogio(["pt", "ru"]),
+    ["America/Sao_Paulo", "Europe/Lisbon", "Europe/Moscow"]);
+  ok("sem sala de idioma: pt, en e es", m.zonasDoRelogio([]).length, 10);
+  ok("o fuso de quem pediu entra primeiro", m.zonasDoRelogio(["ru"], "Asia/Tokyo")[0], "Asia/Tokyo");
+  verdade("cabe no menu do Discord (25)", m.zonasDoRelogio(Object.keys(m.ZONAS_DA_LINGUA)).length <= 20);
+
+  const c = m.cartaoDoRelogio(["America/Sao_Paulo", "Europe/Moscow", "Asia/Tokyo"], INVERNO, null, "America/Sao_Paulo");
+  ok("o título é a hora UTC", c.title, "🕒 UTC 12:21");
+  verdade("Brasília 09:21, marcada como a sua", c.description.includes("🇧🇷 Brasília · **09:21** ⬅️"));
+  verdade("Moscou 15:21", c.description.includes("🇷🇺 Москва · **15:21**"));
+  verdade("e o relógio de quem lê, desenhado pelo Discord", c.description.includes(`🙋 <t:${INVERNO / 1000}:t>`));
+  const noite = m.cartaoDoRelogio(["Asia/Tokyo", "America/Los_Angeles"], Date.UTC(2026, 0, 15, 20, 0));
+  verdade("Tóquio já é amanhã: ⁺¹", noite.description.includes("🇯🇵 東京 · **05:00** ⁺¹"));
+  const cedo = m.cartaoDoRelogio(["America/Los_Angeles"], Date.UTC(2026, 0, 15, 3, 0));
+  verdade("Los Angeles ainda é ontem: ⁻¹", cedo.description.includes("**19:00** ⁻¹"));
+  const convertida = m.cartaoDoRelogio(["America/Sao_Paulo"], INVERNO, INVERNO + 3600000);
+  verdade("hora convertida mostra quanto falta", convertida.description.includes(":R>"));
+
+  const comp = m.componentesDoRelogio(["America/Sao_Paulo", "Europe/Moscow"], INVERNO, "Europe/Moscow");
+  const ops = comp[0].components[0].options;
+  ok("cada opção é a HORA daquele lugar", ops[0].label, "09:21 · Brasília");
+  ok("a salva vem marcada", ops.filter((o) => o.default).map((o) => o.value), ["Europe/Moscow"]);
+  verdade("e há o 🌍 para os outros fusos", ops.some((o) => o.value === "outro"));
+  verdade("botões de atualizar e esquecer", comp[1].components.map((b) => b.custom_id).join() === "hora:atualizar,hora:esquecer");
+}
+
+{
+  const f = readFileSync(`${aqui}/index.js`, "utf8");
+  verdade("o /hora é de todos (não vai para os servidores do jogo)", /COMANDOS_DE_TODOS = new Set\([^)]*"hora"/.test(f));
+  verdade("o fuso salvo mora em tabela própria, e não no cyron_ajuste lido inteiro",
+    /sbPost\("cyron_fuso"/.test(semComentarios(f)) && !/porAjuste\(`fuso:/.test(semComentarios(f.slice(f.indexOf("async function cliqueHora"), f.indexOf("async function cliqueHora") + 4000))));
+  verdade("só fuso validado vai para o banco", /const zona = zonaValida\(valor\);[^]{0,120}salvarFuso\(inter\.user\.id, zona\)/.test(f));
+}
+
 /* ============ o painel de seletores do /evento ============ */
 {
   const m = carregar(["EVENTO_MAX", "LEMBRETES", "REPETICOES", "TODOS_FUSOS", "MINUTOS_DOS_FUSOS", "fusoDoTexto", "rotuloDoFuso", "sugestoesDeFuso", "fusoDoCampo", "textoDaRepeticao",

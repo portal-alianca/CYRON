@@ -8394,6 +8394,213 @@ function instanteDe(pt, fuso) {
   return Date.UTC(pt.ano, pt.mes - 1, pt.dia, pt.hora, pt.min) - fuso * 60000;
 }
 
+/* ---------------- /hora: o relogio do servidor inteiro ----------------
+
+   Fora do jogo, o mesmo problema: o russo avisa "atualizacao as 17h" e o
+   brasileiro nao sabe que isso e' 05h da manha para ele. O /hora mostra a
+   hora AGORA em cada pais das linguas do servidor, e quem toca no proprio
+   horario deixa o fuso salvo -- sem precisar saber o que e' UTC, so' olhando
+   o relogio do celular.
+
+   O Discord nao conta ao bot onde a pessoa esta' (nem o fuso, nem o relogio):
+   por isso a pergunta. Uma vez, e vale em todo servidor.
+
+   Fuso de verdade (America/Sao_Paulo), e nao "-3": Lisboa, Nova York e
+   Sydney mudam de hora no verao, e um numero fixo erraria metade do ano. */
+const ZONAS_DA_LINGUA = {
+  pt: [["🇧🇷", "Brasília", "America/Sao_Paulo"], ["🇵🇹", "Lisboa", "Europe/Lisbon"]],
+  en: [["🇺🇸", "New York", "America/New_York"], ["🇺🇸", "Los Angeles", "America/Los_Angeles"],
+    ["🇬🇧", "London", "Europe/London"], ["🇦🇺", "Sydney", "Australia/Sydney"]],
+  es: [["🇪🇸", "Madrid", "Europe/Madrid"], ["🇲🇽", "México", "America/Mexico_City"],
+    ["🇨🇴", "Bogotá", "America/Bogota"], ["🇦🇷", "Buenos Aires", "America/Argentina/Buenos_Aires"]],
+  ko: [["🇰🇷", "서울", "Asia/Seoul"]], ja: [["🇯🇵", "東京", "Asia/Tokyo"]], "zh-CN": [["🇨🇳", "北京", "Asia/Shanghai"]],
+  de: [["🇩🇪", "Berlin", "Europe/Berlin"]], fr: [["🇫🇷", "Paris", "Europe/Paris"]], it: [["🇮🇹", "Roma", "Europe/Rome"]],
+  ru: [["🇷🇺", "Москва", "Europe/Moscow"]], ar: [["🇸🇦", "الرياض", "Asia/Riyadh"], ["🇪🇬", "القاهرة", "Africa/Cairo"]],
+  tr: [["🇹🇷", "İstanbul", "Europe/Istanbul"]], id: [["🇮🇩", "Jakarta", "Asia/Jakarta"]], th: [["🇹🇭", "กรุงเทพ", "Asia/Bangkok"]],
+  vi: [["🇻🇳", "Hà Nội", "Asia/Ho_Chi_Minh"]], pl: [["🇵🇱", "Warszawa", "Europe/Warsaw"]], nl: [["🇳🇱", "Amsterdam", "Europe/Amsterdam"]],
+  tl: [["🇵🇭", "Manila", "Asia/Manila"]], hi: [["🇮🇳", "India", "Asia/Kolkata"]], uk: [["🇺🇦", "Київ", "Europe/Kyiv"]],
+};
+/* Servidor sem sala de idioma ainda: as tres linguas que mais aparecem. */
+const LINGUAS_DO_RELOGIO_PADRAO = ["pt", "en", "es"];
+const ZONAS_CONHECIDAS = new Map(Object.values(ZONAS_DA_LINGUA).flat().map((z) => [z[2], z]));
+const RELOGIO_MAX = 20;
+
+/* Fuso valido: um dos nossos, ou "off:<minutos>" da lista completa de fusos
+   (o "outro" do menu). Valor de fora nunca vai para o banco. */
+function zonaValida(z) {
+  const t = String(z || "");
+  if (ZONAS_CONHECIDAS.has(t)) return t;
+  const m = t.match(/^off:(-?\d{1,3})$/);
+  return m && MINUTOS_DOS_FUSOS.has(Number(m[1])) ? t : null;
+}
+
+/* Quantos minutos a zona esta' do UTC NESTE instante (com horario de verao). */
+function minutosDaZona(zona, agora = Date.now()) {
+  const t = String(zona || "");
+  if (t.startsWith("off:")) return Number(t.slice(4)) || 0;
+  try {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: t, hourCycle: "h23",
+      year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric" })
+      .formatToParts(new Date(agora)).map((x) => [x.type, x.value]));
+    const comoUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour) % 24, Number(p.minute));
+    return Math.round((comoUtc - Math.floor(agora / 60000) * 60000) / 60000);
+  } catch {
+    return 0;
+  }
+}
+
+function rotuloDaZona(zona) {
+  const z = ZONAS_CONHECIDAS.get(String(zona || ""));
+  if (z) return `${z[0]} ${z[1]}`;
+  const min = Number(String(zona || "").slice(4)) || 0;
+  return `🌍 ${textoDoFuso(min)}`;
+}
+
+/* As zonas das linguas do servidor, sem repetir, com a de quem pediu junto. */
+function zonasDoRelogio(linguas, minha = null) {
+  const fora = [];
+  const lista = linguas?.length ? linguas : LINGUAS_DO_RELOGIO_PADRAO;
+  for (const l of lista) {
+    for (const z of ZONAS_DA_LINGUA[l] || ZONAS_DA_LINGUA[String(l).split("-")[0]] || []) {
+      if (!fora.includes(z[2])) fora.push(z[2]);
+    }
+  }
+  if (minha && !fora.includes(minha)) fora.unshift(minha);
+  return fora.slice(0, RELOGIO_MAX);
+}
+
+/* O cartao. `alvo`: o instante convertido (/hora 17:00); sem ele, agora.
+   Cada linha tem a hora daquele lugar; a ultima, <t:..:t>, o Discord desenha
+   no relogio de QUEM ESTA' LENDO -- inclusive de quem nao esta' na lista. */
+function cartaoDoRelogio(zonas, agora = Date.now(), alvo = null, minha = null) {
+  const t = alvo ?? agora;
+  const z2 = (n) => String(n).padStart(2, "0");
+  const hhmm = (ms, min) => { const p = partesNoFuso(ms, min); return `${z2(p.hora)}:${z2(p.min)}`; };
+  const diaUtc = partesNoFuso(t, 0).dia;
+  const linhas = zonas.map((zona) => {
+    const min = minutosDaZona(zona, t);
+    const dia = partesNoFuso(t, min).dia;
+    const salto = dia === diaUtc ? "" : (min > 0 ? " ⁺¹" : " ⁻¹");
+    return `${rotuloDaZona(zona)} · **${hhmm(t, min)}**${salto}${zona === minha ? " ⬅️" : ""}`;
+  });
+  const s = Math.floor(t / 1000);
+  return {
+    color: COR,
+    title: `🕒 UTC ${hhmm(t, 0)}`,
+    description: [...linhas, "", `🙋 <t:${s}:t>${alvo ? ` · <t:${s}:R>` : ""}`].join("\n"),
+  };
+}
+
+/* Escolher e' tocar no PROPRIO horario -- ninguem precisa saber o nome do fuso. */
+function componentesDoRelogio(zonas, agora = Date.now(), minha = null, pergunta = "🕒") {
+  const z2 = (n) => String(n).padStart(2, "0");
+  const opcoes = zonas.map((zona) => {
+    const p = partesNoFuso(agora, minutosDaZona(zona, agora));
+    const z = ZONAS_CONHECIDAS.get(zona);
+    return { label: `${z2(p.hora)}:${z2(p.min)} · ${z ? z[1] : rotuloDaZona(zona).slice(3)}`.slice(0, 100),
+      value: zona, ...(z ? { emoji: { name: z[0] } } : {}), default: zona === minha };
+  });
+  opcoes.push({ label: "🌍 …", value: "outro" });
+  return [
+    { type: 1, components: [{ type: 3, custom_id: "hora:zona", placeholder: pergunta.slice(0, 150), options: opcoes }] },
+    { type: 1, components: [
+      { type: 2, custom_id: "hora:atualizar", style: 2, emoji: { name: "🔄" } },
+      { type: 2, custom_id: "hora:esquecer", style: 2, emoji: { name: "🗑️" } },
+    ] },
+  ];
+}
+
+/* O fuso salvo de cada pessoa. Tabela propria, lida uma pessoa por vez --
+   e nao no cyron_ajuste, que e' lido INTEIRO a cada minuto e cresceria uma
+   linha por pessoa do mundo. */
+const fusoNaMemoria = new Map();
+async function fusoSalvo(userId) {
+  const achado = fusoNaMemoria.get(userId);
+  if (achado && Date.now() - achado.t < CONFIG_NA_MEMORIA) return achado.zona;
+  const r = await sb(`cyron_fuso?discord_user_id=eq.${encodeURIComponent(userId)}&select=zona`).catch(() => null);
+  const zona = zonaValida(r?.[0]?.zona) || null;
+  fusoNaMemoria.set(userId, { zona, t: Date.now() });
+  while (fusoNaMemoria.size > 20000) fusoNaMemoria.delete(fusoNaMemoria.keys().next().value);
+  return zona;
+}
+async function salvarFuso(userId, zona) {
+  await sbPost("cyron_fuso", { discord_user_id: String(userId), zona, atualizado_em: new Date().toISOString() },
+    "resolution=merge-duplicates");
+  fusoNaMemoria.set(userId, { zona, t: Date.now() });
+}
+async function esquecerFuso(userId) {
+  await sbDel(`cyron_fuso?discord_user_id=eq.${encodeURIComponent(userId)}`);
+  fusoNaMemoria.set(userId, { zona: null, t: Date.now() });
+}
+
+async function linguasDoRelogio(guildId) {
+  if (!guildId) return [];
+  const servidor = await servidorDoGuild(guildId).catch(() => null);
+  if (!servidor) return [];
+  return [...new Set((await replicasDoIdioma(servidor.id).catch(() => [])).map((r) => r.idioma).filter(Boolean))];
+}
+
+async function comandoHora(inter) {
+  const idioma = await linguaDe(inter);
+  const minha = await fusoSalvo(inter.user.id);
+  const agora = Date.now();
+  const bruto = String(inter.options.getString("quando") || "").trim();
+  let alvo = null;
+  if (bruto) {
+    alvo = quandoDoTexto(bruto, agora, minha ? minutosDaZona(minha, agora) : 0);
+    if (alvo === null) {
+      const [t] = await nalingua(idioma, inter.guildId, `Não entendi "${bruto.slice(0, 40)}". Exemplos: 17:00 · 20h30 · 04/10 11:30 · 3h`);
+      return inter.reply({ flags: 64, content: `🕒 ${t}` });
+    }
+  }
+  const zonas = zonasDoRelogio(await linguasDoRelogio(inter.guildId), minha);
+  const [pergunta, deQuem] = await nalingua(idioma, inter.guildId, "Qual é a sua hora agora? Toque nela e fica salvo.",
+    bruto && !minha ? "Li essa hora em UTC. Escolha a sua hora abaixo e da próxima vez eu leio no seu fuso." : "");
+  const cartao = cartaoDoRelogio(zonas, agora, alvo, minha);
+  if (deQuem) cartao.footer = { text: deQuem.slice(0, 2000) };
+  return inter.reply({ embeds: [cartao], components: componentesDoRelogio(zonas, agora, minha, `${pergunta} · Which one is your time?`),
+    allowedMentions: { parse: [] } });
+}
+
+async function cliqueHora(inter) {
+  const acao = inter.customId.split(":")[1];
+  const idioma = await linguaDe(inter);
+  const agora = Date.now();
+  if (acao === "atualizar") {
+    const zonas = (inter.message?.components?.[0]?.components?.[0]?.options || []).map((o) => zonaValida(o.value)).filter(Boolean);
+    const lista = zonas.length ? zonas : zonasDoRelogio(await linguasDoRelogio(inter.guildId));
+    /* A hora convertida (/hora 17:00) nao "atualiza": ela e' fixa. So' o agora anda. */
+    if (inter.message?.embeds?.[0]?.description?.includes(":R>")) return inter.deferUpdate();
+    return inter.update({ embeds: [cartaoDoRelogio(lista, agora)], components: componentesDoRelogio(lista, agora,
+      null, inter.message?.components?.[0]?.components?.[0]?.placeholder || "🕒") });
+  }
+  if (acao === "esquecer") {
+    await esquecerFuso(inter.user.id).catch(() => {});
+    const [t] = await nalingua(idioma, inter.guildId, "Pronto, esqueci o seu fuso.");
+    return inter.reply({ flags: 64, content: `🗑️ ${t}` });
+  }
+  const valor = inter.values?.[0];
+  if (acao === "zona" && valor === "outro") {
+    const lista = (lado) => TODOS_FUSOS.filter(([m]) => (lado === "oeste" ? m <= 0 : m > 0)).map(([m]) => {
+      const p = partesNoFuso(agora, m);
+      return { label: `${String(p.hora).padStart(2, "0")}:${String(p.min).padStart(2, "0")} · ${rotuloDoFuso(m)}`.slice(0, 100), value: `off:${m}` };
+    });
+    const [t] = await nalingua(idioma, inter.guildId, "Toque na hora que está no seu relógio agora.");
+    return inter.reply({ flags: 64, content: `🌍 ${t}`, components: [
+      { type: 1, components: [{ type: 3, custom_id: "hora:zona:oeste", placeholder: "🌎 UTC−12 … UTC±0", options: lista("oeste") }] },
+      { type: 1, components: [{ type: 3, custom_id: "hora:zona:leste", placeholder: "🌏 UTC+1 … UTC+14", options: lista("leste") }] },
+    ] });
+  }
+  const zona = zonaValida(valor);
+  if (acao === "zona" && zona) {
+    await salvarFuso(inter.user.id, zona).catch((e) => console.error("hora: nao consegui salvar o fuso:", e?.message || e));
+    const p = partesNoFuso(agora, minutosDaZona(zona, agora));
+    const [t] = await nalingua(idioma, inter.guildId, "Salvo. Agora eu sei a sua hora:");
+    return inter.reply({ flags: 64, content: `✅ ${t} ${rotuloDaZona(zona)} · **${String(p.hora).padStart(2, "0")}:${String(p.min).padStart(2, "0")}** (${textoDoFuso(minutosDaZona(zona, agora))})` });
+  }
+  return inter.deferUpdate();
+}
+
 /* A proxima hora cheia depois de agora + 1h: o painel abre num horario que
    ja vale, e quem so' quer ajustar a hora nao precisa mexer no dia. */
 function horarioInicial(agora = Date.now()) {
@@ -16666,6 +16873,7 @@ async function comandoDeInteracao(inter) {
   if (nome === "help") return comandoAjuda(inter);
   if (nome === "admin") return comandoAdmin(inter);
   if (nome === "arena") return inter.reply({ flags: 64, content: ARENA_ENCERRADA });
+  if (nome === "hora") return comandoHora(inter);
   if (nome === "evento") {
     if (!inter.guildId) {
       return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
@@ -16796,6 +17004,9 @@ client.on("interactionCreate", async (inter) => {
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("evento:")) {
       return await cliqueEvento(inter);
+    }
+    if (inter.isMessageComponent() && inter.customId.startsWith("hora:")) {
+      return await cliqueHora(inter);
     }
     if ((inter.isMessageComponent() || inter.isModalSubmit()) &&
         (inter.customId.startsWith("leitor:") || inter.customId.startsWith("evsel:"))) {
@@ -17363,7 +17574,7 @@ client.on("messageReactionAdd", async (reacao, quem) => {
    A lista diz "nao mexa nisto", e nao "todo mundo usa". Sem ele aqui,
    separarComandos leria /admin como comando do jogo e o empurraria pros
    servidores com alianca -- exatamente o contrario do que ele e'. */
-const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento"]);
+const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento", "hora"]);
 
 async function separarComandos() {
   try {
@@ -18373,6 +18584,30 @@ const TRADUCOES_DO_EVENTO = (() => {
   return fora;
 })();
 
+const TRADUCOES_DA_HORA = {
+  comando: {
+    "en-US": "The time now in every country of the server", "en-GB": "The time now in every country of the server",
+    "es-ES": "La hora ahora en cada país del servidor", fr: "L'heure actuelle dans chaque pays du serveur",
+    de: "Die aktuelle Uhrzeit in jedem Land des Servers", it: "L'ora attuale in ogni paese del server",
+    ru: "Текущее время в каждой стране сервера", uk: "Поточний час у кожній країні сервера",
+    tr: "Sunucudaki her ülkede şu anki saat", pl: "Aktualna godzina w każdym kraju serwera",
+    id: "Jam sekarang di setiap negara server", vi: "Giờ hiện tại ở mỗi quốc gia trong máy chủ",
+    th: "เวลาตอนนี้ในแต่ละประเทศของเซิร์ฟเวอร์", ja: "サーバーの各国の現在時刻", ko: "서버 각 나라의 현재 시간",
+    "zh-CN": "服务器中每个国家的当前时间", "pt-BR": "A hora agora em cada país do servidor",
+  },
+  quando: {
+    "en-US": "Optional: convert a time. E.g. 17:00 · 04/10 20:30", "en-GB": "Optional: convert a time. E.g. 17:00 · 04/10 20:30",
+    "es-ES": "Opcional: convertir una hora. Ej: 17:00 · 04/10 20:30", fr: "Optionnel : convertir une heure. Ex : 17:00 · 04/10 20:30",
+    de: "Optional: eine Uhrzeit umrechnen. Z. B. 17:00 · 04/10 20:30", it: "Opzionale: convertire un orario. Es: 17:00 · 04/10 20:30",
+    ru: "Необязательно: перевести время. Напр.: 17:00 · 04/10 20:30", uk: "Необов'язково: перевести час. Напр.: 17:00 · 04/10 20:30",
+    tr: "İsteğe bağlı: bir saati çevir. Örn: 17:00 · 04/10 20:30", pl: "Opcjonalnie: przelicz godzinę. Np. 17:00 · 04/10 20:30",
+    id: "Opsional: ubah jam. Mis: 17:00 · 04/10 20:30", vi: "Tùy chọn: đổi giờ. VD: 17:00 · 04/10 20:30",
+    th: "ไม่บังคับ: แปลงเวลา เช่น 17:00 · 04/10 20:30", ja: "任意: 時刻を変換。例: 17:00 · 04/10 20:30",
+    ko: "선택: 시간 변환. 예: 17:00 · 04/10 20:30", "zh-CN": "可选：换算时间。例：17:00 · 04/10 20:30",
+    "pt-BR": "Opcional: converter uma hora. Ex: 17:00 · 04/10 20h30",
+  },
+};
+
 const GLOBAIS_DO_CYRON = [
   {
     name: "cyron",
@@ -18432,6 +18667,20 @@ const GLOBAIS_DO_CYRON = [
       { type: 3, name: "detalhes", required: false, max_length: 800,
         description: "O que mais precisa ser dito",
         descriptionLocalizations: TRADUCOES_DO_EVENTO.detalhes },
+    ],
+  },
+  {
+    /* De todo mundo, e nao so' do lider: saber que horas sao no pais do
+       outro e' coisa de qualquer conversa. Funciona no privado tambem. */
+    name: "hora",
+    nameLocalizations: { "en-US": "time", "en-GB": "time", "es-ES": "hora", "fr": "heure", "de": "uhrzeit", "it": "ora" },
+    description: "A hora agora em cada país do servidor / The time now in every country",
+    descriptionLocalizations: TRADUCOES_DA_HORA.comando,
+    dmPermission: true,
+    options: [
+      { type: 3, name: "quando", required: false, max_length: 40,
+        description: "Opcional: converter uma hora. Ex: 17:00 · 04/10 20h30",
+        descriptionLocalizations: TRADUCOES_DA_HORA.quando },
     ],
   },
   {

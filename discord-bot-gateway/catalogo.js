@@ -386,10 +386,22 @@ export const RECURSOS = [
     nome: { pt: "Eventos na hora de cada um", en: "Events in everyone's own time" },
     como: { pt: "/evento", en: "/evento" },
     oque: {
-      pt: "Você marca “20:30” uma vez e o Brasil lê 20:30, a Alemanha lê 01:30 e as Filipinas leem 07:30 — cada um no relógio dele, sem o bot guardar o fuso de ninguém. Com GIF, contagem regressiva no cartão e repetição: todo dia, toda semana ou a cada 47h30m, como o Urso.",
-      en: "You set “20:30” once and Brazil reads 20:30, Germany reads 01:30 and the Philippines read 07:30 — each on their own clock, with the bot storing nobody's timezone. With a GIF, a live countdown on the card and repeats: daily, weekly or every 47h30m, like the Bear.",
+      pt: "Você marca “20:30” uma vez e o Brasil lê 20:30, a Alemanha lê 01:30 e as Filipinas leem 07:30 — cada um no relógio dele. Com GIF, contagem regressiva no cartão, duração livre (30m, 5d, 1h43m27s) e repetição que conta de quando o evento fecha, como o Urso: 30m e de volta 47h depois.",
+      en: "You set “20:30” once and Brazil reads 20:30, Germany reads 01:30 and the Philippines read 07:30 — each on their own clock. With a GIF, a live countdown on the card, any duration (30m, 5d, 1h43m27s) and repeats that count from when the event ends, like the Bear: 30m, then back 47h later.",
     },
     prova: "cartaoDoEvento",
+  },
+  {
+    chave: "hora",
+    categoria: "viver",
+    plano: "gratis",
+    nome: { pt: "Que horas são lá?", en: "What time is it there?" },
+    como: { pt: "/hora · /hora 17:00", en: "/time · /time 17:00" },
+    oque: {
+      pt: "O russo avisa “atualização às 17h” e o brasileiro não sabe que é 05h da manhã para ele. O /hora mostra a hora agora em cada país das línguas do servidor — e converte uma hora: “17:00” sai em todos os relógios de uma vez. Quem toca no próprio horário deixa o fuso salvo, sem precisar saber o que é UTC.",
+      en: "The Russian says “update at 17:00” and the Brazilian has no idea that's 5 a.m. for him. /time shows the time right now in every country of the server's languages — and converts a time: “17:00” comes out on every clock at once. Tap your own time and your timezone is saved, no need to know what UTC is.",
+    },
+    prova: "cartaoDoRelogio",
   },
   {
     chave: "leitor-de-evento",
