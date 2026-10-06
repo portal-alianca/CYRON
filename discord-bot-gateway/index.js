@@ -9692,14 +9692,35 @@ function podeDarBoasVindas(guildId, agora = Date.now()) {
   return true;
 }
 
-async function mensagemDeBoasVindas(member, linguas) {
+/* A mensagem que vai acima do cartao: a do administrador, se ele escreveu
+   uma, com os marcadores trocados. Pura, para o teste conferir cada troca. */
+const BV_TEXTO_PADRAO = "👋 {usuario} · {ola}";
+const BV_TEXTO_MAX = 1000;
+function textoDeBoasVindas(modelo, { id, nome, servidor, numero, ola }) {
+  const limpo = (t) => String(t || "").replace(/([*_`~|>\\])/g, "\\$1");
+  return String(modelo || BV_TEXTO_PADRAO).slice(0, BV_TEXTO_MAX)
+    /* Funcao, e nao texto, na troca: um nome com "$&" seria lido como
+       comando de substituicao e viraria outra coisa. */
+    .replace(/\{(usuario|usuário|user|mention)\}/gi, () => `<@${id}>`)
+    .replace(/\{(nome|name)\}/gi, () => limpo(nome))
+    .replace(/\{(servidor|server)\}/gi, () => limpo(servidor))
+    .replace(/\{(numero|número|number|count)\}/gi, () => Number(numero || 0).toLocaleString("en-US"))
+    .replace(/\{(ola|olá|hello|welcome)\}/gi, () => String(ola || ""))
+    .slice(0, 2000);
+}
+
+async function mensagemDeBoasVindas(member, linguas, modelo = null) {
   const { noTexto } = saudacoesDoServidor(linguas);
   const imagem = await cartaoDeBoasVindas(member, linguas).catch((e) => {
     console.error("boas-vindas: nao consegui desenhar:", e?.message || e);
     return null;
   });
   return {
-    content: `👋 <@${member.id}> · ${noTexto.join(" · ")}`,
+    /* So' quem chegou e' marcado, escreva o administrador o que escrever:
+       um @everyone no texto aparece, mas nao acorda o servidor inteiro a
+       cada entrada. */
+    content: textoDeBoasVindas(modelo, { id: member.id, nome: member.displayName || member.user?.username,
+      servidor: member.guild.name, numero: member.guild.memberCount, ola: noTexto.join(" · ") }),
     allowedMentions: { users: [member.id] },
     ...(imagem ? { files: [{ attachment: imagem, name: "boas-vindas.jpg" }] } : {}),
   };
@@ -9714,7 +9735,7 @@ async function darBoasVindas(member) {
     await member.guild.channels.fetch(String(canalId)).catch(() => null);
   if (!canal?.isTextBased?.()) return;
   const linguas = await linguasDoRelogio(member.guild.id);
-  await canal.send(await mensagemDeBoasVindas(member, linguas)).catch((e) =>
+  await canal.send(await mensagemDeBoasVindas(member, linguas, servidor.boas_vindas_texto)).catch((e) =>
     console.error(`boas-vindas: nao consegui postar em ${member.guild.name}:`, e?.message || e));
 }
 
@@ -9752,9 +9773,57 @@ async function comandoBoasVindas(inter) {
     "Desligado. Para ligar: /boas-vindas e escolha o canal.",
     "Assim fica, com a sua foto:");
   if (!alvo) return inter.editReply({ content: `👋 ${desligadoTxt}` });
-  const previa = await mensagemDeBoasVindas(inter.member, await linguasDoRelogio(inter.guildId));
-  return inter.editReply({ content: `✅ ${ligado} <#${alvo}>.\n${exemplo}\n\n${previa.content}`,
-    files: previa.files || [], allowedMentions: { parse: [] } });
+  return inter.editReply(await previaDeBoasVindas(inter, idioma, alvo, servidor.boas_vindas_texto, `✅ ${ligado} <#${alvo}>.\n${exemplo}`));
+}
+
+/* A previa com os botoes de editar: o mesmo desenho para o comando e para
+   depois de salvar o texto. */
+async function previaDeBoasVindas(inter, idioma, alvo, modelo, cabeca) {
+  const previa = await mensagemDeBoasVindas(inter.member, await linguasDoRelogio(inter.guildId), modelo);
+  const [editar, padrao] = await nalingua(idioma, inter.guildId, "Editar mensagem", "Voltar ao padrão");
+  return {
+    content: `${cabeca}\n\n${previa.content}`.slice(0, 2000),
+    files: previa.files || [], allowedMentions: { parse: [] },
+    components: [{ type: 1, components: [
+      { type: 2, custom_id: "bv:editar", style: 1, emoji: { name: "✏️" }, label: editar.slice(0, 80) },
+      ...(modelo ? [{ type: 2, custom_id: "bv:padrao", style: 2, emoji: { name: "↩️" }, label: padrao.slice(0, 80) }] : []),
+    ] }],
+  };
+}
+
+/* ✏️ abre a janela com o texto atual; ↩️ volta ao padrao. So' quem
+   administra -- a checagem e' no clique, porque a previa e' efemera mas o
+   botao nao e' protecao. */
+async function cliqueBoasVindas(inter) {
+  const acao = inter.customId.split(":")[1];
+  const idioma = await linguaDe(inter);
+  if (!inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    const [t] = await nalingua(idioma, inter.guildId, "Só quem administra o servidor mexe nas boas-vindas.");
+    return inter.reply({ flags: 64, content: t });
+  }
+  const servidor = await servidorDoGuild(inter.guildId);
+  if (!servidor) return inter.reply({ flags: 64, content: "Ainda não terminei de me instalar aqui." });
+
+  if (acao === "editar") {
+    const [rotulo] = await nalingua(idioma, inter.guildId, "Mensagem de boas-vindas");
+    return inter.showModal({
+      custom_id: "bv:janela", title: "👋",
+      components: [{ type: 1, components: [{ type: 4, custom_id: "texto", label: rotulo.slice(0, 45), style: 2,
+        required: true, max_length: BV_TEXTO_MAX, placeholder: "{usuario} {nome} {servidor} {numero} {ola}",
+        value: String(servidor.boas_vindas_texto || BV_TEXTO_PADRAO).slice(0, BV_TEXTO_MAX) }] }],
+    });
+  }
+
+  await inter.deferReply({ flags: 64 });
+  let modelo = null;
+  if (acao === "janela") {
+    modelo = String(inter.fields.getTextInputValue("texto") || "").trim().slice(0, BV_TEXTO_MAX) || null;
+  }
+  if (acao !== "janela" && acao !== "padrao") return inter.editReply({ content: "—" });
+  await sbPatch(`cyron_servidor?id=eq.${servidor.id}`, { boas_vindas_texto: modelo });
+  cacheServidor.delete(inter.guildId);
+  const [salvo] = await nalingua(idioma, inter.guildId, modelo ? "Mensagem salva. Fica assim:" : "Voltou à mensagem padrão:");
+  return inter.editReply(await previaDeBoasVindas(inter, idioma, servidor.boas_vindas_canal, modelo, `✅ ${salvo}`));
 }
 
 /* A terceira camada: quem escreveu antes de tocar em qualquer botão.
@@ -17228,6 +17297,9 @@ client.on("interactionCreate", async (inter) => {
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("evento:")) {
       return await cliqueEvento(inter);
+    }
+    if ((inter.isMessageComponent() || inter.isModalSubmit()) && inter.customId.startsWith("bv:")) {
+      return await cliqueBoasVindas(inter);
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("hora:")) {
       return await cliqueHora(inter);

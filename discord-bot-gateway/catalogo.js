@@ -398,8 +398,8 @@ export const RECURSOS = [
     nome: { pt: "Boas-vindas com foto, em todas as línguas", en: "Welcome card with photo, in every language" },
     como: { pt: "/boas-vindas #canal", en: "/welcome-card #channel" },
     oque: {
-      pt: "Quem entra ganha um cartão com a própria foto, o nome e o número de membro — e o “bem-vindo” vem em todas as línguas do servidor, lado a lado: “Boas-vindas · Добро пожаловать · Welcome”. Ligado só quando você escolhe o canal.",
-      en: "Whoever joins gets a card with their own photo, name and member number — and the “welcome” comes in every language of the server, side by side: “Boas-vindas · Добро пожаловать · Welcome”. On only when you pick the channel.",
+      pt: "Quem entra ganha um cartão com a própria foto, o nome e o número de membro — e o “bem-vindo” vem em todas as línguas do servidor, lado a lado: “Boas-vindas · Добро пожаловать · Welcome”. O fundo é a imagem do próprio servidor, e a mensagem de cima você escreve no ✏️, com {usuario}, {nome}, {servidor} e {numero}. Ligado só quando você escolhe o canal.",
+      en: "Whoever joins gets a card with their own photo, name and member number — and the “welcome” comes in every language of the server, side by side: “Boas-vindas · Добро пожаловать · Welcome”. The background is your server's own image, and you write the message on top with ✏️, using {user}, {name}, {server} and {number}. On only when you pick the channel.",
     },
     prova: "desenharBoasVindas",
   },
