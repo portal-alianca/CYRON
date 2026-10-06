@@ -8764,6 +8764,26 @@ function conferirCartao(onde, embed, componentes = []) {
   ok("quatro listas no /equipar", eq.components.length, 4);
   verdade("alternativa trancada mostra o nível", eq.components[1].components[0].options[1].label.includes("🔒 Nv 2"));
 
+  /* O cartaz desenhado de verdade, com os retratos do repositorio. */
+  {
+    const sharp = (await import("sharp")).default;
+    const FONTE = new URL("./fontes/DejaVuSans-Bold.ttf", import.meta.url).pathname;
+    const pasta = new URL("./img/duelo/", import.meta.url).pathname;
+    const c = carregar(["soLetrasDaFonte", "temLetra", "FONTES_LIDAS", "fonteDoDesenho", "DU_LARGURA", "DU_ALTURA", "DU_FOTO_L",
+      "DU_FOTO_A", "textoCentradoEm", "desenharDuelo"]);
+    const jpg = await c.desenharDuelo(sharp, P("cleopatra"), P("napoleao"), pasta, FONTE);
+    const meta = await sharp(jpg).metadata();
+    ok("o cartaz sai em 1024x480", [meta.width, meta.height], [1024, 480]);
+    for (const p of elenco.PERSONAGENS) {
+      const r = await sharp(`${pasta}${p.id}.jpg`).metadata().catch(() => null);
+      verdade(`retrato de ${p.id} existe em 384x512`, r?.width === 384 && r?.height === 512);
+    }
+    const creditos = readFileSync(`${pasta}CREDITOS.md`, "utf8");
+    ok("todo retrato tem crédito", elenco.PERSONAGENS.filter((p) => !creditos.includes(`${p.id}.jpg`)).map((p) => p.id), []);
+    const tela = m.telaDoDuelo(Object.assign(duelo(), { limite: 0, imagem: true }));
+    ok("a tela aponta para o anexo", tela.embeds[0].image.url, "attachment://duelo.jpg");
+  }
+
   const idx = readFileSync(`${aqui}/index.js`, "utf8");
   verdade("só quem está na vez joga", /if \(estado\.vez !== indice\)[^]{0,200}Ainda não é a sua vez/.test(idx));
   verdade("clique duplo não joga duas vezes", /if \(estado\.ocupado\) return inter\.deferUpdate\(\)/.test(idx));
