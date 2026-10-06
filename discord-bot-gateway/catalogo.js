@@ -416,6 +416,30 @@ export const RECURSOS = [
     prova: "desenharPerfil",
   },
   {
+    chave: "sorteio",
+    categoria: "ferramentas",
+    plano: "gratis",
+    nome: { pt: "Sorteios com botão", en: "Giveaways with a button" },
+    como: { pt: "/sorteio prêmio duração", en: "/giveaway prize duration" },
+    oque: {
+      pt: "O prêmio, quanto tempo e quantos ganham. Todo mundo entra tocando em 🎉, em qualquer língua; na hora a CYRON sorteia de forma justa, marca quem ganhou e deixa o 🔁 para sortear de novo.",
+      en: "The prize, how long and how many win. Everyone joins by pressing 🎉, in any language; when time's up CYRON draws fairly, pings the winners and leaves 🔁 to draw again.",
+    },
+    prova: "encerrarSorteio",
+  },
+  {
+    chave: "interacoes",
+    categoria: "ferramentas",
+    plano: "gratis",
+    nome: { pt: "Abraço, beijo, tapa e cafuné", en: "Hug, kiss, slap and headpat" },
+    como: { pt: "/abraco · /beijo · /tapa · /cafune", en: "/hug · /kiss · /slap · /pat" },
+    oque: {
+      pt: "Um GIF de anime e o nome da ação na língua de quem mandou e na de quem recebeu, lado a lado: “Abraço · Объятие · Hug”. Diversão que atravessa a barreira da língua, sem gastar tradutor.",
+      en: "An anime GIF and the action's name in the sender's and the receiver's language, side by side: “Hug · Abraço · Объятие”. Fun that crosses the language barrier, using no translator.",
+    },
+    prova: "nomesDaInteracao",
+  },
+  {
     chave: "hora",
     categoria: "ferramentas",
     plano: "gratis",
