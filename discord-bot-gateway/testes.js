@@ -8359,7 +8359,7 @@ function conferirCartao(onde, embed, componentes = []) {
   const FONTE = new URL("./fontes/DejaVuSans-Bold.ttf", import.meta.url).pathname;
   globalThis.FUNDO_DA_CYRON = new URL("./img/fundo-cyron.jpg", import.meta.url).pathname;
   const b = carregar(["SAUDACOES", "SAUDACOES_SO_NO_TEXTO", "BV_LARGURA", "BV_ALTURA", "BV_POR_MINUTO", "entradasRecentes",
-    "saudacoesDoServidor", "soLetrasDaFonte", "linhaEmCaminho", "FONTES_LIDAS", "fonteDoDesenho", "BV_FOTO", "desenharBoasVindas",
+    "saudacoesDoServidor", "soLetrasDaFonte", "temLetra", "linhaEmCaminho", "FONTES_LIDAS", "fonteDoDesenho", "BV_FOTO", "desenharBoasVindas",
     "podeDarBoasVindas"]);
 
   const s1 = b.saudacoesDoServidor(["pt", "ru"]);
@@ -8373,10 +8373,16 @@ function conferirCartao(onde, embed, componentes = []) {
   const fonte = await b.fonteDoDesenho(FONTE);
   ok("emoji e letra que a fonte não tem saem do nome", b.soLetrasDaFonte(fonte, "Tiago 🎮 さくら"), "Tiago");
   ok("nome todo em japonês fica vazio (e cai no @usuário)", b.soLetrasDaFonte(fonte, "さくら"), "");
+  ok("letra enfeitada do Unicode vira letra comum", b.soLetrasDaFonte(fonte, "𝓕𝓮𝓻𝓷𝓪𝓷𝓭𝓸 †"), "Fernando †");
+  ok("letra larga também", b.soLetrasDaFonte(fonte, "Ｆｕｌｌ"), "Full");
 
   const png = await b.desenharBoasVindas(sharp, { nome: "さくら", reserva: "sakura_01",
     saudacoes: ["Boas-vindas", "Welcome"], servidor: "Kingdom #2311", numero: 1234, foto: null }, FONTE);
   const meta = await sharp(png).metadata();
+  const soCruz = await b.desenharBoasVindas(sharp, { nome: "† 🎮", reserva: "tiago069480", saudacoes: ["Welcome"], servidor: "X", numero: 1, foto: null }, FONTE);
+  ok("só † não conta como nome", b.temLetra("†"), false);
+  ok("Fernando † conta", b.temLetra("Fernando †"), true);
+  verdade("o cartão sai mesmo com nome sem letra", soCruz.length > 0);
   ok("o cartão sai em JPEG 1024x500 (leve para o celular)", [meta.format, meta.width, meta.height], ["jpeg", 1024, 500]);
   verdade("e com menos de 250 KB", png.length < 250 * 1024);
   const { data } = await sharp(png).extract({ left: 362, top: 340, width: 300, height: 60 }).raw().toBuffer({ resolveWithObject: true });

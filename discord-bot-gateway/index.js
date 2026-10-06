@@ -9579,8 +9579,16 @@ function saudacoesDoServidor(linguas) {
 /* So' as letras que a fonte sabe desenhar. Nome em japones, emoji, letra
    enfeitada: sem isto viraria uma fileira de quadradinhos. */
 function soLetrasDaFonte(fonte, texto) {
-  return [...String(texto || "")].filter((c) => c === " " || fonte.charToGlyphIndex(c) > 0).join("")
+  /* NFKC antes de filtrar: "𝓕𝓮𝓻𝓷𝓪𝓷𝓭𝓸", "Ｆｕｌｌ" e "ⓕⓡⓔⓓ" sao letras
+     comuns com enfeite, e voltam a ser "Fernando", "Full", "fred". Sem isso
+     o filtro jogava o nome inteiro fora e sobrava so' o "†" do lado. */
+  return [...String(texto || "").normalize("NFKC")].filter((c) => c === " " || fonte.charToGlyphIndex(c) > 0).join("")
     .replace(/\s+/g, " ").trim();
+}
+
+/* Nome que sobrou sem nenhuma letra (so' "†", so' emoji) nao e' nome. */
+function temLetra(t) {
+  return /\p{L}/u.test(String(t || ""));
 }
 
 /* Uma linha de texto como caminho SVG, CENTRALIZADA, encolhendo ate' caber. */
@@ -9605,7 +9613,7 @@ async function desenharBoasVindas(sharp, { nome, reserva, saudacoes, servidor, n
      tem que saltar aos olhos. */
   const titulo = (soLetrasDaFonte(fonte, saudacoes.join(" · ")) || "Welcome").toUpperCase().split("").join(" ");
   /* Apelido todo em japones (ou so' emoji) cai no @usuario, que e' latino. */
-  const quem = soLetrasDaFonte(fonte, nome) || soLetrasDaFonte(fonte, reserva) || "?";
+  const quem = [soLetrasDaFonte(fonte, nome), soLetrasDaFonte(fonte, reserva)].find(temLetra) || "?";
   const rodape = soLetrasDaFonte(fonte, `#${Number(numero || 0).toLocaleString("en-US")} · ${servidor}`);
   /* O fundo vai desfocado e escurecido: e' a cara do servidor, mas o texto
      por cima tem que ler em qualquer imagem, clara ou escura. */
