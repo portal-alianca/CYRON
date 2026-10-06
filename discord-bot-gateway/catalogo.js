@@ -408,10 +408,10 @@ export const RECURSOS = [
     categoria: "ferramentas",
     plano: "gratis",
     nome: { pt: "Níveis, /perfil e cargos por nível", en: "Levels, /profile and level roles" },
-    como: { pt: "/niveis · /perfil · /top", en: "/levels · /profile · /top" },
+    como: { pt: "/niveis · /perfil · /top · /xp", en: "/levels · /profile · /top · /xp" },
     oque: {
-      pt: "Quem conversa ganha XP (uma vez por minuto, e “k” não conta) e quem fica em call também. Sobe de nível e ganha o cargo que você escolheu para cada nível. O /perfil mostra um cartão com a foto, o nível, a língua e a barra de progresso no fundo do próprio servidor; o /top traz quem mais participa e a guerra de bandeiras: 🇧🇷 contra 🇷🇺 contra 🇺🇸. Salas sem XP você escolhe. Ligado só quando você quer.",
-      en: "Whoever chats earns XP (once a minute, and “k” doesn't count), and so does whoever stays in a call. They level up and get the role you picked for each level. /profile shows a card with the photo, level, language and progress bar on your server's own background; /top shows the most active members and the flag war: 🇧🇷 vs 🇷🇺 vs 🇺🇸. You pick which channels give no XP. On only when you want it.",
+      pt: "Quem conversa ganha XP (uma vez por minuto, e “k” não conta) e quem fica em call também. Sobe de nível e ganha o cargo que você escolheu para cada nível. O /perfil mostra um cartão com a foto, o nível, a língua e a barra de progresso no fundo do próprio servidor; o /top traz o pódio com foto, o ranking de sempre e o da semana, e a guerra de bandeiras: 🇧🇷 contra 🇷🇺 contra 🇺🇸. Você escolhe as salas sem XP, a mensagem de quem sobe, se o cargo novo substitui o anterior, XP em dobro para boost ou cargo, e corrige com /xp. Ligado só quando você quer.",
+      en: "Whoever chats earns XP (once a minute, and “k” doesn't count), and so does whoever stays in a call. They level up and get the role you picked for each level. /profile shows a card with the photo, level, language and progress bar on your server's own background; /top shows a podium with photos, the all-time and weekly rankings, and the flag war: 🇧🇷 vs 🇷🇺 vs 🇺🇸. You pick the no-XP channels, the level-up message, whether a new role replaces the old one, double XP for boosters or a role, and fix things with /xp. On only when you want it.",
     },
     prova: "desenharPerfil",
   },

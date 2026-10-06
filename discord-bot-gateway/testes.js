@@ -8437,7 +8437,8 @@ function conferirCartao(onde, embed, componentes = []) {
   const FONTE = new URL("./fontes/DejaVuSans-Bold.ttf", import.meta.url).pathname;
   globalThis.FUNDO_DA_CYRON = new URL("./img/fundo-cyron.jpg", import.meta.url).pathname;
   const x = carregar(["XP_MIN", "XP_MAX", "XP_ESPERA", "XP_NA_MEMORIA_MAX", "xpParaSubir", "nivelDoXp", "xpDasPessoas", "xpPendente",
-    "xpBase", "cargosDosNiveis", "cargosQueFaltam", "salasSemXp", "contaComoMensagem", "ganharXp", "somarXp",
+    "xpBase", "cargosDosNiveis", "cargosQueFaltam", "salasSemXp", "contaComoMensagem", "multiplicadorDeXp", "cargosDoNivel", "NV_TEXTO_PADRAO", "NV_TEXTO_MAX", "textoDeNivel",
+    "ganharXp", "somarXp", "semanaDoXp", "POD_LARGURA", "POD_ALTURA", "desenharPodio",
     "XP_VOZ_POR_MINUTO", "quemGanhaNaVoz", "descarregarXp", "linhasDaGuerra", "LINGUAS_MENU", "nomeNaPropriaLingua",
     "FONTES_LIDAS", "fonteDoDesenho", "soLetrasDaFonte", "temLetra", "BV_FOTO", "PF_LARGURA", "PF_ALTURA", "desenharPerfil"]);
 
@@ -8492,6 +8493,34 @@ function conferirCartao(onde, embed, componentes = []) {
   ok("voz: só quem está em call com mais alguém, sem surdo, sem bot e fora do AFK",
     x.quemGanhaNaVoz(g).map(([, id]) => id).sort(), ["1", "2"]);
 
+  /* trocar ou acumular cargos */
+  const cg = { "5": "111111111111111111", "10": "222222222222222222", "20": "333333333333333333" };
+  ok("acumulando: dá os que faltam até o nível", x.cargosDoNivel(cg, 12, new Set(["111111111111111111"])),
+    { dar: ["222222222222222222"], tirar: [] });
+  ok("trocando: dá só o do maior nível e tira o de baixo", x.cargosDoNivel(cg, 12, new Set(["111111111111111111", "999"]), true),
+    { dar: ["222222222222222222"], tirar: ["111111111111111111"] });
+  ok("trocando, já tendo o certo: nada a fazer", x.cargosDoNivel(cg, 12, new Set(["222222222222222222"]), true), { dar: [], tirar: [] });
+
+  /* XP em dobro */
+  const membroBoost = { premiumSince: new Date(), roles: { cache: new Map() } };
+  const membroCargo = { premiumSince: null, roles: { cache: new Map([["444444444444444444", {}]]) } };
+  ok("boost dobra quando ligado", x.multiplicadorDeXp(membroBoost, { niveis_dobro_boost: true }), 2);
+  ok("boost não dobra quando desligado", x.multiplicadorDeXp(membroBoost, {}), 1);
+  ok("o cargo escolhido dobra", x.multiplicadorDeXp(membroCargo, { niveis_dobro_cargo: "444444444444444444" }), 2);
+  ok("boost + cargo continua 2x", x.multiplicadorDeXp({ ...membroCargo, premiumSince: new Date() }, { niveis_dobro_boost: true, niveis_dobro_cargo: "444444444444444444" }), 2);
+
+  /* mensagem de nível */
+  ok("padrão: só símbolo, serve em toda língua", x.textoDeNivel(null, { id: "1", nome: "Ana", nivel: 5, cargos: ["9"] }), "🎉 <@1> → **Lv. 5** <@&9>");
+  ok("padrão sem cargo não deixa espaço sobrando", x.textoDeNivel(null, { id: "1", nome: "Ana", nivel: 5 }), "🎉 <@1> → **Lv. 5**");
+  ok("texto do administrador com marcadores", x.textoDeNivel("Parabéns {nome}, nível {nivel}! {usuario}", { id: "1", nome: "A_na", nivel: 7 }),
+    "Parabéns A\\_na, nível 7! <@1>");
+
+  /* semana do ranking: mesma conta do banco (ISO, segunda a domingo) */
+  ok("06/10/2026 é a semana 41", x.semanaDoXp(Date.UTC(2026, 9, 6, 12)), "2026-W41");
+  ok("domingo ainda é a mesma semana", x.semanaDoXp(Date.UTC(2026, 9, 11, 23)), "2026-W41");
+  ok("segunda vira", x.semanaDoXp(Date.UTC(2026, 9, 12, 0, 1)), "2026-W42");
+  ok("01/01/2027 (sexta) é a semana 53 de 2026", x.semanaDoXp(Date.UTC(2027, 0, 1, 12)), "2026-W53");
+
   /* guerra de bandeiras */
   const guerra = x.linhasDaGuerra([{ idioma: "ru", xp: 300, pessoas: 2 }, { idioma: "pt", xp: 900, pessoas: 5 }, { idioma: "?", xp: 50, pessoas: 1 }]);
   ok("guerra de bandeiras: maior primeiro, com coroa, sem quem não escolheu língua", guerra,
@@ -8516,6 +8545,10 @@ function conferirCartao(onde, embed, componentes = []) {
     idioma: { codigo: "ru", nome: "Русский", bandeira: await sharp({ create: { width: 72, height: 72, channels: 4, background: "#c00" } }).png().toBuffer() } }, FONTE);
   const meta = await sharp(card).metadata();
   ok("o cartão do /perfil sai em JPEG 1024x340", [meta.format, meta.width, meta.height], ["jpeg", 1024, 340]);
+  const pod = await x.desenharPodio(sharp, { lugares: [{ nome: "Ana", legenda: "LV. 9 · 3,000 XP", foto: null },
+    { nome: "Ivan", legenda: "LV. 7", foto: null }], fundo: null }, FONTE);
+  const pm = await sharp(pod).metadata();
+  ok("o pódio do /top sai em JPEG 1024x400, mesmo com só dois", [pm.format, pm.width, pm.height], ["jpeg", 1024, 400]);
 
   const f = readFileSync(`${aqui}/index.js`, "utf8");
   verdade("a XP é somada antes do corte de texto vazio (foto também conta)",
@@ -8526,7 +8559,7 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("os três comandos são de todos (não vão para os servidores do jogo)",
     /COMANDOS_DE_TODOS = new Set\([^)]*"perfil", "top", "niveis"/.test(f));
   verdade("o /niveis é só de quem administra", /name: "niveis",[^]{0,700}defaultMemberPermissions: PermissionFlagsBits\.ManageGuild/.test(f));
-  verdade("o anúncio de nível só marca quem subiu", /content: `🎉 <@\$\{userId\}>[^]{0,200}allowedMentions: \{ users: \[userId\] \}/.test(f));
+  verdade("o anúncio de nível só marca quem subiu", /content: textoDeNivel\([^]{0,200}allowedMentions: \{ users: \[userId\] \}/.test(f));
 }
 
 /* A IMAGEM TRADUZIDA (🖼️ Ver na imagem).
