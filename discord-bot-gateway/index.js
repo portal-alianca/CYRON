@@ -10872,6 +10872,7 @@ function telaDoDuelo(estado, agora = Date.now()) {
     title: `⚔️ DUELO · ${a.p.epoca} × ${b.p.epoca}`.slice(0, 256),
     description: [`*${a.p.frase}* ✕ *${b.p.frase}*`, "━━━━━━━━━━━━", estadoDoLutador(a), "━━━━━━━━━━━━", estadoDoLutador(b),
       "━━━━━━━━━━━━", `📜 Turno ${estado.jogadas + 1}`, historico, "", rodape, ...(estado.extra || [])].join("\n").slice(0, 4000),
+    ...(estado.imagem ? { image: { url: "attachment://duelo.jpg" } } : {}),
   };
   const botoes = fim || vez.bot ? [] : [{ type: 1, components: vez.kit.map((hab, k) => ({
     type: 2, custom_id: `duelo:hab:${estado.id}:${k}`, style: k === 3 ? 4 : k === 2 ? 1 : 2,
@@ -11002,6 +11003,8 @@ async function comecarDuelo(estado) {
   estado.vez = 1 - primeiro;
   estado.historico.push(`🎲 Sorteio: ${lutadores[primeiro].p.nome} começa!`);
   estado.historico.push(...passarVez(estado));
+  estado.cartaz = await cartazDoDuelo(estado);
+  estado.imagem = Boolean(estado.cartaz);
   await mostrarDuelo(estado);
 }
 
@@ -11009,7 +11012,10 @@ async function mostrarDuelo(estado) {
   clearTimeout(estado.relogio);
   if (estado.vencedor !== null) return terminarDuelo(estado);
   estado.limite = Date.now() + DUELO_TEMPO;
-  await estado.msg?.edit({ content: "", ...telaDoDuelo(estado) }).catch((e) => console.error("duelo: nao editei:", e?.message || e));
+  /* O cartaz vai so' na primeira edicao; depois o anexo ja' esta' la'. */
+  const anexo = estado.cartaz ? { files: [{ attachment: estado.cartaz, name: "duelo.jpg" }] } : {};
+  const foi = await estado.msg?.edit({ content: "", ...telaDoDuelo(estado), ...anexo }).catch((e) => console.error("duelo: nao editei:", e?.message || e));
+  if (foi) estado.cartaz = null;
   estado.ocupado = false;
   const vez = estado.lutadores[estado.vez];
   if (vez.bot) {
@@ -11027,6 +11033,69 @@ async function mostrarDuelo(estado) {
       jogar(estado, estado.vez, vez.kit[0]).catch(() => {});
     }, DUELO_TEMPO);
   }
+}
+
+/* O CARTAZ DO DUELO: os dois retratos frente a frente, desenhado UMA vez no
+   comeco e anexado a' mensagem. As edicoes seguintes so' apontam para o
+   anexo (attachment://), sem desenhar nem mandar a imagem de novo.
+
+   Os retratos (img/duelo/) sao obras em dominio publico -- os creditos
+   estao em img/duelo/CREDITOS.md. Trocar por arte nova e' trocar o arquivo,
+   mesmo nome, 384x512. */
+const RETRATOS_DO_DUELO = fileURLToPath(new URL("./img/duelo/", import.meta.url));
+const DU_LARGURA = 1024;
+const DU_ALTURA = 480;
+const DU_FOTO_L = 276;
+const DU_FOTO_A = 368;
+
+function textoCentradoEm(fonte, texto, cx, y, tamanho, largura, cor) {
+  let tam = tamanho;
+  while (tam > 10 && fonte.getAdvanceWidth(texto, tam) > largura) tam -= 2;
+  const x = cx - fonte.getAdvanceWidth(texto, tam) / 2;
+  return `<path d="${fonte.getPath(texto, x, y, tam).toPathData(2)}" fill="${cor}" filter="url(#s)"/>`;
+}
+
+async function desenharDuelo(sharp, a, b, pasta = RETRATOS_DO_DUELO, fontfile = FONTE_DA_IMAGEM) {
+  const fonte = await fonteDoDesenho(fontfile);
+  const W = DU_LARGURA, H = DU_ALTURA, margem = 64, topo = 28;
+  const lados = [{ p: a, x: margem, cor: "#E74C3C" }, { p: b, x: W - margem - DU_FOTO_L, cor: "#3498DB" }];
+  /* O fundo: cada metade e' o proprio retrato, borrado e escuro. */
+  const metades = [];
+  for (const [k, l] of lados.entries()) {
+    metades.push({ input: await sharp(`${pasta}${l.p.id}.jpg`).resize(W / 2, H, { fit: "cover" }).blur(14)
+      .modulate({ brightness: 0.45 }).toBuffer(), left: k * (W / 2), top: 0 });
+  }
+  const fotos = [];
+  for (const l of lados) {
+    fotos.push({ input: await sharp(`${pasta}${l.p.id}.jpg`).resize(DU_FOTO_L, DU_FOTO_A, { fit: "cover" }).toBuffer(), left: l.x, top: topo });
+  }
+  const nomes = lados.map((l) => {
+    const cx = l.x + DU_FOTO_L / 2;
+    return textoCentradoEm(fonte, soLetrasDaFonte(fonte, l.p.nome) || l.p.id, cx, topo + DU_FOTO_A + 44, 30, DU_FOTO_L + 80, "#FFFFFF") +
+      textoCentradoEm(fonte, soLetrasDaFonte(fonte, l.p.epoca), cx, topo + DU_FOTO_A + 72, 18, DU_FOTO_L + 40, "#D8DEE6");
+  }).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
+    `<filter id="s"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000" flood-opacity="0.7"/></filter>` +
+    `<filter id="g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="12"/></filter></defs>` +
+    lados.map((l) => `<rect x="${l.x - 6}" y="${topo - 6}" width="${DU_FOTO_L + 12}" height="${DU_FOTO_A + 12}" rx="10" fill="${l.cor}" filter="url(#g)" opacity="0.9"/>` +
+      `<rect x="${l.x - 4}" y="${topo - 4}" width="${DU_FOTO_L + 8}" height="${DU_FOTO_A + 8}" rx="8" fill="#F5C542"/>`).join("") +
+    `<circle cx="${W / 2}" cy="${topo + DU_FOTO_A / 2}" r="70" fill="#F5C542" opacity="0.35" filter="url(#g)"/>` +
+    textoCentradoEm(fonte, "VS", W / 2, topo + DU_FOTO_A / 2 + 38, 108, 220, "#F5C542") +
+    nomes + `</svg>`;
+  return await sharp({ create: { width: W, height: H, channels: 3, background: "#14161A" } })
+    .composite([...metades, { input: Buffer.from(svg) }, ...fotos]).jpeg({ quality: 85 }).toBuffer();
+}
+
+/* Desenha o cartaz se a maquina aguentar; senao o duelo segue sem imagem. */
+async function cartazDoDuelo(estado) {
+  if (process.memoryUsage().rss > MEMORIA_PARA_DESENHAR) return null;
+  const sharp = await carregarSharp();
+  if (!sharp) return null;
+  const [a, b] = estado.lutadores;
+  return await naFilaDeDesenho(() => desenharDuelo(sharp, a.p, b.p)).catch((e) => {
+    console.error("duelo: nao desenhei o cartaz:", e?.message || e);
+    return null;
+  });
 }
 
 async function jogar(estado, i, hab) {
