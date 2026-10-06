@@ -404,6 +404,18 @@ export const RECURSOS = [
     prova: "desenharBoasVindas",
   },
   {
+    chave: "niveis",
+    categoria: "ferramentas",
+    plano: "gratis",
+    nome: { pt: "Níveis, /perfil e cargos por nível", en: "Levels, /profile and level roles" },
+    como: { pt: "/niveis · /perfil · /top", en: "/levels · /profile · /top" },
+    oque: {
+      pt: "Quem conversa ganha XP (uma vez por minuto, nada de spam), sobe de nível e ganha o cargo que você escolheu para cada nível. O /perfil mostra um cartão com a foto, o nível e a barra de progresso no fundo do próprio servidor; o /top, quem mais participa. Ligado só quando você quer.",
+      en: "Whoever chats earns XP (once a minute, no spam), levels up and gets the role you picked for each level. /profile shows a card with the photo, level and progress bar on your server's own background; /top, who participates most. On only when you want it.",
+    },
+    prova: "desenharPerfil",
+  },
+  {
     chave: "hora",
     categoria: "ferramentas",
     plano: "gratis",

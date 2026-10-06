@@ -8431,6 +8431,76 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("quem entra é marcado, e só ele", /allowedMentions: \{ users: \[member\.id\] \}/.test(f));
 }
 
+/* ============ níveis, XP e /perfil ============ */
+{
+  const sharp = (await import("sharp")).default;
+  const FONTE = new URL("./fontes/DejaVuSans-Bold.ttf", import.meta.url).pathname;
+  globalThis.FUNDO_DA_CYRON = new URL("./img/fundo-cyron.jpg", import.meta.url).pathname;
+  const x = carregar(["XP_MIN", "XP_MAX", "XP_ESPERA", "XP_NA_MEMORIA_MAX", "xpParaSubir", "nivelDoXp", "xpDasPessoas", "xpPendente",
+    "xpBase", "cargosDosNiveis", "cargosQueFaltam", "ganharXp", "descarregarXp",
+    "FONTES_LIDAS", "fonteDoDesenho", "soLetrasDaFonte", "temLetra", "BV_FOTO", "PF_LARGURA", "PF_ALTURA", "desenharPerfil"]);
+
+  ok("a curva do MEE6: nível 0 → 1 pede 100", x.xpParaSubir(0), 100);
+  ok("nível 1 → 2 pede 155", x.xpParaSubir(1), 155);
+  ok("0 XP é nível 0", x.nivelDoXp(0).nivel, 0);
+  ok("100 XP é nível 1, com 0 dentro", x.nivelDoXp(100), { nivel: 1, dentro: 0, precisa: 155 });
+  ok("254 XP ainda é nível 1", x.nivelDoXp(254).nivel, 1);
+  ok("255 XP é nível 2", x.nivelDoXp(255).nivel, 2);
+
+  ok("cargos que faltam: só os até o nível, e só os que a pessoa não tem",
+    x.cargosQueFaltam({ "5": "111111111111111111", "10": "222222222222222222", "20": "333333333333333333" }, 12,
+      new Set(["111111111111111111"])), ["222222222222222222"]);
+  ok("lixo no lugar do cargo é ignorado", x.cargosQueFaltam({ "1": "abc" }, 5), []);
+  ok("configuração estranha vira vazio", x.cargosDosNiveis({ niveis_cargos: ["x"] }), {});
+
+  /* ganhar: uma vez por minuto, e soma na memória (não no banco) */
+  const anuncios = [];
+  globalThis.sb = async () => [{ xp: 90 }];
+  globalThis.subiuDeNivel = async (_m, _s, n) => { anuncios.push(n); };
+  const msg = { guild: { id: "900000000000000001" }, author: { id: "800000000000000001", bot: false } };
+  const servidor = { niveis_ligado: true };
+  const T = Date.UTC(2026, 9, 6, 12);
+  await x.ganharXp(msg, servidor, T);
+  const chave = "900000000000000001:800000000000000001";
+  verdade("primeira mensagem soma de 15 a 25", x.xpPendente.get(chave).xp >= 15 && x.xpPendente.get(chave).xp <= 25);
+  ok("e 90 + isso passou de 100: subiu para o nível 1", anuncios, [1]);
+  const depois1 = x.xpPendente.get(chave).xp;
+  await x.ganharXp(msg, servidor, T + 30000);
+  ok("outra mensagem antes de um minuto não conta", x.xpPendente.get(chave).xp, depois1);
+  await x.ganharXp(msg, servidor, T + 61000);
+  verdade("depois de um minuto conta", x.xpPendente.get(chave).xp > depois1);
+  await x.ganharXp(msg, { niveis_ligado: false }, T + 200000);
+  verdade("servidor com níveis desligados não ganha nada", x.xpPendente.get(chave).m === 2);
+
+  /* descarga: uma chamada, e o que falhar volta */
+  const chamadas = [];
+  globalThis.rpc = async (fn, corpo) => { chamadas.push([fn, corpo]); return null; };
+  await x.descarregarXp();
+  ok("tudo desce numa chamada só", chamadas.length, 1);
+  ok("pela função que SOMA no banco", chamadas[0][0], "cyron_somar_xp");
+  ok("com servidor, pessoa, XP e mensagens", Object.keys(chamadas[0][1].p_linhas[0]).sort(), ["g", "m", "u", "xp"]);
+  ok("e o pendente esvazia", x.xpPendente.size, 0);
+  x.xpPendente.set(chave, { xp: 20, m: 1 });
+  globalThis.rpc = async () => { throw new Error("fora do ar"); };
+  await x.descarregarXp();
+  ok("banco fora do ar: a XP volta para a próxima leva", x.xpPendente.get(chave), { xp: 20, m: 1 });
+  x.xpPendente.clear();
+
+  const card = await x.desenharPerfil(sharp, { nome: "𝓕𝓮𝓻𝓷𝓪𝓷𝓭𝓸 †", reserva: "f", nivel: 7, dentro: 120, precisa: 495,
+    posicao: 3, xp: 2340, mensagens: 150, foto: null, fundo: null }, FONTE);
+  const meta = await sharp(card).metadata();
+  ok("o cartão do /perfil sai em JPEG 1024x340", [meta.format, meta.width, meta.height], ["jpeg", 1024, 340]);
+
+  const f = readFileSync(`${aqui}/index.js`, "utf8");
+  verdade("a XP é somada antes do corte de texto vazio (foto também conta)",
+    f.indexOf("ganharXp(msg, servidor)") < f.indexOf('const texto = String(msg.content || "").trim();\n\n    /* Reconhecer a língua'));
+  verdade("e desce junto com o uso, a cada minuto e ao desligar", (f.match(/descarregarXp\(\)\.catch/g) || []).length >= 2);
+  verdade("os três comandos são de todos (não vão para os servidores do jogo)",
+    /COMANDOS_DE_TODOS = new Set\([^)]*"perfil", "top", "niveis"/.test(f));
+  verdade("o /niveis é só de quem administra", /name: "niveis",[^]{0,700}defaultMemberPermissions: PermissionFlagsBits\.ManageGuild/.test(f));
+  verdade("o anúncio de nível só marca quem subiu", /content: `🎉 <@\$\{msg\.author\.id\}>[^]{0,200}allowedMentions: \{ users: \[msg\.author\.id\] \}/.test(f));
+}
+
 /* A IMAGEM TRADUZIDA (🖼️ Ver na imagem).
  *
  * O print volta com o texto trocado no lugar. O desenho aqui roda DE VERDADE,
