@@ -18186,6 +18186,7 @@ async function janelaDeComando(existente) {
    por isso salvarComando tambem pergunta ao Discord o que ja' existe. */
 const NOMES_MEUS = new Set([
   "cyron", "help", "admin", "mylanguage", "arena", "evento", "settings", "portal", "player", "events", "ranking",
+  "hora", "time", "boas-vindas", "welcome-card",
 ]);
 
 /* Uma linha do formulario que carrega duas respostas: "todos 60".
@@ -18877,7 +18878,10 @@ const GLOBAIS_DO_CYRON = [
   {
     /* So' de quem administra: e' ele que decide se o servidor ganha cartao. */
     name: "boas-vindas",
-    nameLocalizations: { "en-US": "welcome", "en-GB": "welcome", "es-ES": "bienvenida", "fr": "bienvenue", "de": "willkommen" },
+    /* "welcome-card", e nao "welcome": "welcome" e' o nome mais comum de
+       comando que o dono escreve, e um servidor ja' tinha o dele -- o Discord
+       mostrava os dois iguais e quem tocou caiu no do dono. */
+    nameLocalizations: { "en-US": "welcome-card", "en-GB": "welcome-card" },
     description: "Cartão com foto para quem entra, em todas as línguas / Welcome card",
     descriptionLocalizations: TRADUCOES_DAS_BOAS_VINDAS.comando,
     defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
