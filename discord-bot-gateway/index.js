@@ -7544,10 +7544,49 @@ function textoDaRepeticao(min) {
   return h ? `${h}h${m ? `${m}m` : ""}` : `${m}m`;
 }
 
+/* Quanto o evento DURA, do inicio ate' fechar.
+
+   Livre, e nao uma lista: o Urso dura 30m, um torneio 5d, e o contador do
+   jogo mostra "1h43m27s" -- quem copia o que esta' na tela nao pode ter que
+   arredondar. Aceita "30m", "5d", "1h43m27s", "1:30" (h:mm) e numero solto
+   (minutos). Devolve SEGUNDOS; 0 e' "sem duracao"; null, "nao entendi". */
+const DURACAO_MAX = 30 * 24 * 3600;
+function duracaoDoTexto(bruto) {
+  const t = String(bruto ?? "").trim().toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "");
+  if (!t || /^(?:0|-|—|nao|no|none|sem|nenhuma)$/.test(t)) return 0;
+  let seg = null;
+  const relogio = t.match(/^(\d{1,3}):([0-5]\d)(?::([0-5]\d))?$/);
+  if (relogio) seg = Number(relogio[1]) * 3600 + Number(relogio[2]) * 60 + Number(relogio[3] || 0);
+  else if (/^\d{1,5}$/.test(t)) seg = Number(t) * 60;
+  else {
+    const m = t.match(/^(?:(\d{1,3})d(?:ias?|ays?)?)?(?:(\d{1,4})h(?:oras?|ours?|rs?)?)?(?:(\d{1,5})m(?:in(?:utos?|utes?|s)?)?)?(?:(\d{1,7})s(?:eg(?:undos?)?|ec(?:onds?|s)?)?)?$/);
+    if (m && (m[1] || m[2] || m[3] || m[4])) {
+      seg = Number(m[1] || 0) * 86400 + Number(m[2] || 0) * 3600 + Number(m[3] || 0) * 60 + Number(m[4] || 0);
+    }
+  }
+  return seg !== null && seg > 0 && seg <= DURACAO_MAX ? seg : null;
+}
+
+/* O contrario, para mostrar: 1800 -> "30m", 6207 -> "1h43m27s". */
+function textoDaDuracao(seg) {
+  let n = Math.round(Number(seg) || 0);
+  if (n <= 0) return "";
+  const d = Math.floor(n / 86400); n %= 86400;
+  const h = Math.floor(n / 3600); n %= 3600;
+  const m = Math.floor(n / 60), s = n % 60;
+  return [d && `${d}d`, h && `${h}h`, m && `${m}m`, s && `${s}s`].filter(Boolean).join("");
+}
+
 /* A proxima vez DEPOIS de agora. Um laco, e nao uma conta so', porque o bot
-   pode ter ficado fora varias repeticoes: quem chega atrasado pula todas. */
-function proximaVez(quandoMs, repetirMin, agora = Date.now()) {
-  const passo = Number(repetirMin) * 60000;
+   pode ter ficado fora varias repeticoes: quem chega atrasado pula todas.
+
+   Com duracao, o "repete a cada" conta de quando o evento FECHA, como o
+   contador do jogo: o Urso dura 30m e volta 47h depois de fechar, entao de
+   um inicio ao outro sao 47h30m. Evento sem duracao conta de inicio a
+   inicio, como sempre contou. */
+function proximaVez(quandoMs, repetirMin, agora = Date.now(), duracaoSeg = 0) {
+  const passo = Number(repetirMin) > 0 ? Number(repetirMin) * 60000 + (Number(duracaoSeg) || 0) * 1000 : 0;
   if (!(passo > 0)) return null;
   let t = Number(quandoMs);
   if (t > agora) return t;
@@ -7739,14 +7778,17 @@ const PALAVRAS_DO_CARTAO = {
   jogo: "Jogo (UTC)", seu: "Seu horário", falta: "Falta", comecou: "Começou!", comecaEm: "Começa em",
   repete: "Repete a cada", aviso: "Aviso no privado", antes: "min antes",
   inscritos: "Inscritos", marca: "Marca", inscrever: "Me inscrever",
+  dura: "Dura", fechaAs: "fecha às", fechou: "Fechou", depoisDeFechar: "depois que fecha",
 };
 
 const COR_PERTO = 0x2ECC71;    // menos de 1 hora: hora de se preparar
 const COR_COMECOU = 0xE74C3C;  // na primeira hora depois do inicio
 const PERTO = 3600000;
 
-function corDoEvento(t, agora) {
-  if (t <= agora) return agora - t <= PERTO ? COR_COMECOU : 0x9aa0a6;
+/* `fim`: quando o evento fecha. Com duracao, o vermelho dura o evento
+   inteiro -- nem mais, nem menos que a hora fixa de antes. */
+function corDoEvento(t, agora, fim = t) {
+  if (t <= agora) return (fim > t ? agora < fim : agora - t <= PERTO) ? COR_COMECOU : 0x9aa0a6;
   return t - agora <= PERTO ? COR_PERTO : COR;
 }
 
@@ -7767,13 +7809,24 @@ function cartaoDoEvento(ev, presencas = [], agora = Date.now(), P = PALAVRAS_DO_
      "lado a lado" um embaixo do outro, e o cartao virava uma coluna comprida.
      A hora do JOGO (UTC, a da tela) e quanto falta na mesma linha; a de quem
      le embaixo, no relogio do pais dele. */
-  const falta = passou ? `🔴 **${P.comecou}**` : `⏳ **${cronometro(t - agora)}**`;
+  const dur = Number(ev.duracao_seg) || 0;
+  const fim = t + dur * 1000;
+  const fechou = passou && dur > 0 && agora >= fim;
+  /* A hora de fechar vai escrita (<t:..:t>), e nao "daqui a X": o cartao de
+     um evento que nao repete nao e' redesenhado a cada minuto, e um relativo
+     velho diria "fecha ha' 5 minutos". */
+  const falta = !passou ? `⏳ **${cronometro(t - agora)}**`
+    : fechou ? `⚫ **${P.fechou}**`
+    : `🔴 **${P.comecou}**${dur ? ` · ${P.fechaAs} <t:${Math.floor(fim / 1000)}:t>` : ""}`;
   const linhas = [
     `🎮 **${z(d.getUTCDate())}/${z(d.getUTCMonth() + 1)} ${z(d.getUTCHours())}:${z(d.getUTCMinutes())} UTC**  ·  ${falta}`,
     `🕒 ${P.seu}: <t:${s}:F>`,
   ];
   const extras = [];
-  if (Number(ev.repetir_min) > 0) extras.push(`🔁 ${P.repete} **${textoDaRepeticao(ev.repetir_min)}**`);
+  if (dur) extras.push(`⏱️ ${P.dura} **${textoDaDuracao(dur)}**`);
+  if (Number(ev.repetir_min) > 0) {
+    extras.push(`🔁 ${P.repete} **${textoDaRepeticao(ev.repetir_min)}**${dur ? ` ${P.depoisDeFechar}` : ""}`);
+  }
   if (Number(ev.lembrete_min) > 0) extras.push(`⏰ ${P.aviso}: **${ev.lembrete_min} ${P.antes}**`);
   if (extras.length) linhas.push(extras.join(" · "));
   if (/^\d{5,25}$/.test(String(ev.cargo_id || ""))) linhas.push(`📣 ${P.marca}: <@&${ev.cargo_id}>`);
@@ -7794,8 +7847,8 @@ function cartaoDoEvento(ev, presencas = [], agora = Date.now(), P = PALAVRAS_DO_
   }];
 
   return {
-    color: corDoEvento(t, agora),
-    title: `${passou ? "🔴" : "📅"} ${nomeLimpo(ev.titulo).slice(0, 240)}`,
+    color: corDoEvento(t, agora, fim),
+    title: `${fechou ? "⚫" : passou ? "🔴" : "📅"} ${nomeLimpo(ev.titulo).slice(0, 240)}`,
     description: linhas.join("\n"),
     fields: campos,
     ...(ev.gif_url ? { thumbnail: { url: String(ev.gif_url) } } : {}),
@@ -7822,17 +7875,25 @@ function botoesDoEvento(ev, agora = Date.now(), quantos = 0, rotulo = "Subscribe
   return linha.length ? [{ type: 1, components: linha }] : [];
 }
 
+function fechouHaMuito(e, agora = Date.now()) {
+  return new Date(e.quando).getTime() + (Number(e.duracao_seg) || 0) * 1000 < agora - EVENTO_SOBREVIVE;
+}
+
 /* Tudo abaixo e' tolerante a tabela que ainda nao existe: leitura que falha
    devolve vazio, e a agenda simplesmente nao aparece. O bot segue traduzindo,
    que e' o que ele veio fazer -- mesma regra da arena. */
-async function eventosDoServidor(servidorId) {
-  const desde = new Date(Date.now() - EVENTO_SOBREVIVE).toISOString();
-  return await sb(`cyron_evento?servidor_id=eq.${servidorId}&quando=gte.${desde}` +
+async function eventosDoServidor(servidorId, agora = Date.now()) {
+  /* O prazo conta de quando o evento FECHA: um evento de 5d nao pode sumir
+     da agenda seis horas depois de comecar. A busca vai mais para tras, e o
+     corte fino e' aqui embaixo. */
+  const desde = new Date(agora - EVENTO_SOBREVIVE - DURACAO_MAX * 1000).toISOString();
+  const todos = await sb(`cyron_evento?servidor_id=eq.${servidorId}&quando=gte.${desde}` +
     /* Tudo, e nao uma lista de colunas: a agenda ganhou colunas novas, e uma
        lista que cite uma delas antes da migracao faria a leitura falhar -- e
        a agenda inteira sumir da sala. */
     "&select=*&order=quando.asc")
     .catch(() => null) || [];
+  return todos.filter((e) => !fechouHaMuito(e, agora));
 }
 
 /* Com o servidor na mao, cada inscrito ganha o NOME (apelido daqui), e quem
@@ -7894,6 +7955,14 @@ async function apagarAvisosDeAntes(canal) {
   }
 }
 
+/* O "Comecou!" sai quando o evento FECHA -- a hora de fechar esta' escrita
+   no proprio aviso. Sem duracao, meia hora, como antes. */
+function avisoVenceu(m, agora = Date.now()) {
+  const fecha = String(m?.embeds?.[0]?.description || "").match(/<t:(\d+):t>/);
+  if (fecha) return agora >= Number(fecha[1]) * 1000;
+  return agora - Number(m?.createdTimestamp || agora) > AVISO_FICA;
+}
+
 function ehAvisoDeInicio(m) {
   return m?.author?.id === client.user?.id && !eventoDoCartao(m) &&
     String(m?.content || "").startsWith("🔔 **");
@@ -7908,7 +7977,7 @@ async function pintarSala(canal, eventos, cargaDe, aoPostar = null, agora = Date
   for (const m of [...(recentes?.values?.() || [])].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1))) {
     if (m.author?.id !== client.user?.id) continue;
     if (ehAvisoDeInicio(m)) {
-      if (agora - Number(m.createdTimestamp || agora) > AVISO_FICA) await m.delete().catch(() => {});
+      if (avisoVenceu(m, agora)) await m.delete().catch(() => {});
       continue;
     }
     const id = eventoDoCartao(m);
@@ -7950,7 +8019,8 @@ function avisoDeInicio(ev, aviso, P = PALAVRAS_DO_CARTAO, titulo = ev.titulo, an
     content: aviso.content,
     embeds: [{ color: antes ? COR_PERTO : COR_COMECOU,
       title: `${antes ? "⏰" : "🔴"} ${nomeLimpo(titulo).slice(0, 240)}`,
-      description: antes ? `**${P.comecaEm} ${antes} min**` : `**${P.comecou}**`,
+      description: antes ? `**${P.comecaEm} ${antes} min**` : `**${P.comecou}**` + (Number(ev.duracao_seg) > 0
+        ? ` · ${P.fechaAs} <t:${Math.floor(new Date(ev.quando).getTime() / 1000 + Number(ev.duracao_seg))}:t>` : ""),
       ...(ev.gif_url ? { thumbnail: { url: String(ev.gif_url) } } : {}) }],
     allowedMentions: aviso.allowedMentions,
   };
@@ -7978,9 +8048,9 @@ async function desenharEventos(guild, servidor) {
      jogaria fora a agenda e as inscricoes de todo mundo. */
   const velhos = await sb(`cyron_evento?servidor_id=eq.${servidor.id}` +
     `&quando=lt.${new Date(Date.now() - EVENTO_SOBREVIVE).toISOString()}` +
-    "&or=(repetir_min.is.null,repetir_min.eq.0)&select=id,msg_id")
+    "&or=(repetir_min.is.null,repetir_min.eq.0)&select=*")
     .catch(() => null) || [];
-  for (const v of velhos) {
+  for (const v of velhos.filter((e) => fechouHaMuito(e))) {
     if (v.msg_id) {
       const m = await canal.messages.fetch(v.msg_id).catch(() => null);
       if (m) await m.delete().catch(() => {});
@@ -8164,16 +8234,17 @@ const PORQUE_DO_GIF = {
 };
 
 const NAO_GRAVEI_EVENTO = "Não consegui guardar o evento. Se isto continuar, a tabela dos eventos " +
-  "pode não estar atualizada — está em `supabase/migracoes/005-eventos-agenda.sql`.";
+  "pode não estar atualizada — as mudanças estão em `supabase/migracoes/` (005 e 011).";
 
 /* Grava (ou edita, pelo nome) e redesenha a sala. Um caminho so' para o
    /evento e para o leitor automatico: duas copias desta conta divergiriam no
    dia em que uma ganhasse um campo e a outra nao. */
-async function gravarEvento(guild, servidor, userId, { titulo, detalhes, quando, repetir, lembrete, cargoId, gif }) {
+async function gravarEvento(guild, servidor, userId, { titulo, detalhes, quando, repetir, duracao, lembrete, cargoId, gif }) {
   titulo = nomeLimpo(titulo);
   const campos = {
     titulo, detalhes: detalhes || null, quando: new Date(quando).toISOString(),
     repetir_min: repetir || null,
+    duracao_seg: duracao || null,
     lembrete_min: LEMBRETES.includes(lembrete) ? lembrete : null,
     cargo_id: cargoId || null,
     lembrete_feito: false, aviso_feito: false,
@@ -8229,7 +8300,13 @@ async function nalingua(idioma, guildId, ...frases) {
 }
 
 /* As opcoes que viraram LISTA. Escolher numa lista nao tem "nao entendi". */
-const REPETICOES = [0, 720, 1440, 2850, 2880, 10080];
+/* Sem o 47h30m de antes: o Urso agora e' 47h DEPOIS DE FECHAR, com 30m de
+   duracao -- a opcao "urso" da lista marca os dois de uma vez. */
+const REPETICOES = [0, 720, 1440, 2880, 10080];
+const URSO = { repetir: 2820, duracao: 1800 };
+function ehUrso(p) {
+  return p.repetir === URSO.repetir && p.duracao === URSO.duracao;
+}
 /* TODOS os fusos do mundo, com bandeiras de onde se usa -- para quem nao sabe
    o proprio numero achar pelo pais. Sao 38: mais que as 25 opcoes de uma lista
    do Discord, por isso o comando usa autocompletar (digita "br", "-3",
@@ -8282,6 +8359,29 @@ function fusoDoCampo(bruto) {
 function rotuloDaRepeticao(min) {
   if (!min) return "🔂 —";
   return `${min === 2850 ? "🐻" : "🔁"} ${textoDaRepeticao(min)}`;
+}
+
+/* A linha do rascunho: repetir, duracao e lembrete, so' simbolos. */
+function linhaDoTempo(p) {
+  return `${rotuloDaRepeticao(p.repetir)} · ⏱️ ${textoDaDuracao(p.duracao) || "—"} · ` +
+    (p.lembrete ? `⏰ −${p.lembrete}m ✉️` : "🔕");
+}
+
+/* O autocompletar do repetir e da duracao: o que a pessoa digitou, ja'
+   entendido, primeiro; os comuns depois. Nada de "nao entendi" na hora de
+   digitar -- texto que nao vira tempo so' nao aparece como sugestao. */
+function sugestoesDeTempo(digitado, qual) {
+  const t = String(digitado || "").trim();
+  const dur = qual === "duracao";
+  const lido = t ? (dur ? duracaoDoTexto(t) : repetirDoTexto(t)) : null;
+  const opcao = (v) => (dur
+    ? { name: v ? `⏱️ ${textoDaDuracao(v)}` : "⏱️ —", value: v ? textoDaDuracao(v) : "0" }
+    : { name: rotuloDaRepeticao(v), value: v ? textoDaRepeticao(v) : "0" });
+  const comuns = dur ? [900, 1800, 3600, 7200, 86400].map(opcao)
+    : [...REPETICOES.map(opcao), { name: "🐻 47h + ⏱️ 30m", value: "urso" }];
+  const fora = lido !== null && lido !== undefined && t ? [opcao(lido)] : [];
+  for (const o of comuns) if (!fora.some((f) => f.value === o.value)) fora.push(o);
+  return fora.slice(0, 25);
 }
 
 /* O dia, a hora e o minuto de um instante, no fuso dado. */
@@ -8351,14 +8451,20 @@ async function painelDoRascunho(token, p, idioma, agora = Date.now()) {
   const s = Math.floor(p.quando / 1000);
   const passou = p.quando <= agora;
 
-  const [explica, aviso] = await nalingua(idioma, p.guildId,
+  const [explica, aviso, naoEntendi] = await nalingua(idioma, p.guildId,
     "Escolha o dia, a hora e o minuto abaixo. A hora é a do fuso mostrado; logo embaixo cada pessoa vê no próprio relógio.",
-    passou ? "Esse horário já passou. Escolha outro." : "");
+    passou ? "Esse horário já passou. Escolha outro." : "",
+    p.tempoErrado ? `Não entendi "${String(p.tempoErrado).slice(0, 40)}". Exemplos: 30m · 1h43m27s · 5d` : "");
+  p.tempoErrado = null;
 
   const minutos = Array.from({ length: 12 }, (_, i) => i * 5);
   if (!minutos.includes(pt.min)) minutos.push(pt.min);
   minutos.sort((a, b) => a - b);
-  const reps = REPETICOES.includes(p.repetir) ? REPETICOES : [...REPETICOES, p.repetir];
+  const reps = REPETICOES.includes(p.repetir) || ehUrso(p) ? REPETICOES : [...REPETICOES, p.repetir];
+  const opcoesDeRepetir = [
+    ...reps.map((r) => ({ label: rotuloDaRepeticao(r), value: String(r), default: r === p.repetir && !ehUrso(p) })),
+    { label: "🐻 47h + ⏱️ 30m", value: "urso", default: ehUrso(p) },
+  ];
 
   return {
     content: "",
@@ -8368,9 +8474,9 @@ async function painelDoRascunho(token, p, idioma, agora = Date.now()) {
       description: explica + "\n\n" +
         `${p.fuso === 0 ? "🎮" : "🌍"} **${textoDoFuso(p.fuso)}** ${z(pt.dia)}/${z(pt.mes)}/${pt.ano} ${z(pt.hora)}:${z(pt.min)}\n` +
         `🕒 <t:${s}:F> · ⏳ <t:${s}:R>\n` +
-        `${rotuloDaRepeticao(p.repetir)} · ${p.lembrete ? `⏰ −${p.lembrete}m ✉️` : "🔕"}` +
+        linhaDoTempo(p) +
         (p.cargoId ? ` · 📣 <@&${p.cargoId}>` : "") +
-        (aviso ? `\n\n⚠️ ${aviso}` : ""),
+        (aviso ? `\n\n⚠️ ${aviso}` : "") + (naoEntendi ? `\n\n⚠️ ${naoEntendi}` : ""),
       ...(p.gif || p.imagem ? { thumbnail: { url: p.gif || p.imagem } } : {}),
     }],
     components: [
@@ -8379,15 +8485,17 @@ async function painelDoRascunho(token, p, idioma, agora = Date.now()) {
         options: Array.from({ length: 24 }, (_, h) => ({ label: `${z(h)} h`, value: String(h), default: h === pt.hora })) }] },
       { type: 1, components: [{ type: 3, custom_id: `evsel:min:${token}`,
         options: minutos.map((m) => ({ label: `:${z(m)}`, value: String(m), default: m === pt.min })) }] },
-      { type: 1, components: [{ type: 3, custom_id: `evsel:rep:${token}`,
-        options: reps.map((r) => ({ label: rotuloDaRepeticao(r), value: String(r), default: r === p.repetir })) }] },
+      { type: 1, components: [{ type: 3, custom_id: `evsel:rep:${token}`, options: opcoesDeRepetir }] },
       { type: 1, components: [
         { type: 2, custom_id: `evsel:lemb:${token}`, style: 2, emoji: { name: p.lembrete ? "⏰" : "🔕" },
           label: p.lembrete ? `−${p.lembrete} min` : "—" },
         { type: 2, custom_id: `evsel:fuso:${token}`, style: 2, emoji: { name: "🌍" }, label: textoDoFuso(p.fuso) },
         { type: 2, custom_id: `evsel:nome:${token}`, style: 2, emoji: { name: "✏️" } },
         { type: 2, custom_id: `evsel:criar:${token}`, style: 3, emoji: { name: "✅" }, disabled: passou || !p.titulo },
-        { type: 2, custom_id: `evsel:sair:${token}`, style: 4, emoji: { name: "✖️" } },
+        /* O ✖️ deu lugar ao ⏱️ (a fileira so' cabe cinco): o painel e'
+           efemero, e o "Ignorar mensagem" do proprio Discord ja' fecha. */
+        { type: 2, custom_id: `evsel:tempo:${token}`, style: 2, emoji: { name: "⏱️" },
+          label: textoDaDuracao(p.duracao) || "—" },
       ] },
     ],
     allowedMentions: { parse: [] },
@@ -8401,7 +8509,7 @@ async function confirmarEvento(inter, p, idioma) {
   let gif = p.gif || null;
   if (!gif && p.imagem) gif = await reHospedar(p.imagem, `evento-${inter.guildId}`).catch(() => null);
   const { ev, existente } = await gravarEvento(inter.guild, servidor, inter.user.id, {
-    titulo: p.titulo, detalhes: p.detalhes, quando: p.quando, repetir: p.repetir,
+    titulo: p.titulo, detalhes: p.detalhes, quando: p.quando, repetir: p.repetir, duracao: p.duracao,
     lembrete: p.lembrete, cargoId: p.cargoId, gif,
   });
   const [falhou] = ev?.id ? [null] : await nalingua(idioma, inter.guildId, NAO_GRAVEI_EVENTO);
@@ -8422,7 +8530,7 @@ async function confirmarEvento(inter, p, idioma) {
       color: COR_OK,
       title: `✅ ${String(p.titulo).slice(0, 200)}`,
       description: `${feito}\n\n🕒 <t:${s}:F> · ⏳ <t:${s}:R>\n` +
-        `${rotuloDaRepeticao(p.repetir)} · ${p.lembrete ? `⏰ −${p.lembrete}m ✉️` : "🔕"}` +
+        linhaDoTempo(p) +
         (p.cargoId ? ` · 📣 <@&${p.cargoId}>` : "") +
         (mudo ? `\n\n⚠️ ${mudo}` : "") + `\n\n_${mudar}_`,
     }],
@@ -8460,7 +8568,21 @@ async function criarEvento(inter) {
   const bruto = (inter.options.getString("quando") || "").trim();
   const detalhes = (inter.options.getString("detalhes") || "").trim();
   const fusoEscolhido = fusoDoCampo(inter.options.getString("fuso"));
-  const repetir = inter.options.getInteger("repetir") ?? 0;
+  /* Repetir e duracao sao texto livre, com sugestoes. `get` e nao
+     `getString`: um app que ainda tem o comando velho manda repetir como
+     NUMERO (a lista de antes), e getString estouraria nele. */
+  const repBruto = inter.options.get("repetir")?.value;
+  const durBruto = inter.options.get("duracao")?.value;
+  const urso = String(repBruto ?? "").trim().toLowerCase() === "urso";
+  const repetir = urso ? URSO.repetir : typeof repBruto === "number" ? repBruto : repetirDoTexto(repBruto);
+  let duracao = duracaoDoTexto(durBruto);
+  if (urso && durBruto === undefined) duracao = URSO.duracao;
+  if (repetir === null || duracao === null) {
+    const errado = repetir === null ? repBruto : durBruto;
+    const [t] = await nalingua(idioma, inter.guildId,
+      `Não entendi "${String(errado).slice(0, 40)}". Duração: 30m · 1h43m27s · 5d. Repetir (de 1h a 30d, conta depois que o evento fecha): 24h · 47h · 7d.`);
+    return inter.editReply({ content: `⏱️ ${t}` });
+  }
   const lembrete = inter.options.getInteger("lembrete") ?? 0;
   /* O @everyone tambem aparece na lista de cargos. Marcar o servidor inteiro
      a cada repeticao nao e' convite, e' alarme -- esse fica de fora. */
@@ -8485,7 +8607,7 @@ async function criarEvento(inter) {
 
   const p = {
     guildId: inter.guildId, userId: inter.user.id, titulo, detalhes: detalhes || null,
-    fuso, repetir: REPETICOES.includes(repetir) ? repetir : 0,
+    fuso, repetir, duracao,
     lembrete: LEMBRETES.includes(lembrete) ? lembrete : 0,
     cargoId: cargo?.id || null, gif, imagem: null,
   };
@@ -8693,7 +8815,7 @@ async function lerEventoDaMensagem(inter) {
   const achado = extrairEvento(texto, Date.now(), 0);
   const p = {
     guildId: inter.guildId, userId: inter.user.id, ...achado,
-    repetir: 0, lembrete: 0, cargoId: null, gif: null, detalhes: null,
+    repetir: 0, duracao: 0, lembrete: 0, cargoId: null, gif: null, detalhes: null,
     /* O print vira a imagem do evento -- quem nao tem GIF ainda ganha o urso
        do proprio jogo. So' se ele foi lido. */
     imagem: leuImagem ? img.url : null,
@@ -8716,6 +8838,19 @@ async function cliqueRascunho(inter) {
     return inter.reply({ flags: 64, content: t });
   }
   p.expira = Date.now() + PROPOSTA_VALE;
+
+  /* Duracao e repetir: digitados, porque tempo de jogo nao cabe em lista
+     ("1h43m27s"). Os dois na mesma janela: um depende do outro. */
+  if (acao === "tempo") {
+    const [dura, repete] = await nalingua(idioma, inter.guildId,
+      "Duração. Ex: 30m · 1h43m27s · 5d", "Repetir depois que fecha. Ex: 47h · 7d");
+    const campo = (id, rotulo, valor) => ({ type: 1, components: [{ type: 4, custom_id: id, label: rotulo.slice(0, 45),
+      style: 1, required: false, max_length: 20, ...(valor ? { value: valor } : {}) }] });
+    return inter.showModal({
+      custom_id: `evsel:tempojanela:${token}`, title: "⏱️",
+      components: [campo("duracao", dura, textoDaDuracao(p.duracao)), campo("repetir", repete, textoDaRepeticao(p.repetir))],
+    });
+  }
 
   /* O nome e' o unico campo digitado, e so' quando a pessoa quer. */
   if (acao === "nome") {
@@ -8748,8 +8883,19 @@ async function cliqueRascunho(inter) {
     p.quando = instanteDe({ ...pt, hora: Number(valor) }, p.fuso);
   } else if (acao === "min" && valor !== undefined) {
     p.quando = instanteDe({ ...pt, min: Number(valor) }, p.fuso);
+  } else if (acao === "rep" && valor === "urso") {
+    p.repetir = URSO.repetir;
+    p.duracao = URSO.duracao;
   } else if (acao === "rep" && valor !== undefined) {
     p.repetir = Number(valor) || 0;
+  } else if (acao === "tempojanela") {
+    const durTxt = String(inter.fields.getTextInputValue("duracao") || "");
+    const repTxt = String(inter.fields.getTextInputValue("repetir") || "");
+    const dur = duracaoDoTexto(durTxt), rep = repetirDoTexto(repTxt);
+    if (dur === null) p.tempoErrado = durTxt;
+    else p.duracao = dur;
+    if (rep === null) p.tempoErrado = repTxt;
+    else p.repetir = rep;
   } else if (acao === "lemb") {
     const ciclo = [0, ...LEMBRETES];
     p.lembrete = ciclo[(ciclo.indexOf(p.lembrete) + 1) % ciclo.length];
@@ -9003,7 +9149,7 @@ async function avisarNaHora(guild, servidor, ev, inscritos, marcar, agora = Date
 
   let proximo = ev;
   if (Number(ev.repetir_min) > 0) {
-    const nova = proximaVez(new Date(ev.quando).getTime(), ev.repetir_min, agora);
+    const nova = proximaVez(new Date(ev.quando).getTime(), ev.repetir_min, agora, ev.duracao_seg);
     proximo = { ...ev, quando: new Date(nova).toISOString(), lembrete_feito: false, aviso_feito: false };
     /* criado_em anda junto: o prazo de 30 dias da privacidade conta da
        ultima vez que o evento aconteceu, e nao de quando foi criado. Sem
@@ -16740,6 +16886,9 @@ client.on("interactionCreate", async (inter) => {
       if (inter.commandName === "evento") {
         const foco = inter.options.getFocused(true);
         if (foco?.name === "fuso") return inter.respond(sugestoesDeFuso(String(foco.value || "")));
+        if (foco?.name === "duracao" || foco?.name === "repetir") {
+          return inter.respond(sugestoesDeTempo(String(foco.value || ""), foco.name));
+        }
         const fuso = Number((await ajustes())[`fuso:${inter.user.id}`]) || 0;
         return inter.respond(
           sugestoesDeQuando(String(inter.options.getFocused() || ""), Date.now(), fuso));
@@ -18156,11 +18305,23 @@ const TRADUCOES_DO_EVENTO = (() => {
       id: "Zona waktu (bawaan: UTC, jam game)", vi: "Múi giờ (mặc định: UTC, giờ trong game)", th: "เขตเวลา (ค่าเริ่มต้น: UTC เวลาในเกม)",
       ja: "タイムゾーン（既定: UTC、ゲーム内時刻）", ko: "시간대 (기본: UTC, 게임 시간)", zh: "时区（默认：UTC，游戏时间）",
     },
+    duracao: {
+      en: "How long it lasts. E.g. 30m · 1h43m27s · 5d", es: "Cuánto dura. Ej: 30m · 1h43m27s · 5d",
+      fr: "Durée. Ex : 30m · 1h43m27s · 5d", de: "Wie lange es dauert. Z. B. 30m · 1h43m27s · 5d",
+      it: "Quanto dura. Es: 30m · 1h43m27s · 5d", ru: "Сколько длится. Напр.: 30m · 1h43m27s · 5d",
+      uk: "Скільки триває. Напр.: 30m · 1h43m27s · 5d", tr: "Ne kadar sürer. Örn: 30m · 1h43m27s · 5d",
+      pl: "Ile trwa. Np. 30m · 1h43m27s · 5d", id: "Berapa lama. Mis: 30m · 1h43m27s · 5d",
+      vi: "Kéo dài bao lâu. VD: 30m · 1h43m27s · 5d", th: "นานเท่าไร เช่น 30m · 1h43m27s · 5d",
+      ja: "所要時間。例: 30m · 1h43m27s · 5d", ko: "진행 시간. 예: 30m · 1h43m27s · 5d", zh: "持续多久。例：30m · 1h43m27s · 5d",
+    },
     repetir: {
-      en: "Repeat the event?", es: "¿Repetir el evento?", fr: "Répéter l'événement ?", de: "Ereignis wiederholen?",
-      it: "Ripetere l'evento?", ru: "Повторять событие?", uk: "Повторювати подію?", tr: "Etkinlik tekrarlansın mı?",
-      pl: "Powtarzać wydarzenie?", id: "Ulangi acara?", vi: "Lặp lại sự kiện?", th: "ทำซ้ำกิจกรรมไหม?",
-      ja: "イベントを繰り返す？", ko: "이벤트를 반복할까요?", zh: "重复此活动？",
+      en: "Repeat after it ends. E.g. 24h · 47h · 7d", es: "Repetir después de que termine. Ej: 24h · 47h · 7d",
+      fr: "Répéter après la fin. Ex : 24h · 47h · 7d", de: "Nach dem Ende wiederholen. Z. B. 24h · 47h · 7d",
+      it: "Ripetere dopo la fine. Es: 24h · 47h · 7d", ru: "Повтор после окончания. Напр.: 24h · 47h · 7d",
+      uk: "Повтор після завершення. Напр.: 24h · 47h · 7d", tr: "Bittikten sonra tekrarla. Örn: 24h · 47h · 7d",
+      pl: "Powtórz po zakończeniu. Np. 24h · 47h · 7d", id: "Ulangi setelah selesai. Mis: 24h · 47h · 7d",
+      vi: "Lặp lại sau khi kết thúc. VD: 24h · 47h · 7d", th: "ทำซ้ำหลังจบ เช่น 24h · 47h · 7d",
+      ja: "終了後に繰り返す。例: 24h · 47h · 7d", ko: "종료 후 반복. 예: 24h · 47h · 7d", zh: "结束后重复。例：24h · 47h · 7d",
     },
     lembrete: {
       en: "DM reminder before it starts, for whoever signed up", es: "Recordatorio por privado antes del inicio, para los inscritos",
@@ -18248,10 +18409,13 @@ const GLOBAIS_DO_CYRON = [
         description: "Fuso da hora (padrão: UTC, o relógio do jogo)",
         descriptionLocalizations: TRADUCOES_DO_EVENTO.fuso,
             autocomplete: true, max_length: 12 },
-      { type: 4, name: "repetir", required: false,
-        description: "Repetir o evento?",
-        descriptionLocalizations: TRADUCOES_DO_EVENTO.repetir,
-        choices: REPETICOES.map((r) => ({ name: rotuloDaRepeticao(r), value: r })) },
+      /* Texto com sugestoes, e nao lista: tempo de jogo e' quebrado. */
+      { type: 3, name: "duracao", required: false, autocomplete: true, max_length: 20,
+        description: "Quanto dura. Ex: 30m · 1h43m27s · 5d",
+        descriptionLocalizations: TRADUCOES_DO_EVENTO.duracao },
+      { type: 3, name: "repetir", required: false, autocomplete: true, max_length: 20,
+        description: "Repetir depois que fecha. Ex: 24h · 47h · 7d",
+        descriptionLocalizations: TRADUCOES_DO_EVENTO.repetir },
       { type: 4, name: "lembrete", required: false,
         description: "Lembrete no privado de quem se inscreveu, antes do início",
         descriptionLocalizations: TRADUCOES_DO_EVENTO.lembrete,

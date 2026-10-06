@@ -4951,7 +4951,7 @@ function conferirCartao(onde, embed, componentes = []) {
 /* ============ o cartão do evento ============ */
 {
   const { cartaoDoEvento, botoesDoEvento } = carregar([
-    "EVENTO_SOBREVIVE", "CRONOMETRO_FINO", "cronometro", "PALAVRAS_DO_CARTAO", "COR_PERTO", "COR_COMECOU", "PERTO", "corDoEvento", "nomeLimpo", "cartaoDoEvento", "botoesDoEvento"]);
+    "EVENTO_SOBREVIVE", "CRONOMETRO_FINO", "cronometro", "PALAVRAS_DO_CARTAO", "COR_PERTO", "COR_COMECOU", "PERTO", "corDoEvento", "nomeLimpo", "textoDaDuracao", "cartaoDoEvento", "botoesDoEvento"]);
   globalThis.COR = 0xF5A623;
 
   const AGORA = Date.UTC(2026, 8, 15, 12, 0);
@@ -5029,8 +5029,8 @@ function conferirCartao(onde, embed, componentes = []) {
 /* ============ a agenda: repetir, lembrar, avisar ============ */
 {
   const m = carregar(["REPETIR_MIN", "REPETIR_MAX", "LEMBRETES", "MENCOES_MAX", "EVENTO_SOBREVIVE",
-    "repetirDoTexto", "textoDaRepeticao", "proximaVez", "mencoesDoAviso",
-    "CRONOMETRO_FINO", "cronometro", "PALAVRAS_DO_CARTAO", "COR_PERTO", "COR_COMECOU", "PERTO", "corDoEvento", "nomeLimpo", "cartaoDoEvento", "botoesDoEvento"]);
+    "repetirDoTexto", "textoDaRepeticao", "DURACAO_MAX", "duracaoDoTexto", "proximaVez", "mencoesDoAviso",
+    "CRONOMETRO_FINO", "cronometro", "PALAVRAS_DO_CARTAO", "COR_PERTO", "COR_COMECOU", "PERTO", "corDoEvento", "nomeLimpo", "textoDaDuracao", "cartaoDoEvento", "botoesDoEvento"]);
   globalThis.COR = 0xF5A623;
 
   /* ---- repetir ---- */
@@ -5061,6 +5061,32 @@ function conferirCartao(onde, embed, componentes = []) {
     m.proximaVez(T0, 1440, T0 + 3 * 24 * H + 5 * 60000), T0 + 4 * 24 * H);
   ok("o Urso anda 47h30m", m.proximaVez(T0, 2850, T0 + 1000), T0 + 2850 * 60000);
   ok("não repete: nada", m.proximaVez(T0, 0, T0), null);
+  ok("com duração, o repetir conta de quando FECHA: Urso 30m + 47h = 47h30m de início a início",
+    m.proximaVez(T0, 2820, T0 + 1000, 1800), T0 + 2850 * 60000);
+  ok("duração quebrada entra inteira, até o segundo",
+    m.proximaVez(T0, 1440, T0 + 1000, 6207), T0 + 24 * H + 6207 * 1000);
+  ok("sem repetir, duração não inventa repetição", m.proximaVez(T0, 0, T0, 1800), null);
+
+  /* ---- a duração: livre, como o contador do jogo ---- */
+  ok("30m", m.duracaoDoTexto("30m"), 1800);
+  ok("5d", m.duracaoDoTexto("5d"), 5 * 86400);
+  ok("1h43m27s", m.duracaoDoTexto("1h43m27s"), 6207);
+  ok("com espaço e por extenso: 1 hora 30 min", m.duracaoDoTexto("1 hora 30 min"), 5400);
+  ok("1:30 é hora e minuto", m.duracaoDoTexto("1:30"), 5400);
+  ok("1:43:27 também", m.duracaoDoTexto("1:43:27"), 6207);
+  ok("número solto é minuto", m.duracaoDoTexto("45"), 2700);
+  ok("90s", m.duracaoDoTexto("90s"), 90);
+  ok("vazio: sem duração", m.duracaoDoTexto(""), 0);
+  ok("\"—\": sem duração", m.duracaoDoTexto("—"), 0);
+  ok("mais de 30 dias é recusado", m.duracaoDoTexto("31d"), null);
+  ok("texto sem sentido é recusado", m.duracaoDoTexto("abacaxi"), null);
+  ok("mostra 30m", m.textoDaDuracao(1800), "30m");
+  ok("mostra 1h43m27s", m.textoDaDuracao(6207), "1h43m27s");
+  ok("mostra 5d", m.textoDaDuracao(5 * 86400), "5d");
+  ok("mostra 1d2h", m.textoDaDuracao(93600), "1d2h");
+  for (const x of ["30m", "1h43m27s", "5d", "1d2h3m4s"]) {
+    ok(`ida e volta: ${x}`, m.textoDaDuracao(m.duracaoDoTexto(x)), x);
+  }
 
   /* ---- quem é marcado na hora ---- */
   const ev = { id: 7, titulo: "Armadilha de Caça 1", quando: new Date(T0).toISOString(), cargo_id: "555555555555555555" };
@@ -5088,6 +5114,23 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o lembrete também", c.description.includes("⏰ Aviso no privado: **10 min antes**"));
   verdade("e o cargo", c.description.includes("<@&555555555555555555>"));
   conferirCartao("o evento completo", c, m.botoesDoEvento(completo, AG));
+
+  /* ---- com duração ---- */
+  const urso = { ...completo, repetir_min: 2820, duracao_seg: 1800 };
+  const cu = m.cartaoDoEvento(urso, [], AG);
+  verdade("a duração aparece", cu.description.includes("⏱️ Dura **30m**"));
+  verdade("e o repetir diz que conta depois de fechar", cu.description.includes("🔁 Repete a cada **47h** depois que fecha"));
+  const sozinho = { ...ev, duracao_seg: 1800 };
+  const aberto = m.cartaoDoEvento(sozinho, [], T0 + 10 * 60000);
+  verdade("no meio do evento: Começou! e a hora de fechar",
+    aberto.description.includes(`🔴 **Começou!** · fecha às <t:${T0 / 1000 + 1800}:t>`));
+  ok("e vermelho", aberto.color, 0xE74C3C);
+  const fechado = m.cartaoDoEvento(sozinho, [], T0 + 40 * 60000);
+  verdade("depois de fechar: Fechou", fechado.description.includes("⚫ **Fechou**") && fechado.title.startsWith("⚫"));
+  ok("e cinza, mesmo antes de uma hora", fechado.color, 0x9aa0a6);
+  const longo = m.cartaoDoEvento({ ...ev, duracao_seg: 5 * 86400 }, [], T0 + 2 * 86400000);
+  ok("evento de 5d continua vermelho no 2º dia", longo.color, 0xE74C3C);
+  verdade("sem duração, nada muda", !m.cartaoDoEvento(ev, [], T0 + 60000).description.includes("fecha"));
   verdade("o botão é de inscrição", m.botoesDoEvento(completo, AG)[0].components[0].custom_id === "evento:vou:7");
   verdade("não há mais o 😴", !m.botoesDoEvento(completo, AG)[0].components.some((b) => b.custom_id.startsWith("evento:nao")));
 }
@@ -5095,7 +5138,7 @@ function conferirCartao(onde, embed, componentes = []) {
 /* ============ o painel de seletores do /evento ============ */
 {
   const m = carregar(["EVENTO_MAX", "LEMBRETES", "REPETICOES", "TODOS_FUSOS", "MINUTOS_DOS_FUSOS", "fusoDoTexto", "rotuloDoFuso", "sugestoesDeFuso", "fusoDoCampo", "textoDaRepeticao",
-    "rotuloDaRepeticao", "textoDoFuso", "partesNoFuso", "instanteDe", "horarioInicial", "opcoesDoDia",
+    "rotuloDaRepeticao", "textoDaDuracao", "URSO", "ehUrso", "linhaDoTempo", "textoDoFuso", "partesNoFuso", "instanteDe", "horarioInicial", "opcoesDoDia",
     "nalingua", "painelDoRascunho"]);
   globalThis.COR = 0xF5A623;
   globalThis.traduzirEmbed = async (e) => e;
@@ -5122,6 +5165,23 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o minuto marcado é 30", painel.components[2].components[0].options.find((o) => o.default).value === "30");
   verdade("o Urso aparece como 🐻 47h30m", painel.components[3].components[0].options.some((o) => o.default && o.label === "🐻 47h30m"));
   ok("a última fileira tem 5 botões, o máximo do Discord", painel.components[4].components.length, 5);
+  verdade("o ⏱️ da duração está na fileira", painel.components[4].components.some((b) => b.custom_id === "evsel:tempo:abc"));
+  const comUrso = await m.painelDoRascunho("abc", { ...p, repetir: 2820, duracao: 1800 }, "pt", AGORA);
+  const repUrso = comUrso.components[3].components[0].options;
+  verdade("o 🐻 da lista marca 47h + 30m", repUrso.some((o) => o.default && o.value === "urso"));
+  ok("e só ele marcado", repUrso.filter((o) => o.default).length, 1);
+  verdade("o botão mostra a duração", comUrso.components[4].components.find((b) => b.custom_id === "evsel:tempo:abc").label === "30m");
+  verdade("e a linha do painel também", comUrso.embeds[0].description.includes("⏱️ 30m"));
+  const errou = await m.painelDoRascunho("abc", { ...p, tempoErrado: "abacaxi" }, "pt", AGORA);
+  const sug = carregar(["REPETIR_MIN", "REPETIR_MAX", "DURACAO_MAX", "REPETICOES", "repetirDoTexto", "textoDaRepeticao",
+    "rotuloDaRepeticao", "duracaoDoTexto", "textoDaDuracao", "sugestoesDeTempo"]);
+  ok("o que se digitou vem primeiro, já entendido", sug.sugestoesDeTempo("1h43m27s", "duracao")[0],
+    { name: "⏱️ 1h43m27s", value: "1h43m27s" });
+  verdade("o repetir sugere o Urso", sug.sugestoesDeTempo("", "repetir").some((o) => o.value === "urso"));
+  verdade("sugestões cabem no Discord", sug.sugestoesDeTempo("", "repetir").length <= 25 &&
+    sug.sugestoesDeTempo("", "repetir").every((o) => o.name.length <= 100 && String(o.value).length <= 20));
+  ok("47h digitado vira 47h", sug.sugestoesDeTempo("47h", "repetir")[0].value, "47h");
+  verdade("tempo que não entendi aparece no painel", errou.embeds[0].description.includes("Não entendi \"abacaxi\""));
   verdade("cada pessoa vê o horário no próprio relógio", painel.embeds[0].description.includes(`<t:${t / 1000}:F>`));
   verdade("e o fuso escolhido aparece, com 🎮 quando é o UTC do jogo", painel.embeds[0].description.includes("🎮 **UTC**"));
 
@@ -5326,7 +5386,7 @@ function conferirCartao(onde, embed, componentes = []) {
   globalThis.motorDe = () => ({ tipo: "auto" });
   globalThis.client = { user: { id: "bot" } };
   const m = carregar(["EVENTO_SOBREVIVE", "TIPO_AGENDA", "ROTULO_INSCREVER", "textoDaRepeticao",
-    "CRONOMETRO_FINO", "cronometro", "PALAVRAS_DO_CARTAO", "COR_PERTO", "COR_COMECOU", "PERTO", "corDoEvento", "nomeLimpo", "cartaoDoEvento", "botoesDoEvento", "eventoDoCartao", "traducoesDaAgenda", "traduzirPara", "palavrasNaLingua", "cargaNaLingua", "AVISO_FICA", "emOrdem", "ehAvisoDeInicio", "pintarSala", "avisoDeInicio",
+    "CRONOMETRO_FINO", "cronometro", "PALAVRAS_DO_CARTAO", "COR_PERTO", "COR_COMECOU", "PERTO", "corDoEvento", "nomeLimpo", "textoDaDuracao", "cartaoDoEvento", "botoesDoEvento", "eventoDoCartao", "traducoesDaAgenda", "traduzirPara", "palavrasNaLingua", "cargaNaLingua", "AVISO_FICA", "emOrdem", "avisoVenceu", "ehAvisoDeInicio", "pintarSala", "avisoDeInicio",
     "ultimaCargaDaCopia", "apagarAvisosDeAntes", "desenharNasCopias"]);
   const AGORA = Date.UTC(2026, 9, 2, 12);
   const ev = { id: 7, titulo: "Armadilha de Caça 1", detalhes: "Cavalaria", quando: new Date(AGORA + 3600000).toISOString() };
@@ -5402,6 +5462,14 @@ function conferirCartao(onde, embed, componentes = []) {
   globalThis.salasDaAgenda = async () => [{ canal: comAviso.canal, idioma: "pt" }];
   await m.desenharNasCopias({}, { id: "s" }, [ev], null, AGORA);
   ok("o aviso de início some meia hora depois", comAviso.apagados, ["900"]);
+  const fimDoUrso = Math.floor(AGORA / 1000) + 600;
+  ok("com duração, o aviso fica até fechar", m.avisoVenceu({ createdTimestamp: AGORA - 3 * 3600000,
+    embeds: [{ description: `**Começou!** · fecha às <t:${fimDoUrso}:t>` }] }, AGORA), false);
+  ok("e sai quando fecha", m.avisoVenceu({ createdTimestamp: AGORA,
+    embeds: [{ description: `**Começou!** · fecha às <t:${fimDoUrso}:t>` }] }, AGORA + 601000), true);
+  verdade("o Começou! diz a hora de fechar",
+    m.avisoDeInicio({ ...ev, duracao_seg: 1800 }, { content: "", allowedMentions: {} }).embeds[0].description
+      .includes(`fecha às <t:${Math.floor(new Date(ev.quando).getTime() / 1000) + 1800}:t>`));
 
   /* 15 min antes: o aviso na sala, marcando; no início ele sai e o "Começou!" entra. */
   const antes = sala("pt", [cartaoDe("950", 7)]);
@@ -5866,7 +5934,10 @@ function conferirCartao(onde, embed, componentes = []) {
 
   const def = fonteEv2.slice(fonteEv2.indexOf('name: "evento",'), fonteEv2.indexOf('name: "evento",') + 4000);
   verdade("o quando tem autocompletar", /name: "quando"[^]{0,120}autocomplete: true/.test(def));
-  verdade("repetir é uma LISTA, nada para digitar errado", /type: 4, name: "repetir"[^]{0,200}choices: REPETICOES/.test(def));
+  verdade("repetir é texto livre com sugestões (tempo de jogo é quebrado)", /type: 3, name: "repetir"[^]{0,120}autocomplete: true/.test(def));
+  verdade("e a duração também", /type: 3, name: "duracao"[^]{0,120}autocomplete: true/.test(def));
+  verdade("o autocompletar responde a duração e o repetir",
+    /foco\?\.name === "duracao" \|\| foco\?\.name === "repetir"[^]{0,160}sugestoesDeTempo/.test(semComentarios(fonteEv2)));
   verdade("o fuso tem todos os fusos, pelo autocompletar", /type: 3, name: "fuso"[^]{0,300}autocomplete: true/.test(def));
   verdade("o quando deixou de ser obrigatório (sem ele abre o painel)", /name: "quando", required: false/.test(def));
   verdade("as descrições têm tradução para o app de cada líder", /descriptionLocalizations: TRADUCOES_DO_EVENTO\.comando/.test(def));
@@ -5879,7 +5950,7 @@ function conferirCartao(onde, embed, componentes = []) {
   /* O autocompletar tinha um dono só -- a lista de eventos do Kingshot --, e
      responderia nomes de rally onde o /evento espera "3h". */
   verdade("o autocompletar sabe de qual comando veio",
-    /inter\.commandName === "evento"[^]{0,400}sugestoesDeQuando/.test(fonteEv2));
+    /inter\.commandName === "evento"[^]{0,700}sugestoesDeQuando/.test(fonteEv2));
 
 }
 
