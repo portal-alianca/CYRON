@@ -8756,6 +8756,13 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o botão leva o id do duelo", tela.components[0].components[0].custom_id === "duelo:hab:t:0");
   verdade("sem energia, o botão fica desligado", tela.components[0].components[2].disabled);
   verdade("ninguém é marcado", tela.allowedMentions.parse.length === 0);
+  const meio = m.telaDoDuelo(Object.assign(duelo(), { limite: 0,
+    historico: ["a", "b", "c", "🗡️ Alexandre: **Golpe** −10", "🐍 Napoleão: **Sabre** −10"] }));
+  const linhasDoMeio = meio.embeds[0].description.split("\n");
+  verdade(`o card cabe no celular (${linhasDoMeio.length} linhas)`, linhasDoMeio.length <= 8);
+  verdade("só as duas últimas jogadas aparecem", !meio.embeds[0].description.includes("-# c") && meio.embeds[0].description.includes("Sabre"));
+  verdade("sem bloco de código nas barras (vira caixa enorme no celular)", !meio.embeds[0].description.includes("`"));
+  ok("o título usa os nomes curtos", meio.embeds[0].title, "⚔️ Alexandre × Napoleão");
   const acabou = m.telaDoDuelo(Object.assign(duelo(), { vencedor: 1, limite: 0 }));
   ok("no fim, sem botões", acabou.components, []);
   verdade("o fim mostra quem venceu", acabou.embeds[0].description.includes("🏆"));
