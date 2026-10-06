@@ -8802,7 +8802,8 @@ function conferirCartao(onde, embed, componentes = []) {
     ok("todo retrato tem crédito", elenco.PERSONAGENS.filter((p) => !creditos.includes(`${p.id}.jpg`)).map((p) => p.id), []);
     /* A ficha do /codex, desenhada de verdade com as fontes do repositorio. */
     const fi = carregar(["ESPACOS_ORDEM", "kitEquipado", "FI_LARGURA", "FI_ALTURA", "FI_TINTA", "FI_SEPIA", "descricaoDaHabilidade",
-      "linhasDoTexto", "escreverEm", "enfeite", "tituloDeSecao", "desenharFicha"]);
+      "linhasDoTexto", "escreverEm", "enfeite", "tituloDeSecao", "folhaDePergaminho", "faixaDoTitulo", "svgDoPergaminho", "montarPergaminho",
+      "desenharFicha", "HB_LARGURA", "HB_ALTURA", "desenharHabilidades"]);
     const fontesDaFicha = Object.fromEntries(Object.entries({ titulo: "Cinzel_700Bold", livro: "EBGaramond_400Regular",
       italico: "EBGaramond_400Regular_Italic", negrito: "EBGaramond_700Bold" }).map(([k, v]) => [k, new URL(`./fontes/${v}.ttf`, import.meta.url).pathname]));
     for (const [nome, liberadas] of [["cleopatra", 6], ["musashi", 0], ["zumbi", 10]]) {
@@ -8823,6 +8824,34 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("com o quadro, as barras saem do texto", !tela.embeds[0].description.includes("▰"));
     const semImagem = m.telaDoDuelo(Object.assign(duelo(), { limite: 0, imagem: false }));
     verdade("sem o quadro, as barras voltam para o texto", semImagem.embeds[0].description.includes("▰"));
+  }
+
+  /* O painel (/duelo sem oponente), sem banco e sem desenho: as abas e os
+     botoes certos. */
+  {
+    const antes = { sb: globalThis.sb, carregarSharp: globalThis.carregarSharp };
+    globalThis.sb = async () => [{ personagem: "zumbi", xp: 160, kit: { defesa: 1 }, vitorias: 3, derrotas: 1 }];
+    globalThis.carregarSharp = async () => null;
+    globalThis.MEMORIA_PARA_DESENHAR = 1e12;
+    const pn = carregar(["ESPACOS_ORDEM", "personagemPorId", "nivelDoPersonagem", "kitEquipado", "descricaoDaHabilidade",
+      "heroisAtivos", "cardsDoPainel", "CARDS_GUARDADOS", "heroiAtivo", "cardDoPainel", "progressoDeTodos", "abasDoPainel", "telaDoPainel"]);
+    const zumbi = elenco.PERSONAGENS.findIndex((p) => p.id === "zumbi");
+    ok("o herói ativo é o último mexido", await pn.heroiAtivo("111111"), "zumbi");
+    const herois = await pn.telaDoPainel("111111", "herois", zumbi);
+    const ids = (t) => t.components.flatMap((r) => r.components.map((c) => c.custom_id));
+    verdade("heróis: ◀ ▶ e usar", ids(herois).includes(`dp:aba:herois:${zumbi - 1}`) && ids(herois).includes(`dp:aba:herois:${zumbi + 1}`));
+    verdade("o herói ativo não se escolhe de novo", herois.components[0].components.find((c) => c.custom_id === `dp:usar:${zumbi}`).disabled);
+    verdade("três abas no fim", ids(herois).slice(-3).join() === `dp:aba:herois:${zumbi},dp:aba:hab:${zumbi},dp:aba:duelar:${zumbi}`);
+    const hab = await pn.telaDoPainel("111111", "hab", zumbi);
+    const trocas = hab.components[0].components;
+    ok("nível 3 (160 XP): defesa liberada, o resto trancado", trocas.map((c) => c.disabled), [true, false, true, true]);
+    verdade("o trancado diz o nível", trocas[0].label.includes("Nv 4"));
+    const duelar = await pn.telaDoPainel("111111", "duelar", 0);
+    verdade("duelar: treino, aberto e a lista de pessoas", ids(duelar).includes("dp:treinar:0") && ids(duelar).includes("dp:aberto:0") &&
+      duelar.components[1].components[0].type === 5);
+    verdade("sem desenho, o painel vira texto", !duelar.embeds[0].image && duelar.files.length === 0);
+    verdade("o ◀ do primeiro volta para o último", ids(await pn.telaDoPainel("111111", "herois", -1)).includes(`dp:usar:${elenco.PERSONAGENS.length - 1}`));
+    Object.assign(globalThis, antes);
   }
 
   const idx = readFileSync(`${aqui}/index.js`, "utf8");

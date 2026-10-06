@@ -10909,9 +10909,230 @@ async function progressoDoDuelista(userId, personagemId) {
   return r?.[0] || { xp: 0, kit: {}, vitorias: 0, derrotas: 0 };
 }
 
+/* O PAINEL DO DUELO (/duelo sem oponente): so' quem pediu ve. Tres abas,
+   cada uma com o seu card:
+     🦸 Herois      -- a ficha de cada heroi, ◀ ▶ para passar, ⭐ para usar
+     ✨ Habilidades -- as oito do heroi, equipada em dourado, trancada com o
+                       criterio; um botao por espaco troca uma pela outra
+     ⚔️ Duelar      -- treino, desafio aberto ou alguem escolhido
+   So' o duelo em si vai para o canal. */
+const heroisAtivos = new Map();   // userId -> id do heroi
+const cardsDoPainel = new Map();  // chave -> imagem (os ultimos desenhados)
+const CARDS_GUARDADOS = 30;
+
+async function heroiAtivo(userId) {
+  if (heroisAtivos.has(userId)) return heroisAtivos.get(userId);
+  /* Sem nada na memoria: o ultimo heroi que a pessoa mexeu. */
+  const r = await sb(`cyron_duelo_personagem?user_id=eq.${userId}&select=personagem&order=atualizado_em.desc&limit=1`).catch(() => null);
+  const id = personagemPorId(r?.[0]?.personagem)?.id || PERSONAGENS[0].id;
+  heroisAtivos.set(userId, id);
+  return id;
+}
+
+async function usarHeroi(userId, id) {
+  heroisAtivos.set(userId, id);
+  /* So' a data: o heroi ativo e' o ultimo mexido (o XP fica como esta'). */
+  await sbPost("cyron_duelo_personagem", { user_id: userId, personagem: id, atualizado_em: new Date().toISOString() },
+    "resolution=merge-duplicates").catch(() => {});
+}
+
+/* Um card, guardado pelos ultimos desenhos: passar ◀ ▶ e voltar nao
+   redesenha. Sem processador de imagem: null. */
+async function cardDoPainel(chave, desenhar) {
+  if (cardsDoPainel.has(chave)) return cardsDoPainel.get(chave);
+  if (process.memoryUsage().rss > MEMORIA_PARA_DESENHAR) return null;
+  const sharp = await carregarSharp();
+  if (!sharp) return null;
+  const img = await naFilaDeDesenho(() => desenhar(sharp)).catch((e) => {
+    console.error("duelo: nao desenhei o card do painel:", e?.message || e);
+    return null;
+  });
+  if (img) {
+    cardsDoPainel.set(chave, img);
+    while (cardsDoPainel.size > CARDS_GUARDADOS) cardsDoPainel.delete(cardsDoPainel.keys().next().value);
+  }
+  return img;
+}
+
+/* A linha do banco de cada heroi da pessoa. */
+async function progressoDeTodos(userId) {
+  const r = await sb(`cyron_duelo_personagem?user_id=eq.${userId}&select=personagem,xp,kit,vitorias,derrotas`).catch(() => null);
+  return Array.isArray(r) ? r : [];
+}
+
+function abasDoPainel(aba, idx) {
+  const aba1 = (id, emoji, label) => ({ type: 2, custom_id: `dp:aba:${id}:${idx}`, style: aba === id ? 1 : 2,
+    emoji: { name: emoji }, label, disabled: aba === id });
+  return { type: 1, components: [aba1("herois", "🦸", "Heróis"), aba1("hab", "✨", "Habilidades"), aba1("duelar", "⚔️", "Duelar")] };
+}
+
+/* A tela inteira do painel. Monta o card certo e os botoes da aba. */
+async function telaDoPainel(userId, aba, idx, aviso = "") {
+  const total = PERSONAGENS.length;
+  idx = ((Number(idx) || 0) % total + total) % total;
+  const p = PERSONAGENS[idx];
+  const [todos, ativo] = await Promise.all([progressoDeTodos(userId), heroiAtivo(userId)]);
+  const r = todos.find((x) => x.personagem === p.id) || null;
+  const xp = Number(r?.xp) || 0;
+  const nivel = nivelDoPersonagem(xp);
+  const duelou = (Number(r?.vitorias) || 0) + (Number(r?.derrotas) || 0) > 0;
+  const escolha = r?.kit || {};
+  const linhas = [];
+  let card = null, nomeDoCard = "card.jpg";
+  const navegar = (destino) => [
+    { type: 2, custom_id: `dp:aba:${destino}:${idx - 1}`, style: 2, emoji: { name: "◀️" } },
+    { type: 2, custom_id: `dp:nada:${idx}`, style: 2, label: `${idx + 1} / ${total}`, disabled: true },
+    { type: 2, custom_id: `dp:aba:${destino}:${idx + 1}`, style: 2, emoji: { name: "▶️" } },
+  ];
+  const linhasDeBotoes = [];
+
+  if (aba === "herois") {
+    card = await cardDoPainel(`ficha:${p.id}:${xp}:${r?.vitorias || 0}:${r?.derrotas || 0}:${JSON.stringify(escolha)}`,
+      (sharp) => desenharFicha(sharp, { p, nivel, xp, vitorias: Number(r?.vitorias) || 0, derrotas: Number(r?.derrotas) || 0,
+        kit: kitEquipado(p, nivel, escolha), liberadas: duelou ? nivel : 0 }));
+    linhas.push(`${p.bandeira} **${p.nome}** · ${p.titulo}`);
+    if (!card) linhas.push(`Nível ${nivel} · ${xp} XP`, `*${p.frase}*`);
+    linhasDeBotoes.push({ type: 1, components: [...navegar("herois").slice(0, 2),
+      { type: 2, custom_id: `dp:usar:${idx}`, style: ativo === p.id ? 3 : 1, emoji: { name: "⭐" },
+        label: ativo === p.id ? "Herói ativo" : "Usar este herói", disabled: ativo === p.id },
+      navegar("herois")[2]] });
+  } else if (aba === "hab") {
+    card = await cardDoPainel(`hab:${p.id}:${nivel}:${JSON.stringify(escolha)}`,
+      (sharp) => desenharHabilidades(sharp, { p, nivel, escolha }));
+    linhas.push(`${p.bandeira} **${p.curto}** · Nível ${nivel}`, "-# Toque num espaço para trocar entre a inicial e a alternativa.");
+    if (!card) {
+      for (const hab of kitEquipado(p, nivel, escolha)) linhas.push(`${hab.emoji} **${hab.nome}** · ${descricaoDaHabilidade(hab)}`);
+    }
+    const nomes = { basica: "Básica", defesa: "Defesa", especial: "Especial", suprema: "Suprema" };
+    linhasDeBotoes.push({ type: 1, components: ESPACOS_ORDEM.map((espaco) => {
+      const libera = ESPACOS[espaco].nivelAlternativa;
+      const trancada = nivel < libera;
+      return { type: 2, custom_id: `dp:troca:${idx}:${espaco}`, style: trancada ? 2 : 1,
+        emoji: { name: trancada ? "🔒" : "🔄" }, label: trancada ? `${nomes[espaco]} · Nv ${libera}` : nomes[espaco], disabled: trancada };
+    }) });
+    linhasDeBotoes.push({ type: 1, components: navegar("hab") });
+  } else {
+    const h = personagemPorId(ativo);
+    const ra = todos.find((x) => x.personagem === h.id);
+    const nivelAtivo = nivelDoPersonagem(Number(ra?.xp) || 0);
+    card = await cardDoPainel(`ficha:${h.id}:${Number(ra?.xp) || 0}:${ra?.vitorias || 0}:${ra?.derrotas || 0}:${JSON.stringify(ra?.kit || {})}`,
+      (sharp) => desenharFicha(sharp, { p: h, nivel: nivelAtivo, xp: Number(ra?.xp) || 0, vitorias: Number(ra?.vitorias) || 0,
+        derrotas: Number(ra?.derrotas) || 0, kit: kitEquipado(h, nivelAtivo, ra?.kit || {}),
+        liberadas: (Number(ra?.vitorias) || 0) + (Number(ra?.derrotas) || 0) > 0 ? nivelAtivo : 0 }));
+    linhas.push(`Seu herói: ${h.bandeira} **${h.nome}** · Nível ${nivelAtivo}`, "",
+      "🤖 **Treinar**: contra a CYRON, na hora. Vale menos XP.",
+      "📣 **Desafio aberto**: qualquer pessoa do canal pode aceitar.",
+      "👤 **Desafiar alguém**: escolha a pessoa na lista.",
+      "-# O duelo aparece no canal para todos verem. Trocar de herói: aba 🦸.");
+    linhasDeBotoes.push({ type: 1, components: [
+      { type: 2, custom_id: `dp:treinar:${idx}`, style: 1, emoji: { name: "🤖" }, label: "Treinar" },
+      { type: 2, custom_id: `dp:aberto:${idx}`, style: 3, emoji: { name: "📣" }, label: "Desafio aberto" },
+    ] });
+    linhasDeBotoes.push({ type: 1, components: [{ type: 5, custom_id: `dp:alvo:${idx}`, placeholder: "👤 Desafiar alguém…", min_values: 1, max_values: 1 }] });
+    nomeDoCard = "heroi.jpg";
+  }
+  if (aviso) linhas.push("", aviso);
+  linhasDeBotoes.push(abasDoPainel(aba, idx));
+  const embed = { color: 0xC9A227, title: "⚔️ Duelo CYRON", description: linhas.join("\\n").slice(0, 4000),
+    ...(card ? { image: { url: `attachment://${nomeDoCard}` } } : {}) };
+  return { embeds: [embed], components: linhasDeBotoes, files: card ? [{ attachment: card, name: nomeDoCard }] : [], attachments: [] };
+}
+
+/* Cria o duelo e registra quem esta' nele. */
+function novoDuelo(inter, pessoas, escolhas, { treino = false, fixo = {} } = {}) {
+  const id = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+  const estado = { id, guildId: inter.guildId, canalId: inter.channelId, msg: null, historico: [], jogadas: 0, vez: 0,
+    vencedor: null, treino, escolhas, fixo, pessoas };
+  duelos.set(id, estado);
+  for (const p of pessoas) if (p?.userId) duelistaEm.set(p.userId, id);
+  estado.expira = setTimeout(() => cancelarDuelo(id, "⌛"), DUELO_ESCOLHA);
+  return estado;
+}
+
+async function cliqueDoPainel(inter) {
+  const [, acao, idxTxt, extra] = inter.customId.split(":");
+  const idx = Number(idxTxt) || 0;
+  if (acao === "nada") return inter.deferUpdate();
+  await inter.deferUpdate();
+  const eu = inter.user.id;
+  const nome = inter.member?.displayName || inter.user.username;
+  const fala = async (t) => (await nalingua(await linguaDe(inter), inter.guildId, t))[0];
+  const p = PERSONAGENS[((idx % PERSONAGENS.length) + PERSONAGENS.length) % PERSONAGENS.length];
+
+  /* dp:aba:<aba>:<heroi> */
+  if (acao === "aba") return inter.editReply(await telaDoPainel(eu, ["herois", "hab", "duelar"].includes(idxTxt) ? idxTxt : "herois", extra));
+  if (acao === "usar") {
+    await usarHeroi(eu, p.id);
+    return inter.editReply(await telaDoPainel(eu, "herois", idx, `⭐ ${p.curto} ${await fala("agora é o seu herói.")}`));
+  }
+  if (acao === "troca") {
+    const espaco = extra;
+    if (!ESPACOS[espaco]) return;
+    const r = (await progressoDeTodos(eu)).find((x) => x.personagem === p.id);
+    const nivel = nivelDoPersonagem(Number(r?.xp) || 0);
+    if (nivel < ESPACOS[espaco].nivelAlternativa) return;
+    const kit = { ...(r?.kit || {}), [espaco]: Number(r?.kit?.[espaco]) === 1 ? 0 : 1 };
+    await sbPost("cyron_duelo_personagem", { user_id: eu, personagem: p.id, kit, atualizado_em: new Date().toISOString() },
+      "resolution=merge-duplicates").catch(() => {});
+    heroisAtivos.set(eu, p.id);
+    return inter.editReply(await telaDoPainel(eu, "hab", idx));
+  }
+
+  /* Daqui para baixo, o duelo vai para o canal. */
+  if (!inter.guildId) return inter.editReply(await telaDoPainel(eu, "duelar", idx, `⚠️ ${await fala("O duelo só funciona dentro de um servidor.")}`));
+  if (duelistaEm.has(eu)) return inter.editReply(await telaDoPainel(eu, "duelar", idx, `⚠️ ${await fala("Você já está num duelo. Termine ele primeiro.")}`));
+  const heroi = personagemPorId(await heroiAtivo(eu));
+  /* No canal, a' vista de todos. Sem permissao de mandar ali (app
+     instalado so' pela pessoa), vai como resposta publica da interacao. */
+  const publicar = async (conteudo) => {
+    const noCanal = await inter.channel?.send(conteudo).catch(() => null);
+    if (noCanal) return noCanal;
+    return await inter.followUp({ ...conteudo, flags: 0 }).catch((e) => { console.error("duelo: nao publiquei:", e?.message || e); return null; });
+  };
+
+  if (acao === "treinar") {
+    const outros = PERSONAGENS.filter((x) => x.id !== heroi.id);
+    const estado = novoDuelo(inter, [{ userId: eu, nome }, { bot: true }],
+      { 0: heroi.id, 1: outros[Math.floor(Math.random() * outros.length)].id }, { treino: true, fixo: { 0: true } });
+    estado.msg = await publicar({ content: `⚔️ <@${eu}> vai treinar com ${heroi.bandeira} **${heroi.curto}** contra 🤖 CYRON…`, allowedMentions: { parse: [] } });
+    if (!estado.msg) return cancelarDuelo(estado.id);
+    estado.comecando = true;
+    await comecarDuelo(estado);
+    return inter.editReply(await telaDoPainel(eu, "duelar", idx, `✅ ${await fala("Treino aberto no canal.")}`));
+  }
+  if (acao === "aberto") {
+    const estado = novoDuelo(inter, [{ userId: eu, nome }, null], { 0: heroi.id }, { fixo: { 0: true } });
+    estado.msg = await publicar({ content: `📣 <@${eu}> desafia quem tiver coragem, com ${heroi.bandeira} **${heroi.curto}**!\\n-# O desafio fica aberto por 2 minutos.`,
+      components: [{ type: 1, components: [{ type: 2, custom_id: `duelo:aceitar:${estado.id}`, style: 3, emoji: { name: "⚔️" }, label: "Aceitar o desafio" }] }],
+      allowedMentions: { parse: [] } });
+    if (!estado.msg) return cancelarDuelo(estado.id);
+    return inter.editReply(await telaDoPainel(eu, "duelar", idx, `✅ ${await fala("Desafio aberto no canal. Agora é esperar alguém aceitar.")}`));
+  }
+  if (acao === "alvo") {
+    const alvoId = inter.values?.[0];
+    const alvo = alvoId ? inter.users?.get?.(alvoId) || await inter.client.users.fetch(alvoId).catch(() => null) : null;
+    if (!alvo || alvo.id === eu || alvo.bot) {
+      return inter.editReply(await telaDoPainel(eu, "duelar", idx, `⚠️ ${await fala("Escolha outra pessoa (nem você, nem um bot). Para treinar contra a CYRON, use 🤖 Treinar.")}`));
+    }
+    if (duelistaEm.has(alvo.id)) return inter.editReply(await telaDoPainel(eu, "duelar", idx, `⚠️ ${await fala("Essa pessoa já está num duelo agora.")}`));
+    const nomeAlvo = inter.members?.get?.(alvo.id)?.displayName || alvo.globalName || alvo.username;
+    const estado = novoDuelo(inter, [{ userId: eu, nome }, { userId: alvo.id, nome: nomeAlvo }], { 0: heroi.id }, { fixo: { 0: true } });
+    estado.msg = await publicar({ content: `⚔️ <@${eu}> desafiou <@${alvo.id}> para um duelo, com ${heroi.bandeira} **${heroi.curto}**!\\n-# <@${alvo.id}>, escolha o seu herói abaixo.`,
+      components: escolhaDePersonagem(estado.id, nomeAlvo), allowedMentions: { users: [alvo.id] } });
+    if (!estado.msg) return cancelarDuelo(estado.id);
+    return inter.editReply(await telaDoPainel(eu, "duelar", idx, `✅ ${await fala("Desafio enviado no canal.")}`));
+  }
+}
+
 async function comandoDuelo(inter) {
-  const idioma = await linguaDe(inter);
   const alvo = inter.options.getUser("oponente");
+  /* Sem oponente: o painel do duelo, so' para quem pediu. */
+  if (!alvo) {
+    await inter.deferReply({ flags: 64 });
+    const heroi = await heroiAtivo(inter.user.id);
+    return inter.editReply(await telaDoPainel(inter.user.id, "herois", PERSONAGENS.findIndex((p) => p.id === heroi)));
+  }
+  const idioma = await linguaDe(inter);
   if (duelistaEm.has(inter.user.id)) {
     const [t] = await nalingua(idioma, inter.guildId, "Você já está num duelo. Termine ele primeiro.");
     return inter.reply({ flags: 64, content: `⚔️ ${t}` });
@@ -10945,7 +11166,7 @@ function cancelarDuelo(id, motivo = "") {
   const estado = duelos.get(id);
   if (!estado) return;
   clearTimeout(estado.expira); clearTimeout(estado.relogio);
-  for (const p of estado.pessoas) if (p.userId && duelistaEm.get(p.userId) === id) duelistaEm.delete(p.userId);
+  for (const p of estado.pessoas) if (p?.userId && duelistaEm.get(p.userId) === id) duelistaEm.delete(p.userId);
   duelos.delete(id);
   if (motivo && estado.msg && estado.vencedor === null) estado.msg.edit({ content: `${motivo} Duelo cancelado.`, components: [], embeds: [] }).catch(() => {});
 }
@@ -10959,18 +11180,33 @@ async function cliqueDuelo(inter) {
   if (!estado) {
     return inter.reply({ flags: 64, content: `⚔️ ${await fala("Esse duelo já acabou.")}` });
   }
-  const indice = estado.pessoas.findIndex((p) => p.userId === inter.user.id);
+  /* Desafio aberto: o primeiro que aceitar entra na vaga. */
+  if (acao === "aceitar") {
+    if (estado.pessoas[0].userId === inter.user.id) return inter.reply({ flags: 64, content: `⚔️ ${await fala("Esse desafio é seu: espere alguém aceitar.")}` });
+    if (estado.pessoas[1]) return inter.reply({ flags: 64, content: `⚔️ ${await fala("Alguém já aceitou esse desafio.")}` });
+    if (duelistaEm.has(inter.user.id)) return inter.reply({ flags: 64, content: `⚔️ ${await fala("Você já está num duelo. Termine ele primeiro.")}` });
+    estado.pessoas[1] = { userId: inter.user.id, nome: inter.member?.displayName || inter.user.username };
+    duelistaEm.set(inter.user.id, id);
+    clearTimeout(estado.expira);
+    estado.expira = setTimeout(() => cancelarDuelo(id, "⌛"), DUELO_ESCOLHA);
+    const h = personagemPorId(estado.escolhas[0]);
+    return inter.update({ content: `⚔️ <@${inter.user.id}> aceitou o desafio de <@${estado.pessoas[0].userId}> (${h.bandeira} **${h.curto}**)!\n-# <@${inter.user.id}>, escolha o seu herói abaixo.`,
+      components: escolhaDePersonagem(id, estado.pessoas[1].nome), allowedMentions: { parse: [] } });
+  }
+  const indice = estado.pessoas.findIndex((p) => p?.userId === inter.user.id);
   if (indice < 0) {
     return inter.reply({ flags: 64, content: `👀 ${await fala("Você está assistindo. Para duelar, use /duelo.")}` });
   }
 
   if (acao === "escolher") {
     if (estado.lutadores) return inter.deferUpdate();
+    /* Quem ja' veio do painel com o heroi escolhido nao troca aqui. */
+    if (estado.fixo?.[indice]) return inter.reply({ flags: 64, content: `⚔️ ${await fala("Seu herói já está escolhido. Agora é a vez do outro.")}` });
     const personagem = personagemPorId(inter.values?.[0]);
     if (!personagem) return inter.deferUpdate();
     estado.escolhas[indice] = personagem.id;
     await inter.reply({ flags: 64, content: `${personagem.bandeira} ${await fala("Personagem escolhido:")} **${personagem.nome}**` });
-    if (estado.pessoas[1].bot && estado.escolhas[1] === undefined) {
+    if (estado.pessoas[1]?.bot && estado.escolhas[1] === undefined) {
       const outros = PERSONAGENS.filter((p) => p.id !== personagem.id);
       estado.escolhas[1] = outros[Math.floor(Math.random() * outros.length)].id;
     }
@@ -11236,6 +11472,45 @@ function tituloDeSecao(fonte, texto, cx, y, larg) {
     `<path d="M ${cx - w / 2 - 14} ${y - 10} l -6 -5 v 10 Z M ${cx + w / 2 + 14} ${y - 10} l 6 -5 v 10 Z" fill="${FI_SEPIA}"/>`;
 }
 
+/* A folha de pergaminho: duas folhas de tras, a da frente, moldura dupla
+   e os cantos. Usada pela ficha e pelo card das habilidades. */
+function folhaDePergaminho(W, H, m) {
+  let svg = `<rect x="${m + 10}" y="${m + 14}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="#CDB98F" transform="rotate(0.8 ${W / 2} ${H / 2})"/>`;
+  svg += `<rect x="${m - 6}" y="${m + 6}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="#D9C7A0" transform="rotate(-0.6 ${W / 2} ${H / 2})"/>`;
+  svg += `<rect x="${m}" y="${m}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="url(#papel)"/>`;
+  svg += `<rect x="${m}" y="${m}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="url(#borda)"/>`;
+  svg += `<rect x="${m + 18}" y="${m + 18}" width="${W - 2 * m - 36}" height="${H - 2 * m - 36}" fill="none" stroke="${FI_SEPIA}" stroke-width="2.5"/>`;
+  svg += `<rect x="${m + 26}" y="${m + 26}" width="${W - 2 * m - 52}" height="${H - 2 * m - 52}" fill="none" stroke="${FI_SEPIA}" stroke-width="1" opacity="0.7"/>`;
+  for (const [cx, cy] of [[m + 22, m + 22], [W - m - 22, m + 22], [m + 22, H - m - 22], [W - m - 22, H - m - 22]]) {
+    svg += `<path d="M ${cx} ${cy - 14} L ${cx + 14} ${cy} L ${cx} ${cy + 14} L ${cx - 14} ${cy} Z" fill="#E9DCBC" stroke="${FI_SEPIA}" stroke-width="2"/>` +
+      `<circle cx="${cx}" cy="${cy}" r="4" fill="${FI_SEPIA}"/>`;
+  }
+  return svg;
+}
+
+/* A faixa do titulo, no alto da folha. */
+function faixaDoTitulo(fonte, texto, W, fy) {
+  const c = W / 2;
+  return `<path d="M ${c - 170} ${fy - 34} L ${c + 170} ${fy - 34} L ${c + 190} ${fy - 8} L ${c + 170} ${fy + 18} L ${c - 170} ${fy + 18} L ${c - 190} ${fy - 8} Z" fill="#E6D3A8" stroke="${FI_SEPIA}" stroke-width="2"/>` +
+    `<path d="M ${c - 190} ${fy - 8} L ${c - 218} ${fy - 26} L ${c - 206} ${fy - 8} L ${c - 218} ${fy + 10} Z M ${c + 190} ${fy - 8} L ${c + 218} ${fy - 26} L ${c + 206} ${fy - 8} L ${c + 218} ${fy + 10} Z" fill="${FI_SEPIA}"/>` +
+    escreverEm(fonte, texto, c, fy + 6, 38, FI_TINTA, { alinhar: "meio", espaco: 10, max: 320 });
+}
+
+function svgDoPergaminho(W, H, corpo) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
+    `<radialGradient id="papel" cx="50%" cy="45%" r="70%"><stop offset="0" stop-color="#F4EBD3"/><stop offset="0.75" stop-color="#EADBB7"/><stop offset="1" stop-color="#D9C294"/></radialGradient>` +
+    `<radialGradient id="borda" cx="50%" cy="50%" r="72%"><stop offset="0.8" stop-color="#7A5A30" stop-opacity="0"/><stop offset="1" stop-color="#7A5A30" stop-opacity="0.35"/></radialGradient>` +
+    `</defs>${corpo}</svg>`;
+}
+
+/* Fundo de madeira, a folha, a textura do papel e o que vier por cima. */
+async function montarPergaminho(sharp, W, H, svg, camadas = []) {
+  const ruido = await sharp({ create: { width: W, height: H, channels: 3, background: { r: 128, g: 128, b: 128 },
+    noise: { type: "gaussian", mean: 128, sigma: 18 } } }).blur(0.6).png().toBuffer();
+  return await sharp({ create: { width: W, height: H, channels: 3, background: "#3B2A1E" } })
+    .composite([{ input: Buffer.from(svg) }, { input: ruido, blend: "soft-light" }, ...camadas]).jpeg({ quality: 86 }).toBuffer();
+}
+
 /* `dados`: { p, nivel, xp, vitorias, derrotas, kit (o equipado), liberadas }.
    `liberadas`: quantas paginas do Codex (0 = nunca duelou com ele). */
 async function desenharFicha(sharp, dados, pasta = RETRATOS_DO_DUELO,
@@ -11247,24 +11522,8 @@ async function desenharFicha(sharp, dados, pasta = RETRATOS_DO_DUELO,
   const esq = 78, colEsq = 410; // coluna da esquerda
   let svg = "";
 
-  /* A folha: duas folhas de tras (so' as bordas aparecem) e a da frente. */
-  svg += `<rect x="${m + 10}" y="${m + 14}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="#CDB98F" transform="rotate(0.8 ${W / 2} ${H / 2})"/>`;
-  svg += `<rect x="${m - 6}" y="${m + 6}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="#D9C7A0" transform="rotate(-0.6 ${W / 2} ${H / 2})"/>`;
-  svg += `<rect x="${m}" y="${m}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="url(#papel)"/>`;
-  svg += `<rect x="${m}" y="${m}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="url(#borda)"/>`;
-  /* Moldura dupla e cantos. */
-  svg += `<rect x="${m + 18}" y="${m + 18}" width="${W - 2 * m - 36}" height="${H - 2 * m - 36}" fill="none" stroke="${FI_SEPIA}" stroke-width="2.5"/>`;
-  svg += `<rect x="${m + 26}" y="${m + 26}" width="${W - 2 * m - 52}" height="${H - 2 * m - 52}" fill="none" stroke="${FI_SEPIA}" stroke-width="1" opacity="0.7"/>`;
-  for (const [cx, cy] of [[m + 22, m + 22], [W - m - 22, m + 22], [m + 22, H - m - 22], [W - m - 22, H - m - 22]]) {
-    svg += `<path d="M ${cx} ${cy - 14} L ${cx + 14} ${cy} L ${cx} ${cy + 14} L ${cx - 14} ${cy} Z" fill="#E9DCBC" stroke="${FI_SEPIA}" stroke-width="2"/>` +
-      `<circle cx="${cx}" cy="${cy}" r="4" fill="${FI_SEPIA}"/>`;
-  }
-
-  /* Faixa do titulo. */
-  const fy = 108;
-  svg += `<path d="M 280 ${fy - 34} L 620 ${fy - 34} L 640 ${fy - 8} L 620 ${fy + 18} L 280 ${fy + 18} L 260 ${fy - 8} Z" fill="#E6D3A8" stroke="${FI_SEPIA}" stroke-width="2"/>` +
-    `<path d="M 260 ${fy - 8} L 232 ${fy - 26} L 244 ${fy - 8} L 232 ${fy + 10} Z M 640 ${fy - 8} L 668 ${fy - 26} L 656 ${fy - 8} L 668 ${fy + 10} Z" fill="${FI_SEPIA}"/>`;
-  svg += escreverEm(titulo, "CÓDEX", W / 2, fy + 6, 38, FI_TINTA, { alinhar: "meio", espaco: 10 });
+  svg += folhaDePergaminho(W, H, m);
+  svg += faixaDoTitulo(titulo, "CÓDEX", W, 108);
 
   /* Nome e titulo. */
   svg += enfeite(esq + colEsq / 2, 182, colEsq - 20);
@@ -11339,10 +11598,7 @@ async function desenharFicha(sharp, dados, pasta = RETRATOS_DO_DUELO,
   }
   svg += escreverEm(titulo, "CYRON · DUELO", W / 2, H - m - 34, 14, "#A88C5E", { alinhar: "meio", espaco: 3 });
 
-  const fundo = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
-    `<radialGradient id="papel" cx="50%" cy="45%" r="70%"><stop offset="0" stop-color="#F4EBD3"/><stop offset="0.75" stop-color="#EADBB7"/><stop offset="1" stop-color="#D9C294"/></radialGradient>` +
-    `<radialGradient id="borda" cx="50%" cy="50%" r="72%"><stop offset="0.8" stop-color="#7A5A30" stop-opacity="0"/><stop offset="1" stop-color="#7A5A30" stop-opacity="0.35"/></radialGradient>` +
-    `</defs>${svg}</svg>`;
+  const fundo = svgDoPergaminho(W, H, svg);
 
   /* O retrato preso na folha: borda de papel, levemente torto, com sombra
      e um alfinete. */
@@ -11357,16 +11613,70 @@ async function desenharFicha(sharp, dados, pasta = RETRATOS_DO_DUELO,
   const fx = 505, fy2 = 190;
   const alfinete = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><circle cx="20" cy="20" r="11" fill="#9E2B25" stroke="#5A1612" stroke-width="2"/><circle cx="16" cy="16" r="3.5" fill="#E8A49A"/></svg>`);
 
-  const ruido = await sharp({ create: { width: W, height: H, channels: 3, background: { r: 128, g: 128, b: 128 },
-    noise: { type: "gaussian", mean: 128, sigma: 18 } } }).blur(0.6).png().toBuffer();
-  return await sharp({ create: { width: W, height: H, channels: 3, background: "#3B2A1E" } })
-    .composite([
-      { input: Buffer.from(fundo) },
-      { input: ruido, blend: "soft-light" },
-      { input: sombra, left: fx - 10, top: fy2 - 6 },
-      { input: torta, left: fx, top: fy2 },
-      { input: alfinete, left: fx + Math.round(meta.width / 2) - 20, top: fy2 - 12 },
-    ]).jpeg({ quality: 86 }).toBuffer();
+  return await montarPergaminho(sharp, W, H, fundo, [
+    { input: sombra, left: fx - 10, top: fy2 - 6 },
+    { input: torta, left: fx, top: fy2 },
+    { input: alfinete, left: fx + Math.round(meta.width / 2) - 20, top: fy2 - 12 },
+  ]);
+}
+
+/* O CARD DAS HABILIDADES: os quatro espacos, cada um com as duas opcoes
+   lado a lado. A equipada tem moldura dourada; a trancada fica apagada e
+   diz o que falta para liberar. `escolha`: o kit salvo ({ defesa: 1, ... }). */
+const HB_LARGURA = 900;
+const HB_ALTURA = 1250;
+async function desenharHabilidades(sharp, { p, nivel, escolha = {} }, pasta = RETRATOS_DO_DUELO,
+  fontes = { titulo: FONTE_TITULO, livro: FONTE_LIVRO, italico: FONTE_LIVRO_ITALICO, negrito: FONTE_LIVRO_NEGRITO }) {
+  const [titulo, , italico, negrito] = await Promise.all([fontes.titulo, fontes.livro, fontes.italico, fontes.negrito].map(fonteDoDesenho));
+  const W = HB_LARGURA, H = HB_ALTURA, m = 34;
+  let svg = folhaDePergaminho(W, H, m) + faixaDoTitulo(titulo, "HABILIDADES", W, 108);
+  /* Quem e', ao lado do retrato redondo. */
+  svg += escreverEm(titulo, soLetrasDaFonte(titulo, p.curto || p.nome), 232, 205, 40, FI_TINTA, { max: 560 });
+  svg += escreverEm(italico, soLetrasDaFonte(italico, `${p.titulo} · Nível ${nivel}`), 234, 240, 24, FI_SEPIA, { max: 560 });
+  svg += enfeite(W / 2, 290, W - 180);
+  const rotulos = { basica: "BÁSICA", defesa: "DEFESA", especial: "ESPECIAL", suprema: "SUPREMA" };
+  const cores = { basica: "#9C8A6A", defesa: "#5B7FA6", especial: "#B5652E", suprema: "#9E2B25" };
+  const bx = 78, bw = 360, gap = 24, bh = 150;
+  ESPACOS_ORDEM.forEach((espaco, i) => {
+    const y0 = 330 + i * 200;
+    const regra = ESPACOS[espaco];
+    const libera = regra.nivelAlternativa;
+    const usaAlt = Number(escolha?.[espaco]) === 1 && nivel >= libera;
+    svg += `<rect x="${bx}" y="${y0 - 2}" width="6" height="22" fill="${cores[espaco]}"/>`;
+    svg += escreverEm(titulo, `${rotulos[espaco]}${regra.energia ? ` · ${regra.energia} DE ENERGIA` : " · SEM CUSTO"}` +
+      (regra.aPartirDoTurno ? ` · A PARTIR DO ${regra.aPartirDoTurno}º TURNO` : ""), bx + 16, y0 + 16, 18, FI_TINTA, { max: W - 2 * bx - 20 });
+    p.kit[espaco].forEach((hab, k) => {
+      const x = bx + k * (bw + gap), y = y0 + 32;
+      const trancada = k === 1 && nivel < libera;
+      const equipada = k === (usaAlt ? 1 : 0);
+      svg += `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="10" fill="${trancada ? "#E2D6BA" : "#F6ECD2"}" stroke="${equipada ? "#B8862F" : FI_SEPIA}" stroke-width="${equipada ? 5 : 1.5}"/>`;
+      svg += escreverEm(titulo, k === 0 ? "INICIAL" : "ALTERNATIVA", x + 16, y + 26, 13, "#A88C5E");
+      if (equipada) {
+        svg += `<rect x="${x + bw - 118}" y="${y + 10}" width="104" height="24" rx="12" fill="#B8862F"/>` +
+          escreverEm(titulo, "EQUIPADA", x + bw - 66, y + 27, 13, "#FFF8E6", { alinhar: "meio" });
+      }
+      const corNome = trancada ? "#8E8068" : FI_TINTA;
+      svg += escreverEm(negrito, soLetrasDaFonte(negrito, hab.nome), x + 16, y + 62, 25, corNome, { max: bw - 32 });
+      const desc = linhasDoTexto(italico, soLetrasDaFonte(italico, descricaoDaHabilidade(hab)), 19, bw - 32).slice(0, 2);
+      desc.forEach((l, j) => { svg += escreverEm(italico, l, x + 16, y + 92 + j * 23, 19, trancada ? "#9A8C72" : "#6B5338"); });
+      if (trancada) {
+        /* O cadeado e o criterio. */
+        const lx = x + 16, ly = y + bh - 34;
+        svg += `<path d="M ${lx + 4} ${ly + 8} v -5 a 7 7 0 0 1 14 0 v 5" fill="none" stroke="#7A5A30" stroke-width="3"/>` +
+          `<rect x="${lx}" y="${ly + 8}" width="22" height="17" rx="3" fill="#7A5A30"/>`;
+        svg += escreverEm(negrito, `Libera no nível ${libera}`, lx + 32, ly + 23, 20, "#7A5A30");
+      }
+    });
+  });
+  svg += escreverEm(italico, "A alternativa é diferente, nunca mais forte: escolha o seu estilo.", W / 2, H - m - 62, 20, FI_SEPIA, { alinhar: "meio" });
+  svg += escreverEm(titulo, "CYRON · DUELO", W / 2, H - m - 34, 14, "#A88C5E", { alinhar: "meio", espaco: 3 });
+  /* O retrato redondo no alto, a' esquerda. */
+  const r = 64;
+  const mascara = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${2 * r}" height="${2 * r}"><circle cx="${r}" cy="${r}" r="${r}"/></svg>`);
+  const rosto = await sharp(`${pasta}${p.id}.jpg`).resize(2 * r, 2 * r, { fit: "cover", position: "north" })
+    .composite([{ input: mascara, blend: "dest-in" }]).png().toBuffer();
+  svg += `<circle cx="${84 + r}" cy="${168 + r}" r="${r + 5}" fill="#B8862F"/>`;
+  return await montarPergaminho(sharp, W, H, svgDoPergaminho(W, H, svg), [{ input: rosto, left: 84, top: 168 }]);
 }
 
 async function fichaDoPersonagem(dados) {
@@ -11507,7 +11817,7 @@ async function comandoCodex(inter) {
     const r = linhaDe(escolhido.id);
     const xp = Number(r?.xp) || 0;
     const nivel = nivelDoPersonagem(xp);
-    const liberadas = r ? nivel : 0;
+    const liberadas = (Number(r?.vitorias) || 0) + (Number(r?.derrotas) || 0) > 0 ? nivel : 0;
     const imagem = await fichaDoPersonagem({ p: escolhido, nivel, xp, vitorias: Number(r?.vitorias) || 0, derrotas: Number(r?.derrotas) || 0,
       kit: kitEquipado(escolhido, nivel, r?.kit || {}), liberadas });
     if (imagem) return inter.editReply({ files: [{ attachment: imagem, name: `codex-${escolhido.id}.jpg` }] });
@@ -11517,7 +11827,7 @@ async function comandoCodex(inter) {
   }
   const linhas = PERSONAGENS.map((p) => {
     const r = linhaDe(p.id);
-    const nivel = r ? nivelDoPersonagem(Number(r.xp) || 0) : 0;
+    const nivel = (Number(r?.vitorias) || 0) + (Number(r?.derrotas) || 0) > 0 ? nivelDoPersonagem(Number(r.xp) || 0) : 0;
     return `${p.bandeira} ${p.nome} · 📜 ${nivel}/10${nivel === 10 ? " 👑" : ""}`;
   });
   return inter.editReply({ embeds: [{ color: 0xF5C542, title: "📜 Códex", description: linhas.join("\n") +
@@ -19008,6 +19318,9 @@ client.on("interactionCreate", async (inter) => {
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("evento:")) {
       return await cliqueEvento(inter);
+    }
+    if (inter.isMessageComponent() && inter.customId.startsWith("dp:")) {
+      return await cliqueDoPainel(inter);
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("duelo:")) {
       return await cliqueDuelo(inter);
