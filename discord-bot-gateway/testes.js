@@ -8801,7 +8801,7 @@ function conferirCartao(onde, embed, componentes = []) {
     const creditos = readFileSync(`${pasta}CREDITOS.md`, "utf8");
     ok("todo retrato tem crédito", elenco.PERSONAGENS.filter((p) => !creditos.includes(`${p.id}.jpg`)).map((p) => p.id), []);
     /* A ficha do /codex, desenhada de verdade com as fontes do repositorio. */
-    const fi = carregar(["ESPACOS_ORDEM", "kitEquipado", "FI_LARGURA", "FI_ALTURA", "FI_TINTA", "FI_SEPIA", "descricaoDaHabilidade",
+    const fi = carregar(["ESPACOS_ORDEM", "kitEquipado", "FI_LARGURA", "FI_ALTURA", "FI_TINTA", "FI_SEPIA", "ROTULOS_DA_FICHA", "fonteQueEscreve", "descricaoDaHabilidade",
       "linhasDoTexto", "escreverEm", "enfeite", "tituloDeSecao", "folhaDePergaminho", "faixaDoTitulo", "svgDoPergaminho", "montarPergaminho",
       "desenharFicha", "HB_LARGURA", "HB_ALTURA", "desenharHabilidades"]);
     const fontesDaFicha = Object.fromEntries(Object.entries({ titulo: "Cinzel_700Bold", livro: "EBGaramond_400Regular",
@@ -8812,6 +8812,15 @@ function conferirCartao(onde, embed, componentes = []) {
       const mf = await sharp(ficha).metadata();
       ok(`a ficha de ${nome} sai em 900x1350`, [mf.width, mf.height], [900, 1350]);
     }
+    /* Em russo (fonte do livro tem cirilico; a Cinzel nao): a ficha sai com
+       os titulos na Garamond, sem perder letra. */
+    const tituloF = await c.fonteDoDesenho(fontesDaFicha.titulo), negritoF = await c.fonteDoDesenho(fontesDaFicha.negrito);
+    verdade("cirílico não cabe na Cinzel e vai na Garamond", fi.fonteQueEscreve(tituloF, negritoF, "Навыки") === negritoF);
+    verdade("latim fica na Cinzel", fi.fonteQueEscreve(tituloF, negritoF, "Habilidades") === tituloF);
+    const rotRu = Object.fromEntries(Object.keys(fi.ROTULOS_DA_FICHA).map((k) => [k, "Навыки"]));
+    const fichaRu = await fi.desenharFicha(sharp, { p: { ...P("tesla"), curto: "Тесла", titulo: "Волшебник" }, nivel: 2, xp: 70, vitorias: 1, derrotas: 0,
+      kit: fi.kitEquipado(P("tesla"), 2, {}), liberadas: 2, rot: rotRu }, pasta, fontesDaFicha);
+    verdade("a ficha em russo sai", fichaRu.length > 10000);
     ok("a habilidade se explica numa linha", fi.descricaoDaHabilidade({ dano: 18, efeito: "queimar" }), "18 de dano · queima 5 por 2 turnos");
     ok("defesa sem dano", fi.descricaoDaHabilidade({ dano: 0, efeito: "escudo" }), "escudo de 25 até a próxima vez");
     const fonteLivro = await c.fonteDoDesenho(fontesDaFicha.livro);
@@ -8834,9 +8843,24 @@ function conferirCartao(onde, embed, componentes = []) {
     globalThis.carregarSharp = async () => null;
     globalThis.MEMORIA_PARA_DESENHAR = 1e12;
     const pn = carregar(["ESPACOS_ORDEM", "personagemPorId", "nivelDoPersonagem", "kitEquipado", "descricaoDaHabilidade",
+      "ROTULOS_DA_FICHA", "LINGUAS_SEM_FONTE_NO_CARD", "linguaDoCard", "traduzirTextos", "HEROIS_NA_LINGUA", "heroiNaLingua",
+      "TEXTOS_DO_PAINEL", "PAINEL_NA_LINGUA", "textosDoPainel",
       "heroisAtivos", "cardsDoPainel", "CARDS_GUARDADOS", "heroiAtivo", "cardDoPainel", "progressoDeTodos", "abasDoPainel", "telaDoPainel"]);
     const zumbi = elenco.PERSONAGENS.findIndex((p) => p.id === "zumbi");
     ok("o herói ativo é o último mexido", await pn.heroiAtivo("111111"), "zumbi");
+    ok("japonês: o card sai em inglês", pn.linguaDoCard("ja"), "en");
+    ok("russo: o card sai em russo", pn.linguaDoCard("ru"), "ru");
+    const ptHeroi = await pn.heroiNaLingua(elenco.PERSONAGENS[0], "pt", null);
+    verdade("em português nada vai ao tradutor e a época vira lugar + ano", ptHeroi.lingua === "pt" && ptHeroi.p.lugar === "Macedônia" && ptHeroi.p.quando === "331 a.C.");
+    verdade("cada habilidade leva a descrição pronta", ptHeroi.p.kit.especial[0].desc.includes("de dano"));
+    globalThis.motorDoGuild = async () => undefined;
+    globalThis.traduzirComCache = async (texto) => `EN:${texto}`;
+    const enHeroi = await pn.heroiNaLingua(elenco.PERSONAGENS[0], "en", "1");
+    verdade("em inglês, nome, habilidades e rótulos vão traduzidos", enHeroi.p.curto === "EN:Alexandre" &&
+      enHeroi.p.kit.basica[0].nome.startsWith("EN:") && enHeroi.p.fatos[9].startsWith("EN:") && enHeroi.rot.libera === "EN:Libera no nível");
+    verdade("o retrato e os números não mudam", enHeroi.p.id === "alexandre" && enHeroi.p.kit.especial[0].dano === 18);
+    const enPainel = await pn.textosDoPainel("en", "1");
+    ok("os botões do painel também", enPainel.duelar, "EN:Duelar");
     const herois = await pn.telaDoPainel("111111", "herois", zumbi);
     const ids = (t) => t.components.flatMap((r) => r.components.map((c) => c.custom_id));
     verdade("heróis: ◀ ▶ e usar", ids(herois).includes(`dp:aba:herois:${zumbi - 1}`) && ids(herois).includes(`dp:aba:herois:${zumbi + 1}`));
@@ -8845,7 +8869,7 @@ function conferirCartao(onde, embed, componentes = []) {
     const hab = await pn.telaDoPainel("111111", "hab", zumbi);
     const trocas = hab.components[0].components;
     ok("nível 3 (160 XP): defesa liberada, o resto trancado", trocas.map((c) => c.disabled), [true, false, true, true]);
-    verdade("o trancado diz o nível", trocas[0].label.includes("Nv 4"));
+    verdade("o trancado diz o nível", trocas[0].label.endsWith("4"));
     verdade("sem desenho, o painel vira texto", !herois.embeds[0].image && herois.files.length === 0);
     ok("aba desconhecida cai em Heróis", ids(await pn.telaDoPainel("111111", "xyz", 0))[2], "dp:usar:0");
     verdade("o ◀ do primeiro volta para o último", ids(await pn.telaDoPainel("111111", "herois", -1)).includes(`dp:usar:${elenco.PERSONAGENS.length - 1}`));
