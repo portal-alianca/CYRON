@@ -10961,19 +10961,38 @@ async function progressoDeTodos(userId) {
   return Array.isArray(r) ? r : [];
 }
 
-function abasDoPainel(aba, idx) {
+/* Os textos do painel que o Discord desenha (botoes e linhas). */
+const TEXTOS_DO_PAINEL = {
+  herois: "Heróis", habilidades: "Habilidades", duelar: "Duelar", usar: "Usar este herói", ativo: "Herói ativo",
+  trocar: "Toque num espaço para trocar entre a inicial e a alternativa.", nivel: "Nível",
+  basica: "Básica", defesa: "Defesa", especial: "Especial", suprema: "Suprema",
+};
+const PAINEL_NA_LINGUA = new Map();
+async function textosDoPainel(idioma, guildId) {
+  if (!idioma || idioma === "pt") return TEXTOS_DO_PAINEL;
+  if (PAINEL_NA_LINGUA.has(idioma)) return PAINEL_NA_LINGUA.get(idioma);
+  const chaves = Object.keys(TEXTOS_DO_PAINEL);
+  const t = await traduzirTextos(chaves.map((k) => TEXTOS_DO_PAINEL[k]), idioma, guildId);
+  const pronto = Object.fromEntries(chaves.map((k, i) => [k, t[i]]));
+  PAINEL_NA_LINGUA.set(idioma, pronto);
+  return pronto;
+}
+
+function abasDoPainel(aba, idx, tx = TEXTOS_DO_PAINEL) {
   const aba1 = (id, emoji, label) => ({ type: 2, custom_id: `dp:aba:${id}:${idx}`, style: aba === id ? 1 : 2,
-    emoji: { name: emoji }, label, disabled: aba === id });
-  return { type: 1, components: [aba1("herois", "🦸", "Heróis"), aba1("hab", "✨", "Habilidades"),
-    { type: 2, custom_id: `dp:duelar:${idx}`, style: 3, emoji: { name: "⚔️" }, label: "Duelar" }] };
+    emoji: { name: emoji }, label: String(label).slice(0, 80), disabled: aba === id });
+  return { type: 1, components: [aba1("herois", "🦸", tx.herois), aba1("hab", "✨", tx.habilidades),
+    { type: 2, custom_id: `dp:duelar:${idx}`, style: 3, emoji: { name: "⚔️" }, label: String(tx.duelar).slice(0, 80) }] };
 }
 
 /* A tela inteira do painel. Monta o card certo e os botoes da aba. */
-async function telaDoPainel(userId, aba, idx, aviso = "") {
+async function telaDoPainel(userId, aba, idx, aviso = "", { idioma = "pt", guildId = null } = {}) {
   const total = PERSONAGENS.length;
   idx = ((Number(idx) || 0) % total + total) % total;
-  const p = PERSONAGENS[idx];
-  const [todos, ativo] = await Promise.all([progressoDeTodos(userId), heroiAtivo(userId)]);
+  const [todos, ativo, lingua, tx] = await Promise.all([progressoDeTodos(userId), heroiAtivo(userId),
+    heroiNaLingua(PERSONAGENS[idx], idioma, guildId), textosDoPainel(idioma, guildId)]);
+  /* O heroi ja' na lingua do card (nomes, habilidades, curiosidades). */
+  const { p, rot } = lingua;
   const r = todos.find((x) => x.personagem === p.id) || null;
   const xp = Number(r?.xp) || 0;
   const nivel = nivelDoPersonagem(xp);
@@ -10991,33 +11010,33 @@ async function telaDoPainel(userId, aba, idx, aviso = "") {
 
   if (aba !== "hab") {
     aba = "herois";
-    card = await cardDoPainel(`ficha:${p.id}:${xp}:${r?.vitorias || 0}:${r?.derrotas || 0}:${JSON.stringify(escolha)}`,
+    card = await cardDoPainel(`ficha:${lingua.lingua}:${p.id}:${xp}:${r?.vitorias || 0}:${r?.derrotas || 0}:${JSON.stringify(escolha)}`,
       (sharp) => desenharFicha(sharp, { p, nivel, xp, vitorias: Number(r?.vitorias) || 0, derrotas: Number(r?.derrotas) || 0,
-        kit: kitEquipado(p, nivel, escolha), liberadas: duelou ? nivel : 0 }));
+        kit: kitEquipado(p, nivel, escolha), liberadas: duelou ? nivel : 0, rot }));
     linhas.push(`${p.bandeira} **${p.nome}** · ${p.titulo}`);
-    if (!card) linhas.push(`Nível ${nivel} · ${xp} XP`, `*${p.frase}*`);
+    if (!card) linhas.push(`${tx.nivel} ${nivel} · ${xp} XP`, `*${p.frase}*`);
     linhasDeBotoes.push({ type: 1, components: [...navegar("herois").slice(0, 2),
       { type: 2, custom_id: `dp:usar:${idx}`, style: ativo === p.id ? 3 : 1, emoji: { name: "⭐" },
-        label: ativo === p.id ? "Herói ativo" : "Usar este herói", disabled: ativo === p.id },
+        label: String(ativo === p.id ? tx.ativo : tx.usar).slice(0, 80), disabled: ativo === p.id },
       navegar("herois")[2]] });
   } else if (aba === "hab") {
-    card = await cardDoPainel(`hab:${p.id}:${nivel}:${JSON.stringify(escolha)}`,
-      (sharp) => desenharHabilidades(sharp, { p, nivel, escolha }));
-    linhas.push(`${p.bandeira} **${p.curto}** · Nível ${nivel}`, "-# Toque num espaço para trocar entre a inicial e a alternativa.");
+    card = await cardDoPainel(`hab:${lingua.lingua}:${p.id}:${nivel}:${JSON.stringify(escolha)}`,
+      (sharp) => desenharHabilidades(sharp, { p, nivel, escolha, rot }));
+    linhas.push(`${p.bandeira} **${p.curto}** · ${tx.nivel} ${nivel}`, `-# ${tx.trocar}`);
     if (!card) {
       for (const hab of kitEquipado(p, nivel, escolha)) linhas.push(`${hab.emoji} **${hab.nome}** · ${descricaoDaHabilidade(hab)}`);
     }
-    const nomes = { basica: "Básica", defesa: "Defesa", especial: "Especial", suprema: "Suprema" };
+    const nomes = { basica: tx.basica, defesa: tx.defesa, especial: tx.especial, suprema: tx.suprema };
     linhasDeBotoes.push({ type: 1, components: ESPACOS_ORDEM.map((espaco) => {
       const libera = ESPACOS[espaco].nivelAlternativa;
       const trancada = nivel < libera;
       return { type: 2, custom_id: `dp:troca:${idx}:${espaco}`, style: trancada ? 2 : 1,
-        emoji: { name: trancada ? "🔒" : "🔄" }, label: trancada ? `${nomes[espaco]} · Nv ${libera}` : nomes[espaco], disabled: trancada };
+        emoji: { name: trancada ? "🔒" : "🔄" }, label: String(trancada ? `${nomes[espaco]} · ${libera}` : nomes[espaco]).slice(0, 80), disabled: trancada };
     }) });
     linhasDeBotoes.push({ type: 1, components: navegar("hab") });
   }
   if (aviso) linhas.push("", aviso);
-  linhasDeBotoes.push(abasDoPainel(aba, idx));
+  linhasDeBotoes.push(abasDoPainel(aba, idx, tx));
   const embed = { color: 0xC9A227, title: "⚔️ Duelo CYRON", description: linhas.join("\\n").slice(0, 4000),
     ...(card ? { image: { url: `attachment://${nomeDoCard}` } } : {}) };
   return { embeds: [embed], components: linhasDeBotoes, files: card ? [{ attachment: card, name: nomeDoCard }] : [], attachments: [] };
@@ -11043,12 +11062,13 @@ async function cliqueDoPainel(inter) {
   const nome = inter.member?.displayName || inter.user.username;
   const fala = async (t) => (await nalingua(await linguaDe(inter), inter.guildId, t))[0];
   const p = PERSONAGENS[((idx % PERSONAGENS.length) + PERSONAGENS.length) % PERSONAGENS.length];
+  const ctx = { idioma: await linguaDe(inter), guildId: inter.guildId };
 
   /* dp:aba:<aba>:<heroi> */
-  if (acao === "aba") return inter.editReply(await telaDoPainel(eu, idxTxt === "hab" ? "hab" : "herois", extra));
+  if (acao === "aba") return inter.editReply(await telaDoPainel(eu, idxTxt === "hab" ? "hab" : "herois", extra, "", ctx));
   if (acao === "usar") {
     await usarHeroi(eu, p.id);
-    return inter.editReply(await telaDoPainel(eu, "herois", idx, `⭐ ${p.curto} ${await fala("agora é o seu herói.")}`));
+    return inter.editReply(await telaDoPainel(eu, "herois", idx, `⭐ ${p.curto} ${await fala("agora é o seu herói.")}`, ctx));
   }
   if (acao === "troca") {
     const espaco = extra;
@@ -11060,13 +11080,13 @@ async function cliqueDoPainel(inter) {
     await sbPost("cyron_duelo_personagem", { user_id: eu, personagem: p.id, kit, atualizado_em: new Date().toISOString() },
       "resolution=merge-duplicates").catch(() => {});
     heroisAtivos.set(eu, p.id);
-    return inter.editReply(await telaDoPainel(eu, "hab", idx));
+    return inter.editReply(await telaDoPainel(eu, "hab", idx, "", ctx));
   }
 
   /* ⚔️ Duelar: o desafio vai para o canal. */
   if (acao !== "duelar") return;
-  if (!inter.guildId) return inter.editReply(await telaDoPainel(eu, "herois", idx, `⚠️ ${await fala("O duelo só funciona dentro de um servidor.")}`));
-  if (duelistaEm.has(eu)) return inter.editReply(await telaDoPainel(eu, "herois", idx, `⚠️ ${await fala("Você já está num duelo. Termine ele primeiro.")}`));
+  if (!inter.guildId) return inter.editReply(await telaDoPainel(eu, "herois", idx, `⚠️ ${await fala("O duelo só funciona dentro de um servidor.")}`, ctx));
+  if (duelistaEm.has(eu)) return inter.editReply(await telaDoPainel(eu, "herois", idx, `⚠️ ${await fala("Você já está num duelo. Termine ele primeiro.")}`, ctx));
   const heroi = personagemPorId(await heroiAtivo(eu));
   const estado = novoDuelo(inter, [{ userId: eu, nome }, null], { 0: heroi.id }, { fixo: { 0: true } });
   /* No canal, a' vista de todos. Sem permissao de mandar ali (app
@@ -11080,9 +11100,9 @@ async function cliqueDoPainel(inter) {
     await inter.followUp({ ...conteudo, flags: 0 }).catch((e) => { console.error("duelo: nao publiquei:", e?.message || e); return null; });
   if (!estado.msg) {
     cancelarDuelo(estado.id);
-    return inter.editReply(await telaDoPainel(eu, "herois", idx, `⚠️ ${await fala("Não consegui mandar o desafio neste canal.")}`));
+    return inter.editReply(await telaDoPainel(eu, "herois", idx, `⚠️ ${await fala("Não consegui mandar o desafio neste canal.")}`, ctx));
   }
-  return inter.editReply(await telaDoPainel(eu, "herois", idx, `✅ ${await fala("Seu desafio está no canal!")}`));
+  return inter.editReply(await telaDoPainel(eu, "herois", idx, `✅ ${await fala("Seu desafio está no canal!")}`, ctx));
 }
 
 async function comandoDuelo(inter) {
@@ -11091,7 +11111,8 @@ async function comandoDuelo(inter) {
   if (!alvo) {
     await inter.deferReply({ flags: 64 });
     const heroi = await heroiAtivo(inter.user.id);
-    return inter.editReply(await telaDoPainel(inter.user.id, "herois", PERSONAGENS.findIndex((p) => p.id === heroi)));
+    return inter.editReply(await telaDoPainel(inter.user.id, "herois", PERSONAGENS.findIndex((p) => p.id === heroi), "",
+      { idioma: await linguaDe(inter), guildId: inter.guildId }));
   }
   const idioma = await linguaDe(inter);
   if (duelistaEm.has(inter.user.id)) {
@@ -11390,8 +11411,75 @@ const FI_ALTURA = 1350;
 const FI_TINTA = "#4A3424";
 const FI_SEPIA = "#8B6B3E";
 
+/* Os textos fixos dos cards, em portugues. Vao pelo tradutor (com cache)
+   para a lingua de quem abriu o painel. */
+const ROTULOS_DA_FICHA = {
+  codex: "Códex", habilidades: "Habilidades", origem: "Origem", epoca: "Época", nivel: "Nível", duelos: "Duelos",
+  de10: "de 10", vitorias: "vitórias", derrotas: "derrotas", paginas: "Páginas", nivelMax: "Nível máximo",
+  basica: "Básica", defesa: "Defesa", especial: "Especial", suprema: "Suprema", deEnergia: "de energia",
+  semCusto: "sem custo", aPartir: "a partir do turno 3", inicial: "Inicial", alternativa: "Alternativa",
+  equipada: "Equipada", libera: "Libera no nível", trancada: "página trancada", trancadas: "páginas trancadas",
+  subaNivel: "suba de nível para ler", nenhuma: "Nenhuma página liberada ainda. Duele com este personagem para abrir a primeira.",
+  estilo: "A alternativa é diferente, nunca mais forte: escolha o seu estilo.",
+};
+
+/* Linguas cujas letras as fontes dos cards nao tem (arabe, japones,
+   coreano, chines, tailandes, hindi): a IMAGEM sai em ingles. Os botoes e
+   avisos, que o Discord desenha, continuam na lingua da pessoa. */
+const LINGUAS_SEM_FONTE_NO_CARD = new Set(["ko", "ja", "zh-CN", "ar", "th", "hi"]);
+function linguaDoCard(idioma) {
+  if (!idioma) return "pt";
+  return LINGUAS_SEM_FONTE_NO_CARD.has(idioma) ? "en" : idioma;
+}
+
+/* Varios textos de uma vez, em paralelo, pelo tradutor com cache: cada
+   texto custa UMA traducao por lingua, para sempre; depois vem da memoria. */
+async function traduzirTextos(textos, idioma, guildId) {
+  if (!idioma || idioma === "pt") return textos;
+  const motor = await motorDoGuild(guildId).catch(() => undefined);
+  const unicos = [...new Set(textos.filter((t) => typeof t === "string" && /\p{L}/u.test(t)))];
+  const pronto = new Map();
+  for (let i = 0; i < unicos.length; i += 8) {
+    await Promise.all(unicos.slice(i, i + 8).map(async (t) => {
+      pronto.set(t, (await traduzirComCache(t, idioma, motor).catch(() => null)) || t);
+    }));
+  }
+  return textos.map((t) => pronto.get(t) ?? t);
+}
+
+/* O heroi e os rotulos na lingua do card. Guardado por lingua e heroi. */
+const HEROIS_NA_LINGUA = new Map();
+async function heroiNaLingua(p, idioma, guildId) {
+  const lingua = linguaDoCard(idioma);
+  const virgula = p.epoca.lastIndexOf(",");
+  const base = { ...p, lugar: virgula > 0 ? p.epoca.slice(0, virgula) : p.epoca, quando: virgula > 0 ? p.epoca.slice(virgula + 1).trim() : "",
+    kit: Object.fromEntries(Object.entries(p.kit).map(([e, habs]) => [e, habs.map((h) => ({ ...h, desc: descricaoDaHabilidade(h) }))])) };
+  if (lingua === "pt") return { p: base, rot: ROTULOS_DA_FICHA, lingua };
+  const chave = `${lingua}:${p.id}`;
+  if (HEROIS_NA_LINGUA.has(chave)) return HEROIS_NA_LINGUA.get(chave);
+  const habs = ESPACOS_ORDEM.flatMap((e) => base.kit[e]);
+  const chavesRot = Object.keys(ROTULOS_DA_FICHA);
+  const textos = [base.curto, base.nome, base.titulo, base.lugar, base.frase, ...base.fatos,
+    ...habs.flatMap((h) => [h.nome, h.desc]), ...chavesRot.map((k) => ROTULOS_DA_FICHA[k])];
+  const t = await traduzirTextos(textos, lingua, guildId);
+  let i = 0;
+  const novo = { ...base, curto: t[i++], nome: t[i++], titulo: t[i++], lugar: t[i++], frase: t[i++], fatos: base.fatos.map(() => t[i++]) };
+  novo.kit = Object.fromEntries(ESPACOS_ORDEM.map((e) => [e, base.kit[e].map((h) => ({ ...h, nome: t[i++], desc: t[i++] }))]));
+  const rot = Object.fromEntries(chavesRot.map((k) => [k, t[i++]]));
+  const pronto = { p: novo, rot, lingua };
+  HEROIS_NA_LINGUA.set(chave, pronto);
+  return pronto;
+}
+
+/* A fonte de titulo (Cinzel) so' tem letras latinas. Texto com letra que ela
+   nao tem (cirilico, vietnamita) vai na fonte do livro, que tem. */
+function fonteQueEscreve(principal, reserva, texto) {
+  return [...String(texto)].every((c) => !/\p{L}/u.test(c) || principal.charToGlyphIndex(c) > 0) ? principal : reserva;
+}
+
 /* O que a habilidade faz, numa linha. */
 function descricaoDaHabilidade(hab) {
+  if (hab.desc) return hab.desc;
   const efeito = hab.efeito ? EFEITOS[hab.efeito]?.texto : "";
   if (hab.dano > 0) return efeito ? `${hab.dano} de dano · ${efeito}` : `${hab.dano} de dano`;
   return efeito || "";
@@ -11490,27 +11578,34 @@ async function desenharFicha(sharp, dados, pasta = RETRATOS_DO_DUELO,
   fontes = { titulo: FONTE_TITULO, livro: FONTE_LIVRO, italico: FONTE_LIVRO_ITALICO, negrito: FONTE_LIVRO_NEGRITO }) {
   const [titulo, livro, italico, negrito] = await Promise.all([fontes.titulo, fontes.livro, fontes.italico, fontes.negrito].map(fonteDoDesenho));
   const { p, nivel, xp, vitorias, derrotas, kit, liberadas } = dados;
+  const rot = dados.rot || ROTULOS_DA_FICHA;
+  const up = (t) => String(t).toLocaleUpperCase();
+  /* Titulo na Cinzel quando ela tem as letras; senao na Garamond. */
+  const T = (texto) => fonteQueEscreve(titulo, negrito, texto);
+  const tit = (texto, ...resto) => escreverEm(T(texto), soLetrasDaFonte(T(texto), texto), ...resto);
   const W = FI_LARGURA, H = FI_ALTURA;
   const m = 34;                 // margem da folha
   const esq = 78, colEsq = 410; // coluna da esquerda
   let svg = "";
 
   svg += folhaDePergaminho(W, H, m);
-  svg += faixaDoTitulo(titulo, "CÓDEX", W, 108);
+  svg += faixaDoTitulo(T(up(rot.codex)), soLetrasDaFonte(T(up(rot.codex)), up(rot.codex)), W, 108);
 
   /* Nome e titulo. */
   svg += enfeite(esq + colEsq / 2, 182, colEsq - 20);
-  svg += escreverEm(titulo, soLetrasDaFonte(titulo, p.curto || p.nome), esq + colEsq / 2, 248, 54, FI_TINTA, { alinhar: "meio", max: colEsq });
+  svg += tit(p.curto || p.nome, esq + colEsq / 2, 248, 54, FI_TINTA, { alinhar: "meio", max: colEsq });
   svg += escreverEm(italico, soLetrasDaFonte(italico, p.titulo), esq + colEsq / 2, 290, 30, FI_SEPIA, { alinhar: "meio", max: colEsq });
   svg += enfeite(esq + colEsq / 2, 316, colEsq - 20);
 
   /* Os dados, com a linha pontilhada ate' o valor. */
   const virgula = p.epoca.lastIndexOf(",");
-  const lugar = virgula > 0 ? p.epoca.slice(0, virgula) : p.epoca;
-  const quando = virgula > 0 ? p.epoca.slice(virgula + 1).trim() : "";
-  const dadosLinhas = [["Origem", lugar], ["Época", quando], ["Nível", `${nivel} de 10`], ["Duelos", `${vitorias} vitórias · ${derrotas} derrotas`]];
+  const lugar = p.lugar ?? (virgula > 0 ? p.epoca.slice(0, virgula) : p.epoca);
+  const quando = p.quando ?? (virgula > 0 ? p.epoca.slice(virgula + 1).trim() : "");
+  const dadosLinhas = [[rot.origem, lugar], [rot.epoca, quando], [rot.nivel, `${nivel} ${rot.de10}`],
+    [rot.duelos, `${vitorias} ${rot.vitorias} · ${derrotas} ${rot.derrotas}`]];
   dadosLinhas.forEach(([rotulo, valor], i) => {
     const y = 372 + i * 50;
+    rotulo = soLetrasDaFonte(negrito, rotulo);
     const wr = negrito.getAdvanceWidth(rotulo, 27);
     const valorTxt = soLetrasDaFonte(livro, valor);
     const wv = Math.min(livro.getAdvanceWidth(valorTxt, 25), colEsq - wr - 30);
@@ -11520,13 +11615,13 @@ async function desenharFicha(sharp, dados, pasta = RETRATOS_DO_DUELO,
   });
 
   /* Habilidades equipadas. */
-  svg += tituloDeSecao(titulo, "Habilidades", esq + colEsq / 2, 600, colEsq);
-  const rotulos = { basica: "BÁSICA", defesa: "DEFESA", especial: "ESPECIAL", suprema: "SUPREMA" };
+  svg += tituloDeSecao(T(rot.habilidades), soLetrasDaFonte(T(rot.habilidades), rot.habilidades), esq + colEsq / 2, 600, colEsq);
+  const rotulos = { basica: up(rot.basica), defesa: up(rot.defesa), especial: up(rot.especial), suprema: up(rot.suprema) };
   kit.forEach((hab, i) => {
     const y = 650 + i * 74;
     const custo = ESPACOS[hab.espaco].energia;
     svg += `<rect x="${esq - 6}" y="${y - 24}" width="4" height="58" fill="${["#9C8A6A", "#5B7FA6", "#B5652E", "#9E2B25"][i]}"/>`;
-    svg += escreverEm(titulo, `${rotulos[hab.espaco]}${custo ? ` · ${custo} DE ENERGIA` : ""}`, esq + 8, y - 6, 15, FI_SEPIA);
+    svg += tit(`${rotulos[hab.espaco]}${custo ? ` · ${custo} ${up(rot.deEnergia)}` : ""}`, esq + 8, y - 6, 15, FI_SEPIA, { max: colEsq - 10 });
     svg += escreverEm(negrito, soLetrasDaFonte(negrito, hab.nome), esq + 8, y + 18, 25, FI_TINTA, { max: colEsq - 10 });
     svg += escreverEm(italico, soLetrasDaFonte(italico, descricaoDaHabilidade(hab)), esq + 8, y + 41, 19, "#6B5338", { max: colEsq - 10 });
   });
@@ -11536,7 +11631,7 @@ async function desenharFicha(sharp, dados, pasta = RETRATOS_DO_DUELO,
   const proximo = NIVEIS_DO_PERSONAGEM[nivel];
   const anterior = NIVEIS_DO_PERSONAGEM[nivel - 1] || 0;
   const parte = proximo === undefined ? 1 : Math.max(0, Math.min(1, (xp - anterior) / (proximo - anterior)));
-  svg += escreverEm(titulo, nivel >= 10 ? "NÍVEL MÁXIMO" : `NÍVEL ${nivel}`, dx + dl / 2, 742, 30, FI_TINTA, { alinhar: "meio" });
+  svg += tit(nivel >= 10 ? up(rot.nivelMax) : `${up(rot.nivel)} ${nivel}`, dx + dl / 2, 742, 30, FI_TINTA, { alinhar: "meio", max: dl + 40 });
   svg += `<rect x="${dx}" y="758" width="${dl}" height="16" rx="8" fill="#D6C49C" stroke="${FI_SEPIA}" stroke-width="1.5"/>` +
     `<rect x="${dx}" y="758" width="${Math.round(dl * parte)}" height="16" rx="8" fill="#B8862F"/>`;
   svg += escreverEm(italico, proximo === undefined ? `${xp} XP` : `${xp} / ${proximo} XP`, dx + dl / 2, 800, 21, "#6B5338", { alinhar: "meio" });
@@ -11545,11 +11640,12 @@ async function desenharFicha(sharp, dados, pasta = RETRATOS_DO_DUELO,
   /* As paginas do Codex: as liberadas, das mais novas para tras, ate'
      encher a area; o resto fica trancado. */
   const topoCodex = 960;
-  svg += tituloDeSecao(titulo, `Páginas ${Math.max(0, liberadas)}/10`, W / 2, topoCodex, W - 2 * esq);
+  const tituloPaginas = `${rot.paginas} ${Math.max(0, liberadas)}/10`;
+  svg += tituloDeSecao(T(tituloPaginas), soLetrasDaFonte(T(tituloPaginas), tituloPaginas), W / 2, topoCodex, W - 2 * esq);
   const larguraTexto = W - 2 * esq - 50, tam = 21, alt = 26, fim = H - m - 90;
   let blocos = [];
   if (liberadas <= 0) {
-    blocos = [{ n: "", linhas: linhasDoTexto(italico, soLetrasDaFonte(italico, "Nenhuma página liberada ainda. Duele com este personagem para abrir a primeira."), tam, larguraTexto), fonte: italico }];
+    blocos = [{ n: "", linhas: linhasDoTexto(italico, soLetrasDaFonte(italico, rot.nenhuma), tam, larguraTexto), fonte: italico }];
   } else {
     let usado = 0;
     for (let i = liberadas - 1; i >= 0; i--) {
@@ -11567,7 +11663,7 @@ async function desenharFicha(sharp, dados, pasta = RETRATOS_DO_DUELO,
   }
   const trancadas = 10 - Math.max(0, liberadas);
   if (trancadas > 0) {
-    svg += escreverEm(italico, `${trancadas} ${trancadas === 1 ? "página trancada" : "páginas trancadas"} · suba de nível para ler`, W / 2, H - m - 62, 20, FI_SEPIA, { alinhar: "meio" });
+    svg += escreverEm(italico, soLetrasDaFonte(italico, `${trancadas} ${trancadas === 1 ? rot.trancada : rot.trancadas} · ${rot.subaNivel}`), W / 2, H - m - 62, 20, FI_SEPIA, { alinhar: "meio", max: W - 2 * esq });
   }
   svg += escreverEm(titulo, "CYRON · DUELO", W / 2, H - m - 34, 14, "#A88C5E", { alinhar: "meio", espaco: 3 });
 
@@ -11597,36 +11693,39 @@ async function desenharFicha(sharp, dados, pasta = RETRATOS_DO_DUELO,
    lado a lado. A equipada tem moldura dourada; a trancada fica apagada e
    diz o que falta para liberar. `escolha`: o kit salvo ({ defesa: 1, ... }). */
 const HB_LARGURA = 900;
-const HB_ALTURA = 1250;
-async function desenharHabilidades(sharp, { p, nivel, escolha = {} }, pasta = RETRATOS_DO_DUELO,
+const HB_ALTURA = 1320;
+async function desenharHabilidades(sharp, { p, nivel, escolha = {}, rot = ROTULOS_DA_FICHA }, pasta = RETRATOS_DO_DUELO,
   fontes = { titulo: FONTE_TITULO, livro: FONTE_LIVRO, italico: FONTE_LIVRO_ITALICO, negrito: FONTE_LIVRO_NEGRITO }) {
   const [titulo, , italico, negrito] = await Promise.all([fontes.titulo, fontes.livro, fontes.italico, fontes.negrito].map(fonteDoDesenho));
   const W = HB_LARGURA, H = HB_ALTURA, m = 34;
-  let svg = folhaDePergaminho(W, H, m) + faixaDoTitulo(titulo, "HABILIDADES", W, 108);
-  /* Quem e', ao lado do retrato redondo. */
-  svg += escreverEm(titulo, soLetrasDaFonte(titulo, p.curto || p.nome), 232, 205, 40, FI_TINTA, { max: 560 });
-  svg += escreverEm(italico, soLetrasDaFonte(italico, `${p.titulo} · Nível ${nivel}`), 234, 240, 24, FI_SEPIA, { max: 560 });
-  svg += enfeite(W / 2, 290, W - 180);
-  const rotulos = { basica: "BÁSICA", defesa: "DEFESA", especial: "ESPECIAL", suprema: "SUPREMA" };
+  const up = (t) => String(t).toLocaleUpperCase();
+  const T = (texto) => fonteQueEscreve(titulo, negrito, texto);
+  const tit = (texto, ...resto) => escreverEm(T(texto), soLetrasDaFonte(T(texto), texto), ...resto);
+  let svg = folhaDePergaminho(W, H, m) + faixaDoTitulo(T(up(rot.habilidades)), soLetrasDaFonte(T(up(rot.habilidades)), up(rot.habilidades)), W, 108);
+  /* Quem e', ao lado do retrato redondo (que fica acima do enfeite). */
+  svg += tit(p.curto || p.nome, 232, 196, 40, FI_TINTA, { max: 560 });
+  svg += escreverEm(italico, soLetrasDaFonte(italico, `${p.titulo} · ${rot.nivel} ${nivel}`), 234, 232, 24, FI_SEPIA, { max: 560 });
+  svg += enfeite(W / 2, 300, W - 180);
+  const rotulos = { basica: up(rot.basica), defesa: up(rot.defesa), especial: up(rot.especial), suprema: up(rot.suprema) };
   const cores = { basica: "#9C8A6A", defesa: "#5B7FA6", especial: "#B5652E", suprema: "#9E2B25" };
-  const bx = 78, bw = 360, gap = 24, bh = 150;
+  const bx = 78, bw = 360, gap = 24, bh = 168;
   ESPACOS_ORDEM.forEach((espaco, i) => {
-    const y0 = 330 + i * 200;
+    const y0 = 336 + i * 216;
     const regra = ESPACOS[espaco];
     const libera = regra.nivelAlternativa;
     const usaAlt = Number(escolha?.[espaco]) === 1 && nivel >= libera;
     svg += `<rect x="${bx}" y="${y0 - 2}" width="6" height="22" fill="${cores[espaco]}"/>`;
-    svg += escreverEm(titulo, `${rotulos[espaco]}${regra.energia ? ` · ${regra.energia} DE ENERGIA` : " · SEM CUSTO"}` +
-      (regra.aPartirDoTurno ? ` · A PARTIR DO ${regra.aPartirDoTurno}º TURNO` : ""), bx + 16, y0 + 16, 18, FI_TINTA, { max: W - 2 * bx - 20 });
+    svg += tit(`${rotulos[espaco]}${regra.energia ? ` · ${regra.energia} ${up(rot.deEnergia)}` : ` · ${up(rot.semCusto)}`}` +
+      (regra.aPartirDoTurno ? ` · ${up(rot.aPartir)}` : ""), bx + 16, y0 + 16, 18, FI_TINTA, { max: W - 2 * bx - 20 });
     p.kit[espaco].forEach((hab, k) => {
       const x = bx + k * (bw + gap), y = y0 + 32;
       const trancada = k === 1 && nivel < libera;
       const equipada = k === (usaAlt ? 1 : 0);
       svg += `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="10" fill="${trancada ? "#E2D6BA" : "#F6ECD2"}" stroke="${equipada ? "#B8862F" : FI_SEPIA}" stroke-width="${equipada ? 5 : 1.5}"/>`;
-      svg += escreverEm(titulo, k === 0 ? "INICIAL" : "ALTERNATIVA", x + 16, y + 26, 13, "#A88C5E");
+      svg += tit(up(k === 0 ? rot.inicial : rot.alternativa), x + 16, y + 26, 13, "#A88C5E", { max: bw - 150 });
       if (equipada) {
         svg += `<rect x="${x + bw - 118}" y="${y + 10}" width="104" height="24" rx="12" fill="#B8862F"/>` +
-          escreverEm(titulo, "EQUIPADA", x + bw - 66, y + 27, 13, "#FFF8E6", { alinhar: "meio" });
+          tit(up(rot.equipada), x + bw - 66, y + 27, 13, "#FFF8E6", { alinhar: "meio", max: 96 });
       }
       const corNome = trancada ? "#8E8068" : FI_TINTA;
       svg += escreverEm(negrito, soLetrasDaFonte(negrito, hab.nome), x + 16, y + 62, 25, corNome, { max: bw - 32 });
@@ -11637,19 +11736,19 @@ async function desenharHabilidades(sharp, { p, nivel, escolha = {} }, pasta = RE
         const lx = x + 16, ly = y + bh - 34;
         svg += `<path d="M ${lx + 4} ${ly + 8} v -5 a 7 7 0 0 1 14 0 v 5" fill="none" stroke="#7A5A30" stroke-width="3"/>` +
           `<rect x="${lx}" y="${ly + 8}" width="22" height="17" rx="3" fill="#7A5A30"/>`;
-        svg += escreverEm(negrito, `Libera no nível ${libera}`, lx + 32, ly + 23, 20, "#7A5A30");
+        svg += escreverEm(negrito, soLetrasDaFonte(negrito, `${rot.libera} ${libera}`), lx + 32, ly + 23, 20, "#7A5A30", { max: bw - 64 });
       }
     });
   });
-  svg += escreverEm(italico, "A alternativa é diferente, nunca mais forte: escolha o seu estilo.", W / 2, H - m - 62, 20, FI_SEPIA, { alinhar: "meio" });
+  svg += escreverEm(italico, soLetrasDaFonte(italico, rot.estilo), W / 2, H - m - 62, 20, FI_SEPIA, { alinhar: "meio", max: W - 160 });
   svg += escreverEm(titulo, "CYRON · DUELO", W / 2, H - m - 34, 14, "#A88C5E", { alinhar: "meio", espaco: 3 });
   /* O retrato redondo no alto, a' esquerda. */
   const r = 64;
   const mascara = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${2 * r}" height="${2 * r}"><circle cx="${r}" cy="${r}" r="${r}"/></svg>`);
   const rosto = await sharp(`${pasta}${p.id}.jpg`).resize(2 * r, 2 * r, { fit: "cover", position: "north" })
     .composite([{ input: mascara, blend: "dest-in" }]).png().toBuffer();
-  svg += `<circle cx="${84 + r}" cy="${168 + r}" r="${r + 5}" fill="#B8862F"/>`;
-  return await montarPergaminho(sharp, W, H, svgDoPergaminho(W, H, svg), [{ input: rosto, left: 84, top: 168 }]);
+  svg += `<circle cx="${84 + r}" cy="${150 + r}" r="${r + 5}" fill="#B8862F"/>`;
+  return await montarPergaminho(sharp, W, H, svgDoPergaminho(W, H, svg), [{ input: rosto, left: 84, top: 150 }]);
 }
 
 async function fichaDoPersonagem(dados) {
@@ -11791,8 +11890,9 @@ async function comandoCodex(inter) {
     const xp = Number(r?.xp) || 0;
     const nivel = nivelDoPersonagem(xp);
     const liberadas = (Number(r?.vitorias) || 0) + (Number(r?.derrotas) || 0) > 0 ? nivel : 0;
-    const imagem = await fichaDoPersonagem({ p: escolhido, nivel, xp, vitorias: Number(r?.vitorias) || 0, derrotas: Number(r?.derrotas) || 0,
-      kit: kitEquipado(escolhido, nivel, r?.kit || {}), liberadas });
+    const { p: naLingua, rot } = await heroiNaLingua(escolhido, await linguaDe(inter), inter.guildId);
+    const imagem = await fichaDoPersonagem({ p: naLingua, nivel, xp, vitorias: Number(r?.vitorias) || 0, derrotas: Number(r?.derrotas) || 0,
+      kit: kitEquipado(naLingua, nivel, r?.kit || {}), liberadas, rot });
     if (imagem) return inter.editReply({ files: [{ attachment: imagem, name: `codex-${escolhido.id}.jpg` }] });
     const paginas = escolhido.fatos.map((f, i) => (i < liberadas ? `**${i + 1}.** ${f}` : `**${i + 1}.** 🔒`)).join("\n");
     return inter.editReply({ embeds: [{ color: 0xF5C542, title: `📜 ${escolhido.bandeira} ${escolhido.nome} · ${liberadas}/10`.slice(0, 256),
