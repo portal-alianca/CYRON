@@ -8612,6 +8612,167 @@ function conferirCartao(onde, embed, componentes = []) {
     kit: { ...elenco.PERSONAGENS[0].kit, especial: [{ emoji: "💥", nome: "Forte demais", dano: 60, efeito: null }, elenco.PERSONAGENS[0].kit.especial[1]] } }]).length === 1);
 }
 
+/* ============ o motor do Duelo ============ */
+{
+  const elenco = await import(`${aqui}/duelo-elenco.js`);
+  Object.assign(globalThis, { PERSONAGENS: elenco.PERSONAGENS, ESPACOS: elenco.ESPACOS, EFEITOS: elenco.EFEITOS,
+    NIVEIS_DO_PERSONAGEM: elenco.NIVEIS_DO_PERSONAGEM });
+  const m = carregar(["DUELO_MORTE_SUBITA", "DUELO_PERFURAR", "danoPrevisto", "DUELO_VIDA", "DUELO_ENERGIA_INICIAL", "DUELO_ENERGIA_TURNO", "DUELO_ENERGIA_MAX", "DUELO_XP",
+    "DUELO_TREINOS_DIA", "DUELO_DUELOS_DIA", "ESPACOS_ORDEM", "personagemPorId", "nivelDoPersonagem", "kitEquipado", "novoLutador", "podeUsar",
+    "comecarVez", "usarHabilidade", "passarVez", "jogadaDoBot", "barra", "estadoDoLutador", "telaDoDuelo", "xpDoDuelo",
+    "telaDeEquipar"]);
+  const P = (id) => m.personagemPorId(id);
+  const duelo = (a = "alexandre", b = "napoleao") => ({ id: "t", historico: [], jogadas: 0, vez: 0, vencedor: null,
+    lutadores: [m.novoLutador({ userId: "111111", nome: "A", personagem: P(a) }), m.novoLutador({ userId: "222222", nome: "B", personagem: P(b) })] });
+  const hab = (dano, efeito, espaco = "especial") => ({ emoji: "⚔️", nome: "X", dano, efeito, espaco });
+
+  ok("nível 1 com 0 XP", m.nivelDoPersonagem(0), 1);
+  ok("nível 2 com 60 XP", m.nivelDoPersonagem(60), 2);
+  ok("nível 10 no topo", m.nivelDoPersonagem(99999), 10);
+  ok("kit inicial no nível 1", m.kitEquipado(P("musashi"), 1, { defesa: 1 }).map((h) => h.nome),
+    ["basica", "defesa", "especial", "suprema"].map((e) => P("musashi").kit[e][0].nome));
+  ok("alternativa equipada só depois de liberada", m.kitEquipado(P("musashi"), 2, { defesa: 1 })[1].nome, P("musashi").kit.defesa[1].nome);
+
+  const e = duelo();
+  m.comecarVez(e, 0);
+  ok("o primeiro turno não ganha energia", e.lutadores[0].en, 30);
+  verdade("suprema bloqueada no começo", !m.podeUsar(e.lutadores[0], e.lutadores[0].kit[3]));
+  verdade("especial precisa de 40", !m.podeUsar(e.lutadores[0], e.lutadores[0].kit[2]));
+  m.usarHabilidade(e, 0, e.lutadores[0].kit[0]);
+  ok("a básica tira 10", e.lutadores[1].hp, 90);
+  m.passarVez(e);
+  ok("a vez passa", e.vez, 1);
+  m.comecarVez(e, 0);
+  ok("+20 de energia no turno seguinte", e.lutadores[0].en, 50);
+
+  const f = duelo();
+  f.lutadores[1].escudo = 20;
+  m.usarHabilidade(f, 0, hab(28, null));
+  ok("o escudo absorve", f.lutadores[1].hp, 92);
+  ok("o escudo acaba", f.lutadores[1].escudo, 0);
+  const g = duelo();
+  g.lutadores[1].escudo = 20;
+  m.usarHabilidade(g, 0, hab(18, "perfurar"));
+  ok("perfurar ignora o escudo", g.lutadores[1].hp, 82);
+  const g2 = duelo();
+  m.usarHabilidade(g2, 0, hab(18, "perfurar"));
+  ok("sem defesa, perfurar entra mais fundo", g2.lutadores[1].hp, 77);
+  const g3 = duelo();
+  g3.lutadores[1].esquiva = true;
+  m.usarHabilidade(g3, 0, hab(18, "perfurar"));
+  ok("perfurar atravessa a esquiva", g3.lutadores[1].hp, 82);
+  const ex = duelo();
+  ex.lutadores[0].escudo = 25; ex.lutadores[0].esquiva = true;
+  m.comecarVez(ex, 0);
+  verdade("escudo e esquiva acabam na vez seguinte", ex.lutadores[0].escudo === 0 && !ex.lutadores[0].esquiva);
+  const ms = Object.assign(duelo(), { jogadas: 20 });
+  m.comecarVez(ms, 0);
+  ok("morte súbita depois de 20 jogadas", ms.lutadores[0].hp, 95);
+  const h = duelo();
+  h.lutadores[1].esquiva = true;
+  m.usarHabilidade(h, 0, hab(28, null));
+  ok("a esquiva anula o golpe", h.lutadores[1].hp, 100);
+  verdade("e se gasta", !h.lutadores[1].esquiva);
+  const i = duelo();
+  i.lutadores[0].preparado = true;
+  m.usarHabilidade(i, 0, hab(28, null));
+  ok("preparar dobra o golpe", i.lutadores[1].hp, 44);
+  const j = duelo();
+  j.lutadores[0].hp = 50;
+  m.usarHabilidade(j, 0, hab(18, "drenar"));
+  ok("drenar cura metade", j.lutadores[0].hp, 59);
+  const k = duelo();
+  k.lutadores[0].confuso = true;
+  m.usarHabilidade(k, 0, hab(28, null), () => 0.1);
+  ok("confuso pode errar", k.lutadores[1].hp, 100);
+  const k2 = duelo();
+  k2.lutadores[0].confuso = true;
+  m.usarHabilidade(k2, 0, hab(28, null), () => 0.9);
+  ok("ou acertar", k2.lutadores[1].hp, 72);
+  const q = duelo();
+  m.usarHabilidade(q, 0, hab(18, "queimar"));
+  m.passarVez(q);
+  ok("a queimadura tira 5 no começo da vez", q.lutadores[1].hp, 77);
+  const s = duelo();
+  m.usarHabilidade(s, 0, hab(18, "atordoar"));
+  const linhas = m.passarVez(s);
+  ok("atordoado perde a vez", s.vez, 0);
+  verdade("e o histórico conta", linhas.some((t) => t.includes("😵")));
+  const c = duelo();
+  c.lutadores[0].hp = 95;
+  m.usarHabilidade(c, 0, hab(0, "cura", "defesa"));
+  ok("cura não passa de 100", c.lutadores[0].hp, 100);
+  const fim = duelo();
+  fim.lutadores[1].hp = 5;
+  m.usarHabilidade(fim, 0, fim.lutadores[0].kit[0]);
+  m.passarVez(fim);
+  ok("vida zerada encerra", fim.vencedor, 0);
+
+  const bot = m.novoLutador({ userId: null, nome: "CYRON", personagem: P("tesla"), bot: true });
+  bot.en = 10;
+  ok("o bot sem energia usa a básica", m.jogadaDoBot(bot, () => 0).espaco, "basica");
+  bot.en = 100; bot.turnos = 3;
+  ok("o bot usa a suprema quando pode", m.jogadaDoBot(bot, () => 0).espaco, "suprema");
+
+  /* O equilibrio: milhares de duelos bot contra bot, com sorte de semente
+     fixa (o resultado e' sempre o mesmo). Todo duelo acaba, e ninguem
+     ganha ou perde demais. */
+  let semente = 42;
+  const sorte = () => ((semente = (semente * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const vit = {}, jog = {};
+  let eterno = 0, maior = 0;
+  for (let r = 0; r < 3000; r++) {
+    const a = elenco.PERSONAGENS[r % 12], b = elenco.PERSONAGENS[(r * 7 + Math.floor(r / 12)) % 12];
+    if (a === b) continue;
+    const e = { historico: [], jogadas: 0, vez: sorte() < 0.5 ? 0 : 1, vencedor: null,
+      lutadores: [m.novoLutador({ personagem: a }), m.novoLutador({ personagem: b })] };
+    m.passarVez(e);
+    while (e.vencedor === null && e.jogadas < 200) {
+      m.usarHabilidade(e, e.vez, m.jogadaDoBot(e.lutadores[e.vez], sorte, e.lutadores[1 - e.vez]), sorte);
+      e.jogadas++;
+      m.passarVez(e);
+    }
+    if (e.vencedor === null) { eterno++; continue; }
+    maior = Math.max(maior, e.jogadas);
+    const w = e.lutadores[e.vencedor].p.id;
+    vit[w] = (vit[w] || 0) + 1; jog[a.id] = (jog[a.id] || 0) + 1; jog[b.id] = (jog[b.id] || 0) + 1;
+  }
+  ok("nenhum duelo fica eterno", eterno, 0);
+  verdade(`todo duelo acaba antes de 50 jogadas (maior: ${maior})`, maior < 50);
+  const fora = Object.keys(jog).filter((k) => vit[k] / jog[k] < 0.35 || vit[k] / jog[k] > 0.65)
+    .map((k) => `${k} ${Math.round(100 * vit[k] / jog[k])}%`);
+  ok("todo personagem vence entre 35% e 65%", fora, []);
+
+  ok("vitória vale 30", m.xpDoDuelo(true, false), 30);
+  ok("derrota vale 10", m.xpDoDuelo(false, false), 10);
+  verdade("treino vale menos", m.xpDoDuelo(true, true, 0) < 30);
+  ok("treino tem teto por dia", m.xpDoDuelo(true, true, 10), 0);
+  ok("duelo também tem teto por dia", m.xpDoDuelo(true, false, 20), 0);
+  ok("quem perde por W.O. não ganha XP", m.xpDoDuelo(false, false, 0, true), 0);
+  ok("quem vence por W.O. ganha", m.xpDoDuelo(true, false, 0, true), 30);
+
+  const tela = m.telaDoDuelo(Object.assign(duelo(), { limite: 0 }));
+  ok("4 botões para quem joga", tela.components[0].components.length, 4);
+  verdade("o botão leva o id do duelo", tela.components[0].components[0].custom_id === "duelo:hab:t:0");
+  verdade("sem energia, o botão fica desligado", tela.components[0].components[2].disabled);
+  verdade("ninguém é marcado", tela.allowedMentions.parse.length === 0);
+  const acabou = m.telaDoDuelo(Object.assign(duelo(), { vencedor: 1, limite: 0 }));
+  ok("no fim, sem botões", acabou.components, []);
+  verdade("o fim mostra quem venceu", acabou.embeds[0].description.includes("🏆"));
+
+  const eq = m.telaDeEquipar(P("joana"), 1, {}, 0);
+  ok("quatro listas no /equipar", eq.components.length, 4);
+  verdade("alternativa trancada mostra o nível", eq.components[1].components[0].options[1].label.includes("🔒 Nv 2"));
+
+  const idx = readFileSync(`${aqui}/index.js`, "utf8");
+  verdade("só quem está na vez joga", /if \(estado\.vez !== indice\)[^]{0,200}Ainda não é a sua vez/.test(idx));
+  verdade("clique duplo não joga duas vezes", /if \(estado\.ocupado\) return inter\.deferUpdate\(\)/.test(idx));
+  verdade("os comandos do duelo são de todos", /COMANDOS_DE_TODOS = new Set\([^)]*"duelo", "equipar", "codex"/.test(idx));
+  verdade("os botões do duelo têm rota", idx.includes('inter.customId.startsWith("duelo:")') && idx.includes('inter.customId.startsWith("equipar:")'));
+  const sql = readFileSync(`${aqui}/../supabase/migracoes/019-duelo.sql`, "utf8");
+  verdade("no banco, uma linha por pessoa e personagem", /primary key \(user_id, personagem\)/.test(sql));
+}
+
 /* A IMAGEM TRADUZIDA (🖼️ Ver na imagem).
  *
  * O print volta com o texto trocado no lugar. O desenho aqui roda DE VERDADE,

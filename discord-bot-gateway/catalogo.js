@@ -440,6 +440,18 @@ export const RECURSOS = [
     prova: "nomesDaInteracao",
   },
   {
+    chave: "duelo",
+    categoria: "ferramentas",
+    plano: "gratis",
+    nome: { pt: "Duelo de personagens da história", en: "History characters duel" },
+    como: { pt: "/duelo · /equipar · /codex", en: "/duel · /equip · /codex" },
+    oque: {
+      pt: "Alexandre, Napoleão, Cleópatra, Musashi, Zumbi e mais: duelo em turnos numa única mensagem que se edita, contra outra pessoa ou treinando contra a CYRON. Cada personagem sobe até o nível 10, libera habilidades novas e as páginas do Códex, com curiosidades reais da história.",
+      en: "Alexander, Napoleon, Cleopatra, Musashi, Zumbi and more: a turn-based duel in a single self-editing message, against another person or training against CYRON. Each character levels up to 10, unlocking new skills and Codex pages with real history facts.",
+    },
+    prova: "function usarHabilidade",
+  },
+  {
     chave: "hora",
     categoria: "ferramentas",
     plano: "gratis",
