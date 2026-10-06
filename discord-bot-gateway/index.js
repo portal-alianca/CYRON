@@ -9849,6 +9849,273 @@ async function cliqueBoasVindas(inter) {
   return inter.editReply(await previaDeBoasVindas(inter, idioma, servidor.boas_vindas_canal, modelo, `✅ ${salvo}`));
 }
 
+/* ---------------- niveis, XP e /perfil ----------------
+
+   O que mais se pede num servidor depois do boas-vindas: falar da XP, a XP
+   da' nivel, o nivel da' cargo. Do mesmo jeito do MEE6 -- 15 a 25 por
+   mensagem, uma vez por minuto (quem manda dez mensagens seguidas nao ganha
+   dez vezes), e a curva 5n²+50n+100 que todo mundo ja' conhece.
+
+   O banco do Supabase e' de uso geral, e uma escrita por mensagem seria a
+   maior carga que o bot ja' fez la'. Entao a XP soma NA MEMORIA e desce em
+   lote a cada minuto, numa chamada so' (cyron_somar_xp), que SOMA no banco
+   em vez de sobrescrever -- dois processos, ou um reinicio no meio, nao
+   apagam a XP de ninguem. Ler, so' uma vez por pessoa e por servidor.
+
+   Desligado ate' alguem ligar no /niveis: servidor que ja' usa o MEE6 nao
+   quer dois bots anunciando nivel. */
+const XP_MIN = 15;
+const XP_MAX = 25;
+const XP_ESPERA = 60 * 1000;
+const XP_NA_MEMORIA_MAX = 50000;
+
+function xpParaSubir(nivel) {
+  return 5 * nivel * nivel + 50 * nivel + 100;
+}
+/* Nivel, XP dentro do nivel e quanto falta: o que o /perfil desenha. */
+function nivelDoXp(xp) {
+  let nivel = 0, resto = Math.max(0, Math.floor(Number(xp) || 0));
+  while (resto >= xpParaSubir(nivel)) { resto -= xpParaSubir(nivel); nivel++; }
+  return { nivel, dentro: resto, precisa: xpParaSubir(nivel) };
+}
+
+const xpDasPessoas = new Map(); // `${guild}:${user}` -> { base, pend, msgs, ultima, carregando }
+const xpPendente = new Map();   // `${guild}:${user}` -> { xp, m }
+
+async function xpBase(guildId, userId) {
+  const r = await sb(`cyron_xp?guild_id=eq.${guildId}&user_id=eq.${userId}&select=xp`);
+  return Number(r?.[0]?.xp) || 0;
+}
+
+/* Os cargos por nivel: { "5": "id do cargo", "10": "..." }. */
+function cargosDosNiveis(servidor) {
+  const c = servidor?.niveis_cargos;
+  return c && typeof c === "object" && !Array.isArray(c) ? c : {};
+}
+
+/* Cada cargo de nivel ate' o nivel atual que a pessoa ainda nao tem. Puro. */
+function cargosQueFaltam(cargos, nivel, jaTem = new Set()) {
+  return Object.entries(cargos)
+    .filter(([n, id]) => Number(n) <= nivel && /^\d{5,25}$/.test(String(id)) && !jaTem.has(String(id)))
+    .map(([, id]) => String(id));
+}
+
+async function ganharXp(msg, servidor, agora = Date.now()) {
+  if (!servidor?.niveis_ligado || msg.author?.bot) return;
+  const chave = `${msg.guild.id}:${msg.author.id}`;
+  let p = xpDasPessoas.get(chave);
+  if (!p) {
+    p = { base: null, pend: 0, ultima: 0, carregando: null };
+    xpDasPessoas.set(chave, p);
+    while (xpDasPessoas.size > XP_NA_MEMORIA_MAX) xpDasPessoas.delete(xpDasPessoas.keys().next().value);
+  }
+  if (agora - p.ultima < XP_ESPERA) return;
+  p.ultima = agora;
+  const ganho = XP_MIN + Math.floor(Math.random() * (XP_MAX - XP_MIN + 1));
+  p.pend += ganho;
+  const leva = xpPendente.get(chave) || { xp: 0, m: 0 };
+  leva.xp += ganho; leva.m += 1;
+  xpPendente.set(chave, leva);
+
+  /* Sem saber a base nao da' para saber se subiu: na duvida, nao anuncia --
+     anunciar nivel errado e' pior que atrasar um anuncio. */
+  if (p.base === null) {
+    p.carregando ??= xpBase(msg.guild.id, msg.author.id).then((v) => { p.base = v; })
+      .catch(() => {}).finally(() => { p.carregando = null; });
+    await p.carregando;
+    if (p.base === null) return;
+  }
+  const antes = nivelDoXp(p.base + p.pend - ganho).nivel;
+  const depois = nivelDoXp(p.base + p.pend).nivel;
+  if (depois > antes) await subiuDeNivel(msg, servidor, depois).catch((e) =>
+    console.error("niveis: nao consegui anunciar:", e?.message || e));
+}
+
+async function subiuDeNivel(msg, servidor, nivel) {
+  const membro = msg.member || await msg.guild.members.fetch(msg.author.id).catch(() => null);
+  /* Os cargos primeiro: o anuncio pode falhar (canal sem permissao) e o
+     cargo ainda assim tem que chegar. */
+  const faltam = membro ? cargosQueFaltam(cargosDosNiveis(servidor), nivel, new Set(membro.roles.cache.keys())) : [];
+  const ganhos = [];
+  for (const id of faltam) {
+    const cargo = msg.guild.roles.cache.get(id);
+    if (!cargo?.editable) continue;   // cargo acima do meu: nao tenho como dar
+    if (await membro.roles.add(cargo, `CYRON: nivel ${nivel}`).then(() => true).catch(() => false)) ganhos.push(id);
+  }
+  const canal = (servidor.niveis_canal && msg.guild.channels.cache.get(String(servidor.niveis_canal))) || msg.channel;
+  /* Sem palavra nenhuma: "Lv." e o emoji servem em toda lingua, e nao gastam
+     tradutor a cada nivel de cada pessoa. */
+  await canal.send({
+    content: `🎉 <@${msg.author.id}> → **Lv. ${nivel}**${ganhos.length ? ` · ${ganhos.map((id) => `<@&${id}>`).join(" ")}` : ""}`,
+    allowedMentions: { users: [msg.author.id] },
+  });
+}
+
+/* A cada minuto: tudo o que somou desce numa chamada so'. */
+async function descarregarXp() {
+  if (!xpPendente.size) return;
+  const leva = [...xpPendente.entries()];
+  xpPendente.clear();
+  const linhas = leva.map(([chave, v]) => {
+    const [g, u] = chave.split(":");
+    return { g, u, xp: v.xp, m: v.m };
+  });
+  try {
+    await rpc("cyron_somar_xp", { p_linhas: linhas });
+    /* Gravou: o que estava pendente virou base. */
+    for (const [chave, v] of leva) {
+      const p = xpDasPessoas.get(chave);
+      if (p) { p.pend -= v.xp; if (p.base !== null) p.base += v.xp; }
+    }
+  } catch (e) {
+    console.error("niveis: nao consegui gravar a XP:", e?.message || e);
+    for (const [chave, v] of leva) {
+      const volta = xpPendente.get(chave) || { xp: 0, m: 0 };
+      volta.xp += v.xp; volta.m += v.m;
+      xpPendente.set(chave, volta);
+    }
+  }
+}
+
+/* XP de alguem agora: o do banco mais o que ainda nao desceu. */
+async function xpAgora(guildId, userId) {
+  const chave = `${guildId}:${userId}`;
+  const r = await sb(`cyron_xp?guild_id=eq.${guildId}&user_id=eq.${userId}&select=xp,mensagens`).catch(() => null);
+  const pend = xpPendente.get(chave) || { xp: 0, m: 0 };
+  return { xp: (Number(r?.[0]?.xp) || 0) + pend.xp, mensagens: (Number(r?.[0]?.mensagens) || 0) + pend.m };
+}
+
+/* O cartao do /perfil: o mesmo fundo do boas-vindas (o do servidor, ou o
+   da CYRON), a foto, o nivel e a barra. */
+const PF_LARGURA = 1024;
+const PF_ALTURA = 340;
+async function desenharPerfil(sharp, { nome, reserva, nivel, dentro, precisa, posicao, xp, mensagens, foto, fundo }, fontfile = FONTE_DA_IMAGEM) {
+  const fonte = await fonteDoDesenho(fontfile);
+  const W = PF_LARGURA, H = PF_ALTURA, x = 300, larg = W - x - 50;
+  const quem = [soLetrasDaFonte(fonte, nome), soLetrasDaFonte(fonte, reserva)].find(temLetra) || "?";
+  const linha = (t, y, tam, cor, maxL = larg) => {
+    let s2 = tam;
+    while (s2 > 10 && fonte.getAdvanceWidth(t, s2) > maxL) s2 -= 2;
+    return `<path d="${fonte.getPath(t, x, y, s2).toPathData(2)}" fill="${cor}" filter="url(#s)"/>`;
+  };
+  const direita = (t, y, tam, cor) => {
+    const w = fonte.getAdvanceWidth(t, tam);
+    return `<path d="${fonte.getPath(t, W - 50 - w, y, tam).toPathData(2)}" fill="${cor}" filter="url(#s)"/>`;
+  };
+  const pct = Math.max(0, Math.min(1, dentro / Math.max(1, precisa)));
+  const fmt = (n) => Number(n || 0).toLocaleString("en-US");
+  const base = await sharp(fundo || FUNDO_DA_CYRON).resize(W, H, { fit: "cover" }).blur(6).toBuffer();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
+    `<linearGradient id="v" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity="0.75"/>` +
+    `<stop offset="1" stop-color="#000" stop-opacity="0.35"/></linearGradient>` +
+    `<linearGradient id="b" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7FD3FF"/><stop offset="1" stop-color="#5865F2"/></linearGradient>` +
+    `<filter id="g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10"/></filter>` +
+    `<filter id="s"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000" flood-opacity="0.6"/></filter></defs>` +
+    `<rect width="${W}" height="${H}" fill="url(#v)"/>` +
+    `<circle cx="150" cy="170" r="122" fill="#7FD3FF" opacity="0.7" filter="url(#g)"/>` +
+    `<circle cx="150" cy="170" r="118" fill="#FFFFFF"/>` +
+    (foto ? "" : `<circle cx="150" cy="170" r="110" fill="#404249"/>`) +
+    linha(quem, 120, 56, "#FFFFFF", larg - 230) +
+    direita(`LV. ${nivel}`, 120, 52, "#7FD3FF") +
+    linha(`#${fmt(posicao)} · ${fmt(xp)} XP · ${fmt(mensagens)} msg`, 172, 26, "#C9D6E3") +
+    `<rect x="${x}" y="212" width="${larg}" height="34" rx="17" fill="#000" opacity="0.45"/>` +
+    `<rect x="${x}" y="212" width="${Math.max(34, Math.round(larg * pct))}" height="34" rx="17" fill="url(#b)"/>` +
+    direita(`${fmt(dentro)} / ${fmt(precisa)}`, 284, 22, "#E6F4FF") +
+    `</svg>`;
+  const camadas = [{ input: Buffer.from(svg) }];
+  if (foto) camadas.push({ input: foto, left: 150 - BV_FOTO / 2, top: 170 - BV_FOTO / 2 });
+  return await sharp(base).composite(camadas).jpeg({ quality: 88 }).toBuffer();
+}
+
+async function comandoPerfil(inter) {
+  await inter.deferReply();
+  const idioma = await linguaDe(inter);
+  const servidor = await servidorDoGuild(inter.guildId);
+  if (!servidor?.niveis_ligado) {
+    const [t] = await nalingua(idioma, inter.guildId, "Os níveis estão desligados neste servidor. Quem administra liga com /niveis.");
+    return inter.editReply({ content: `📊 ${t}` });
+  }
+  const alvo = inter.options.getMember("membro") || inter.member;
+  const { xp, mensagens } = await xpAgora(inter.guildId, alvo.id);
+  const acima = await rpc("cyron_posicao_xp", { p_guild: inter.guildId, p_xp: xp }).catch(() => null);
+  const n = nivelDoXp(xp);
+  const sharp = await carregarSharp();
+  let imagem = null;
+  if (sharp && process.memoryUsage().rss <= MEMORIA_PARA_DESENHAR) {
+    imagem = await naFilaDeDesenho(async () => {
+      const [foto, fundo] = await Promise.all([
+        fotoRedonda(sharp, alvo.displayAvatarURL({ extension: "png", size: 256 })), fundoDe(inter.guild)]);
+      const args = { nome: alvo.displayName, reserva: alvo.user?.username, ...n, posicao: (Number(acima) || 0) + 1,
+        xp, mensagens, foto, fundo };
+      return await desenharPerfil(sharp, args).catch(() => desenharPerfil(sharp, { ...args, fundo: null }));
+    }).catch(() => null);
+  }
+  const texto = `📊 <@${alvo.id}> · **Lv. ${n.nivel}** · ${xp.toLocaleString("en-US")} XP`;
+  return inter.editReply({ content: imagem ? `<@${alvo.id}>` : texto, allowedMentions: { parse: [] },
+    ...(imagem ? { files: [{ attachment: imagem, name: "perfil.jpg" }] } : {}) });
+}
+
+async function comandoTop(inter) {
+  await inter.deferReply();
+  const idioma = await linguaDe(inter);
+  const servidor = await servidorDoGuild(inter.guildId);
+  if (!servidor?.niveis_ligado) {
+    const [t] = await nalingua(idioma, inter.guildId, "Os níveis estão desligados neste servidor. Quem administra liga com /niveis.");
+    return inter.editReply({ content: `🏆 ${t}` });
+  }
+  await descarregarXp().catch(() => {});
+  const top = await sb(`cyron_xp?guild_id=eq.${inter.guildId}&select=user_id,xp&order=xp.desc&limit=10`).catch(() => []) || [];
+  const medalha = ["🥇", "🥈", "🥉"];
+  const linhas = top.map((l, i) => `${medalha[i] || `**${i + 1}.**`} <@${l.user_id}> · Lv. ${nivelDoXp(l.xp).nivel} · ${Number(l.xp).toLocaleString("en-US")} XP`);
+  return inter.editReply({ embeds: [{ color: COR, title: `🏆 ${inter.guild.name}`.slice(0, 256),
+    description: linhas.join("\n") || "—" }], allowedMentions: { parse: [] } });
+}
+
+/* /niveis: ligar, onde anunciar, e o cargo de cada nivel. Uma tela so'. */
+async function comandoNiveis(inter) {
+  await inter.deferReply({ flags: 64 });
+  const idioma = await linguaDe(inter);
+  const servidor = await servidorDoGuild(inter.guildId);
+  if (!servidor) return inter.editReply({ content: (await nalingua(idioma, inter.guildId, "Ainda não terminei de me instalar aqui."))[0] });
+  const muda = {};
+  const ligar = inter.options.getBoolean("ligar");
+  if (ligar !== null) muda.niveis_ligado = ligar;
+  const canal = inter.options.getChannel("canal");
+  if (canal) muda.niveis_canal = canal.id;
+  const nivel = inter.options.getInteger("nivel");
+  const cargo = inter.options.getRole("cargo");
+  let aviso = "";
+  if (nivel !== null) {
+    const cargos = { ...cargosDosNiveis(servidor) };
+    if (cargo) {
+      if (cargo.id === inter.guildId || cargo.managed) {
+        aviso = "Esse cargo não pode ser dado por bot.";
+      } else {
+        cargos[String(nivel)] = cargo.id;
+        if (!cargo.editable) aviso = "Esse cargo está acima do meu na lista de cargos. Arraste o cargo da CYRON para cima dele, senão eu não consigo dar.";
+      }
+    } else {
+      delete cargos[String(nivel)];
+    }
+    muda.niveis_cargos = cargos;
+  }
+  if (Object.keys(muda).length) {
+    await sbPatch(`cyron_servidor?id=eq.${servidor.id}`, muda);
+    cacheServidor.delete(inter.guildId);
+  }
+  const atual = { ...servidor, ...muda };
+  const cargos = Object.entries(cargosDosNiveis(atual)).sort((a, b) => Number(a[0]) - Number(b[0]));
+  const [ligadoT, desligadoT, ondeT, mesmoT, cargosT, nenhumT, comoT, avisoT] = await nalingua(idioma, inter.guildId,
+    "Níveis ligados", "Níveis desligados", "Anúncio de nível em", "no mesmo canal da mensagem",
+    "Cargos por nível", "nenhum ainda",
+    "Para dar um cargo num nível: /niveis nivel:5 cargo:@Cargo. Para tirar: /niveis nivel:5 (sem cargo).", aviso);
+  return inter.editReply({ embeds: [{ color: atual.niveis_ligado ? COR_OK : COR,
+    title: `📊 ${atual.niveis_ligado ? ligadoT : desligadoT}`,
+    description: `${ondeT}: ${atual.niveis_canal ? `<#${atual.niveis_canal}>` : mesmoT}\n\n**${cargosT}**\n` +
+      (cargos.length ? cargos.map(([n, id]) => `Lv. ${n} → <@&${id}>`).join("\n") : `_${nenhumT}_`) +
+      `\n\n-# ${comoT}` + (avisoT ? `\n\n⚠️ ${avisoT}` : "") }], allowedMentions: { parse: [] } });
+}
+
 /* A terceira camada: quem escreveu antes de tocar em qualquer botão.
 
    E aqui a oferta vai NA LÍNGUA DELA, que é o ponto inteiro. Um convite em
@@ -17186,6 +17453,10 @@ async function comandoDeInteracao(inter) {
   if (nome === "admin") return comandoAdmin(inter);
   if (nome === "arena") return inter.reply({ flags: 64, content: ARENA_ENCERRADA });
   if (nome === "hora") return comandoHora(inter);
+  if (nome === "perfil" || nome === "top" || nome === "niveis") {
+    if (!inter.guildId) return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
+    return nome === "perfil" ? comandoPerfil(inter) : nome === "top" ? comandoTop(inter) : comandoNiveis(inter);
+  }
   if (nome === "boas-vindas") {
     if (!inter.guildId) return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
     return comandoBoasVindas(inter);
@@ -17529,6 +17800,10 @@ client.on("messageCreate", async (msg) => {
       });
       return;
     }
+
+    /* XP: sem await, e antes de qualquer corte -- foto sem legenda tambem e'
+       participar da conversa. */
+    ganharXp(msg, servidor).catch((e) => console.error("niveis: falhou:", e?.message || e));
 
     const texto = String(msg.content || "").trim();
 
@@ -17893,7 +18168,7 @@ client.on("messageReactionAdd", async (reacao, quem) => {
    A lista diz "nao mexa nisto", e nao "todo mundo usa". Sem ele aqui,
    separarComandos leria /admin como comando do jogo e o empurraria pros
    servidores com alianca -- exatamente o contrario do que ele e'. */
-const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento", "hora", "boas-vindas"]);
+const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento", "hora", "boas-vindas", "perfil", "top", "niveis"]);
 
 async function separarComandos() {
   try {
@@ -18327,7 +18602,7 @@ async function janelaDeComando(existente) {
    por isso salvarComando tambem pergunta ao Discord o que ja' existe. */
 const NOMES_MEUS = new Set([
   "cyron", "help", "admin", "mylanguage", "arena", "evento", "settings", "portal", "player", "events", "ranking",
-  "hora", "time", "boas-vindas", "welcome-card",
+  "hora", "time", "boas-vindas", "welcome-card", "perfil", "profile", "top", "niveis", "levels",
 ]);
 
 /* Uma linha do formulario que carrega duas respostas: "todos 60".
@@ -19017,6 +19292,39 @@ const GLOBAIS_DO_CYRON = [
     ],
   },
   {
+    name: "perfil",
+    nameLocalizations: { "en-US": "profile", "en-GB": "profile", "es-ES": "perfil" },
+    description: "Seu cartão: nível, XP e posição / Your card: level, XP and rank",
+    descriptionLocalizations: { "en-US": "Your card: level, XP and rank", "en-GB": "Your card: level, XP and rank",
+      "es-ES": "Tu tarjeta: nivel, XP y posición", "pt-BR": "Seu cartão: nível, XP e posição" },
+    dmPermission: false,
+    options: [{ type: 6, name: "membro", required: false, description: "Ver o de outra pessoa / See someone else's",
+      descriptionLocalizations: { "en-US": "See someone else's", "en-GB": "See someone else's", "es-ES": "Ver el de otra persona" } }],
+  },
+  {
+    name: "top",
+    description: "Quem mais participa no servidor / Most active members",
+    descriptionLocalizations: { "en-US": "Most active members of the server", "en-GB": "Most active members of the server",
+      "es-ES": "Quienes más participan en el servidor", "pt-BR": "Quem mais participa no servidor" },
+    dmPermission: false,
+  },
+  {
+    /* So' de quem administra: liga, escolhe o canal e os cargos. */
+    name: "niveis",
+    nameLocalizations: { "en-US": "levels", "en-GB": "levels", "es-ES": "niveles" },
+    description: "Ligar os níveis (XP) e dar cargos por nível / Levels and level roles",
+    descriptionLocalizations: { "en-US": "Turn on levels (XP) and give roles per level", "en-GB": "Turn on levels (XP) and give roles per level",
+      "es-ES": "Activar niveles (XP) y dar roles por nivel", "pt-BR": "Ligar os níveis (XP) e dar cargos por nível" },
+    defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
+    dmPermission: false,
+    options: [
+      { type: 5, name: "ligar", required: false, description: "Ligar ou desligar / Turn on or off" },
+      { type: 7, name: "canal", required: false, channelTypes: [0, 5], description: "Onde anunciar quem subiu / Where to announce level-ups" },
+      { type: 4, name: "nivel", required: false, min_value: 1, max_value: 500, description: "Nível do cargo / Level for the role" },
+      { type: 8, name: "cargo", required: false, description: "Cargo desse nível (vazio tira) / Role for that level (empty removes)" },
+    ],
+  },
+  {
     /* So' de quem administra: e' ele que decide se o servidor ganha cartao. */
     name: "boas-vindas",
     /* "welcome-card", e nao "welcome": "welcome" e' o nome mais comum de
@@ -19569,6 +19877,7 @@ client.once("clientReady", () => {
   setInterval(() => {
     sincronizarRecentes().catch((e) => console.error("espelho: passada curta falhou:", e?.message || e));
     descarregarUso().catch((e) => console.error("uso: descarga falhou:", e?.message || e));
+    descarregarXp().catch((e) => console.error("niveis: descarga falhou:", e?.message || e));
     /* A agenda precisa do minuto: lembrete "10 min antes" numa ronda de dez
        em dez chegaria na hora do evento. */
     rodarAgendaDeEventos().catch((e) => console.error("eventos: agenda falhou:", e?.message || e));
@@ -19609,6 +19918,7 @@ for (const sinal of ["SIGINT", "SIGTERM"]) {
     await Promise.race([
       Promise.all([
         descarregarUso().catch(() => {}),
+        descarregarXp().catch(() => {}),
         porAjuste("despedi", String(Date.now())).catch(() => {}),
       ]),
       new Promise((r) => setTimeout(r, PRAZO_DESPEDIDA)),
