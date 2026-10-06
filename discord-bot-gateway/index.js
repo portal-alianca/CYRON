@@ -17,6 +17,7 @@ import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:
 /* O catalogo do que eu faco. Mora fora daqui porque a pagina cyron/recursos.html
    nasce dele tambem -- uma lista so', e nao uma no bot e outra no site. */
 import { CATEGORIAS, doCliente } from "./catalogo.js";
+import { PERSONAGENS, ESPACOS, EFEITOS, NIVEIS_DO_PERSONAGEM } from "./duelo-elenco.js";
 /* O que e' so' da alianca [TOP]: fica fora daqui para nao se misturar com o
    produto. Ver o comentario no topo do alianca.js. */
 import { ligarAlianca, COMANDOS_DA_ALIANCA, comandoDaAlianca, boasVindasDaAlianca, reHospedar, MAX_MIDIA,
@@ -10653,6 +10654,513 @@ async function comandoInteracao(inter, chave) {
   });
 }
 
+/* ---------------- ⚔️ Duelo CYRON ----------------
+
+   Duelo em turnos entre personagens da historia (o elenco mora em
+   duelo-elenco.js). UMA mensagem por duelo, editada a cada jogada: o chat
+   nao enche. So' quem esta' na vez consegue jogar; o resto recebe um aviso
+   que so' a pessoa ve.
+
+   O estado vive na memoria enquanto o duelo dura (minutos). O banco so' e'
+   tocado no fim, uma linha por jogador e personagem: XP, vitorias e o kit
+   equipado. Duelo que cai num reinicio simplesmente acaba -- nao vale
+   guardar cada jogada para isso.
+
+   Contra a CYRON e' treino, assumido como bot (🤖), e vale menos XP, com
+   limite por dia: o bot nao vira fazenda de nivel. */
+const DUELO_VIDA = 100;
+const DUELO_ENERGIA_INICIAL = 30;
+const DUELO_ENERGIA_TURNO = 20;
+const DUELO_ENERGIA_MAX = 100;
+const DUELO_TEMPO = 30 * 1000;
+const DUELO_ESCOLHA = 2 * 60 * 1000;
+const DUELO_AUSENCIAS = 3;
+/* Morte subita: depois de tantas jogadas, a arena tira vida de todos no
+   comeco de cada vez, e cada vez mais. Garante que nenhum duelo vira
+   eterno (dois escudos se revezando, duas curas...). */
+const DUELO_MORTE_SUBITA = 20;
+/* Perfurar atravessa escudo e esquiva; contra quem nao se defendeu, entra
+   mais fundo (x1.3). Sem esse bonus, perfurar quase nunca valia nada: o
+   escudo so' esta' de pe' numa vez em cada tantas. */
+const DUELO_PERFURAR = 1.3;
+const DUELO_XP = { vitoria: 30, derrota: 10, treinoVitoria: 10, treinoDerrota: 4 };
+const DUELO_TREINOS_DIA = 10;
+const DUELO_DUELOS_DIA = 20;
+const ESPACOS_ORDEM = ["basica", "defesa", "especial", "suprema"];
+
+const duelos = new Map();          // id -> estado
+const duelistaEm = new Map();      // userId -> id do duelo
+const treinosHoje = new Map();     // `${user}:${tipo}:${dia}` -> quantos
+
+function personagemPorId(id) {
+  return PERSONAGENS.find((p) => p.id === id) || null;
+}
+
+/* Nivel do personagem pelo XP (1 a 10). */
+function nivelDoPersonagem(xp) {
+  let n = 1;
+  for (let i = 0; i < NIVEIS_DO_PERSONAGEM.length; i++) if (Number(xp) >= NIVEIS_DO_PERSONAGEM[i]) n = i + 1;
+  return n;
+}
+
+/* O kit que entra no duelo: o equipado, desde que ja' liberado no nivel. */
+function kitEquipado(personagem, nivel, escolha = {}) {
+  return ESPACOS_ORDEM.map((espaco) => {
+    const alt = Number(escolha?.[espaco]) === 1 && nivel >= ESPACOS[espaco].nivelAlternativa;
+    return { ...personagem.kit[espaco][alt ? 1 : 0], espaco };
+  });
+}
+
+function novoLutador({ userId, nome, personagem, nivel = 1, kit = null, bot = false }) {
+  return { userId, nome, bot, p: personagem, nivel, kit: kit || kitEquipado(personagem, nivel),
+    hp: DUELO_VIDA, en: DUELO_ENERGIA_INICIAL, escudo: 0, esquiva: false, preparado: false,
+    confuso: false, atordoado: false, queimando: 0, turnos: 0, ausencias: 0 };
+}
+
+/* Pode usar a habilidade agora? Energia e, para a suprema, o 3o turno. */
+function podeUsar(l, hab) {
+  const regra = ESPACOS[hab.espaco];
+  if (l.en < regra.energia) return false;
+  if (regra.aPartirDoTurno && l.turnos < regra.aPartirDoTurno) return false;
+  return true;
+}
+
+/* Comeco da vez de alguem: energia, queimadura e atordoamento. Devolve as
+   linhas do historico. Puro sobre o estado. */
+function comecarVez(estado, i) {
+  const l = estado.lutadores[i];
+  const log = [];
+  l.turnos++;
+  if (l.turnos > 1) l.en = Math.min(DUELO_ENERGIA_MAX, l.en + DUELO_ENERGIA_TURNO);
+  /* Escudo e esquiva protegem so' durante UMA vez do outro: na minha vez
+     seguinte, acabaram. Sem isso, escudo renovado todo turno travava o duelo. */
+  l.escudo = 0;
+  l.esquiva = false;
+  if ((estado.jogadas || 0) >= DUELO_MORTE_SUBITA) {
+    const perda = 5 * (1 + Math.floor((estado.jogadas - DUELO_MORTE_SUBITA) / 4));
+    l.hp = Math.max(0, l.hp - perda);
+    log.push(`☠️ A arena cobra: ${l.p.nome} −${perda} ❤️`);
+  }
+  if (l.queimando > 0) {
+    l.hp = Math.max(0, l.hp - EFEITOS.queimar.valor);
+    l.queimando--;
+    log.push(`🔥 ${l.p.nome} queima: −${EFEITOS.queimar.valor} ❤️`);
+  }
+  estado.vez = i;
+  return log;
+}
+
+/* Uma jogada. `sorte()` devolve [0,1) -- vem de fora para o teste ser exato.
+   Devolve as linhas do historico. */
+function usarHabilidade(estado, i, hab, sorte = Math.random) {
+  const eu = estado.lutadores[i];
+  const outro = estado.lutadores[1 - i];
+  const log = [];
+  eu.en -= ESPACOS[hab.espaco].energia;
+  let linha = `${hab.emoji} ${eu.p.nome} usou **${hab.nome}**`;
+  if (hab.dano > 0) {
+    if (eu.confuso) {
+      eu.confuso = false;
+      if (sorte() < EFEITOS.confundir.chance) { log.push(`${linha}… e errou! 🌀`); return log; }
+    }
+    let dano = Math.round(hab.dano * (eu.preparado ? EFEITOS.preparar.multiplicador : 1));
+    eu.preparado = false;
+    const perfura = hab.efeito === "perfurar";
+    if (perfura && !outro.escudo && !outro.esquiva) dano = Math.round(dano * DUELO_PERFURAR);
+    if (outro.esquiva && !perfura) {
+      outro.esquiva = false;
+      log.push(`${linha}, mas ${outro.p.nome} desviou! 💨`);
+    } else {
+      if (perfura && outro.esquiva) { outro.esquiva = false; linha += " (💨✕)"; }
+      if (!perfura && outro.escudo > 0) {
+        const absorvido = Math.min(outro.escudo, dano);
+        outro.escudo -= absorvido;
+        dano -= absorvido;
+        if (absorvido) linha += ` (🛡️ −${absorvido})`;
+      }
+      outro.hp = Math.max(0, outro.hp - dano);
+      linha += `! −${dano} ❤️`;
+      if (hab.efeito === "drenar") { const cura = Math.floor(dano / 2); eu.hp = Math.min(DUELO_VIDA, eu.hp + cura); linha += ` · 🩸 +${cura}`; }
+      if (hab.efeito === "atordoar") { outro.atordoado = true; linha += " · 😵"; }
+      if (hab.efeito === "queimar") { outro.queimando = EFEITOS.queimar.turnos; linha += " · 🔥"; }
+      if (hab.efeito === "confundir") { outro.confuso = true; linha += " · 🌀"; }
+      log.push(linha);
+    }
+    if (hab.efeito === "preparar") eu.preparado = true;
+    if (hab.efeito === "cura") eu.hp = Math.min(DUELO_VIDA, eu.hp + EFEITOS.cura.valor);
+    if (hab.efeito === "energia") eu.en = Math.min(DUELO_ENERGIA_MAX, eu.en + EFEITOS.energia.valor);
+    return log;
+  }
+  if (hab.efeito === "escudo") eu.escudo = Math.max(eu.escudo, EFEITOS.escudo.valor);
+  if (hab.efeito === "esquiva") eu.esquiva = true;
+  if (hab.efeito === "cura") eu.hp = Math.min(DUELO_VIDA, eu.hp + EFEITOS.cura.valor);
+  if (hab.efeito === "preparar") eu.preparado = true;
+  log.push(`${linha} · ${EFEITOS[hab.efeito]?.texto || ""}`);
+  return log;
+}
+
+/* Depois de uma jogada: acabou? senao, passa a vez (pulando atordoado e
+   aplicando queimadura). Devolve as linhas novas. */
+function passarVez(estado) {
+  const log = [];
+  for (let volta = 0; volta < 4; volta++) {
+    if (estado.lutadores.some((l) => l.hp <= 0)) break;
+    const proximo = 1 - estado.vez;
+    log.push(...comecarVez(estado, proximo));
+    if (estado.lutadores[proximo].hp <= 0) break;
+    if (estado.lutadores[proximo].atordoado) {
+      estado.lutadores[proximo].atordoado = false;
+      log.push(`😵 ${estado.lutadores[proximo].p.nome} está atordoado e perdeu a vez`);
+      continue;
+    }
+    break;
+  }
+  const caido = estado.lutadores.findIndex((l) => l.hp <= 0);
+  if (caido >= 0) estado.vencedor = 1 - caido;
+  return log;
+}
+
+/* O bot de treino: suprema se puder; especial quase sempre; defesa quando
+   a vida esta' baixa; senao a basica. Previsivel o bastante para quem
+   aprende, esperto o bastante para nao ser saco de pancada. */
+function jogadaDoBot(l, sorte = Math.random, outro = null) {
+  const [basica, defesa, especial, suprema] = l.kit;
+  /* Se um golpe derruba, o mais barato que derruba. */
+  if (outro && !outro.esquiva) {
+    const mata = l.kit.filter((h) => h.dano > 0 && podeUsar(l, h) &&
+      danoPrevisto(h, l, outro) >= outro.hp);
+    if (mata.length) return mata[0];
+  }
+  if (podeUsar(l, suprema)) return suprema;
+  if (l.hp < 40 && podeUsar(l, defesa) && sorte() < 0.6) return defesa;
+  if (podeUsar(l, especial) && sorte() < 0.8) return especial;
+  if (podeUsar(l, defesa) && !l.preparado && sorte() < 0.25) return defesa;
+  return basica;
+}
+
+/* Quanto um golpe tira, sem sorte nenhuma (o bot usa para decidir). */
+function danoPrevisto(hab, eu, outro) {
+  let dano = Math.round(hab.dano * (eu.preparado ? EFEITOS.preparar.multiplicador : 1));
+  if (hab.efeito === "perfurar") return outro.escudo || outro.esquiva ? dano : Math.round(dano * DUELO_PERFURAR);
+  return Math.max(0, dano - (outro.escudo || 0));
+}
+
+function barra(valor, max = 100) {
+  const cheio = Math.round((Math.max(0, valor) / max) * 10);
+  return "█".repeat(cheio) + "░".repeat(10 - cheio);
+}
+
+function estadoDoLutador(l) {
+  const marcas = [l.escudo ? `🛡️${l.escudo}` : "", l.esquiva ? "💨" : "", l.preparado ? "📈" : "",
+    l.confuso ? "🌀" : "", l.atordoado ? "😵" : "", l.queimando ? "🔥" : ""].filter(Boolean).join(" ");
+  return `${l.p.bandeira} **${l.p.nome}** · Nv ${l.nivel} — ${l.bot ? "🤖 CYRON" : `<@${l.userId}>`}\n` +
+    `❤️ \`${barra(l.hp)}\` ${l.hp}/${DUELO_VIDA}\n🔷 \`${barra(l.en)}\` ${l.en}/${DUELO_ENERGIA_MAX}${marcas ? `  ${marcas}` : ""}`;
+}
+
+/* A mensagem inteira do duelo. Pura: so' le o estado. */
+function telaDoDuelo(estado, agora = Date.now()) {
+  const [a, b] = estado.lutadores;
+  const fim = estado.vencedor !== undefined && estado.vencedor !== null;
+  const vez = estado.lutadores[estado.vez];
+  const historico = estado.historico.slice(-4).map((t) => `› ${t}`).join("\n") || "› …";
+  const rodape = fim
+    ? `🏆 **${estado.lutadores[estado.vencedor].p.nome}** venceu${estado.lutadores[estado.vencedor].bot ? "" : ` · <@${estado.lutadores[estado.vencedor].userId}>`}` +
+      (estado.motivo ? ` · ${estado.motivo}` : "")
+    : `⏳ Vez de ${vez.bot ? "🤖 CYRON" : `<@${vez.userId}>`} · <t:${Math.floor((estado.limite || agora) / 1000)}:R>`;
+  const embed = {
+    color: fim ? 0xF5C542 : 0xE74C3C,
+    title: `⚔️ DUELO · ${a.p.epoca} × ${b.p.epoca}`.slice(0, 256),
+    description: [`*${a.p.frase}* ✕ *${b.p.frase}*`, "━━━━━━━━━━━━", estadoDoLutador(a), "━━━━━━━━━━━━", estadoDoLutador(b),
+      "━━━━━━━━━━━━", `📜 Turno ${estado.jogadas + 1}`, historico, "", rodape, ...(estado.extra || [])].join("\n").slice(0, 4000),
+  };
+  const botoes = fim || vez.bot ? [] : [{ type: 1, components: vez.kit.map((hab, k) => ({
+    type: 2, custom_id: `duelo:hab:${estado.id}:${k}`, style: k === 3 ? 4 : k === 2 ? 1 : 2,
+    emoji: { name: hab.emoji }, label: `${hab.nome}${ESPACOS[hab.espaco].energia ? ` ${ESPACOS[hab.espaco].energia}🔷` : ""}`.slice(0, 80),
+    disabled: !podeUsar(vez, hab),
+  })) }];
+  return { embeds: [embed], components: botoes, allowedMentions: { parse: [] } };
+}
+
+/* A lista de personagens para escolher (todos liberados). */
+function escolhaDePersonagem(id, quem) {
+  return [{ type: 1, components: [{ type: 3, custom_id: `duelo:escolher:${id}`,
+    placeholder: `⚔️ ${quem}: escolha seu personagem`.slice(0, 150),
+    options: PERSONAGENS.map((p) => ({ label: `${p.nome} · ${p.titulo}`.slice(0, 100), value: p.id, emoji: { name: p.bandeira } })) }] }];
+}
+
+async function progressoDoDuelista(userId, personagemId) {
+  const r = await sb(`cyron_duelo_personagem?user_id=eq.${userId}&personagem=eq.${personagemId}&select=xp,kit,vitorias,derrotas`).catch(() => null);
+  return r?.[0] || { xp: 0, kit: {}, vitorias: 0, derrotas: 0 };
+}
+
+async function comandoDuelo(inter) {
+  const idioma = await linguaDe(inter);
+  const alvo = inter.options.getUser("oponente");
+  if (duelistaEm.has(inter.user.id)) {
+    const [t] = await nalingua(idioma, inter.guildId, "Você já está num duelo. Termine ele primeiro.");
+    return inter.reply({ flags: 64, content: `⚔️ ${t}` });
+  }
+  if (alvo && (alvo.id === inter.user.id)) {
+    const [t] = await nalingua(idioma, inter.guildId, "Você não pode duelar consigo mesmo. Sem oponente, o duelo é um treino contra a CYRON.");
+    return inter.reply({ flags: 64, content: `⚔️ ${t}` });
+  }
+  const contraHumano = alvo && !alvo.bot;
+  if (contraHumano && duelistaEm.has(alvo.id)) {
+    const [t] = await nalingua(idioma, inter.guildId, "Essa pessoa já está num duelo agora.");
+    return inter.reply({ flags: 64, content: `⚔️ ${t}` });
+  }
+  const id = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+  const estado = { id, guildId: inter.guildId, canalId: inter.channelId, msg: null, historico: [], jogadas: 0, vez: 0,
+    vencedor: null, treino: !contraHumano, escolhas: {},
+    pessoas: [{ userId: inter.user.id, nome: inter.member?.displayName || inter.user.username },
+      contraHumano ? { userId: alvo.id, nome: inter.options.getMember("oponente")?.displayName || alvo.username } : { bot: true }] };
+  duelos.set(id, estado);
+  duelistaEm.set(inter.user.id, id);
+  if (contraHumano) duelistaEm.set(alvo.id, id);
+  estado.expira = setTimeout(() => cancelarDuelo(id, "⌛"), DUELO_ESCOLHA);
+  const titulo = contraHumano ? `⚔️ <@${inter.user.id}> desafiou <@${alvo.id}> para um duelo!` : `⚔️ <@${inter.user.id}> vai treinar contra 🤖 CYRON`;
+  await inter.reply({ content: `${titulo}\n-# Cada um escolhe o seu personagem abaixo.`,
+    components: escolhaDePersonagem(id, contraHumano ? "Os dois" : (inter.member?.displayName || "Você")),
+    allowedMentions: { users: contraHumano ? [alvo.id] : [] } });
+  estado.msg = await inter.fetchReply().catch(() => null);
+}
+
+function cancelarDuelo(id, motivo = "") {
+  const estado = duelos.get(id);
+  if (!estado) return;
+  clearTimeout(estado.expira); clearTimeout(estado.relogio);
+  for (const p of estado.pessoas) if (p.userId && duelistaEm.get(p.userId) === id) duelistaEm.delete(p.userId);
+  duelos.delete(id);
+  if (motivo && estado.msg && estado.vencedor === null) estado.msg.edit({ content: `${motivo} Duelo cancelado.`, components: [], embeds: [] }).catch(() => {});
+}
+
+async function cliqueDuelo(inter) {
+  const [, acao, id, extra] = inter.customId.split(":");
+  const estado = duelos.get(id);
+  /* Clique de duelo tem pressa (3 s): a lingua so' e' buscada quando ha'
+     aviso para dar. */
+  const fala = async (t) => (await nalingua(await linguaDe(inter), inter.guildId, t))[0];
+  if (!estado) {
+    return inter.reply({ flags: 64, content: `⚔️ ${await fala("Esse duelo já acabou.")}` });
+  }
+  const indice = estado.pessoas.findIndex((p) => p.userId === inter.user.id);
+  if (indice < 0) {
+    return inter.reply({ flags: 64, content: `👀 ${await fala("Você está assistindo. Para duelar, use /duelo.")}` });
+  }
+
+  if (acao === "escolher") {
+    if (estado.lutadores) return inter.deferUpdate();
+    const personagem = personagemPorId(inter.values?.[0]);
+    if (!personagem) return inter.deferUpdate();
+    estado.escolhas[indice] = personagem.id;
+    await inter.reply({ flags: 64, content: `${personagem.bandeira} ${await fala("Personagem escolhido:")} **${personagem.nome}**` });
+    if (estado.pessoas[1].bot && estado.escolhas[1] === undefined) {
+      const outros = PERSONAGENS.filter((p) => p.id !== personagem.id);
+      estado.escolhas[1] = outros[Math.floor(Math.random() * outros.length)].id;
+    }
+    /* Os dois escolhem quase juntos: so' o primeiro clique monta o duelo. */
+    if (estado.escolhas[0] !== undefined && estado.escolhas[1] !== undefined && !estado.comecando) {
+      estado.comecando = true;
+      await comecarDuelo(estado);
+    }
+    return;
+  }
+
+  if (acao === "hab") {
+    if (!estado.lutadores || estado.vencedor !== null) return inter.deferUpdate();
+    if (estado.vez !== indice) {
+      return inter.reply({ flags: 64, content: `⏳ ${await fala("Ainda não é a sua vez.")}` });
+    }
+    /* Clique duplo: a segunda jogada chega com o duelo ja' ocupado. */
+    if (estado.ocupado) return inter.deferUpdate();
+    const l = estado.lutadores[indice];
+    const hab = l.kit[Number(extra)];
+    if (!hab || !podeUsar(l, hab)) return inter.deferUpdate();
+    estado.ocupado = true;
+    l.ausencias = 0;
+    await inter.deferUpdate();
+    await jogar(estado, indice, hab);
+  }
+}
+
+async function comecarDuelo(estado) {
+  clearTimeout(estado.expira);
+  const lutadores = [];
+  for (let i = 0; i < 2; i++) {
+    const pessoa = estado.pessoas[i];
+    const personagem = personagemPorId(estado.escolhas[i]);
+    if (pessoa.bot) { lutadores.push(novoLutador({ userId: null, nome: "CYRON", personagem, nivel: 1, bot: true })); continue; }
+    const prog = await progressoDoDuelista(pessoa.userId, personagem.id);
+    const nivel = nivelDoPersonagem(prog.xp);
+    lutadores.push(novoLutador({ userId: pessoa.userId, nome: pessoa.nome, personagem, nivel, kit: kitEquipado(personagem, nivel, prog.kit) }));
+    lutadores[i].xpAntes = Number(prog.xp) || 0;
+    lutadores[i].vitorias = Number(prog.vitorias) || 0;
+    lutadores[i].derrotas = Number(prog.derrotas) || 0;
+  }
+  estado.lutadores = lutadores;
+  const primeiro = Math.random() < 0.5 ? 0 : 1;
+  estado.vez = 1 - primeiro;
+  estado.historico.push(`🎲 Sorteio: ${lutadores[primeiro].p.nome} começa!`);
+  estado.historico.push(...passarVez(estado));
+  await mostrarDuelo(estado);
+}
+
+async function mostrarDuelo(estado) {
+  clearTimeout(estado.relogio);
+  if (estado.vencedor !== null) return terminarDuelo(estado);
+  estado.limite = Date.now() + DUELO_TEMPO;
+  await estado.msg?.edit({ content: "", ...telaDoDuelo(estado) }).catch((e) => console.error("duelo: nao editei:", e?.message || e));
+  estado.ocupado = false;
+  const vez = estado.lutadores[estado.vez];
+  if (vez.bot) {
+    estado.relogio = setTimeout(() => jogar(estado, estado.vez, jogadaDoBot(vez, Math.random, estado.lutadores[1 - estado.vez])).catch(() => {}), 1800);
+  } else {
+    /* Tempo acabou: sai a basica. Tres vezes seguidas: W.O. */
+    estado.relogio = setTimeout(() => {
+      vez.ausencias++;
+      if (vez.ausencias >= DUELO_AUSENCIAS) {
+        estado.vencedor = 1 - estado.vez;
+        estado.motivo = "W.O.";
+        return terminarDuelo(estado).catch(() => {});
+      }
+      estado.ocupado = true;
+      jogar(estado, estado.vez, vez.kit[0]).catch(() => {});
+    }, DUELO_TEMPO);
+  }
+}
+
+async function jogar(estado, i, hab) {
+  if (!duelos.has(estado.id) || estado.vencedor !== null) return;
+  estado.historico.push(...usarHabilidade(estado, i, hab));
+  estado.jogadas++;
+  estado.historico.push(...passarVez(estado));
+  await mostrarDuelo(estado);
+}
+
+/* O XP de quem duelou. Treino vale menos; os dois tem teto por dia, e quem
+   perde por W.O. nao ganha nada -- senao duas contas abandonando duelo uma
+   para a outra viravam fabrica de XP. Puro. */
+function xpDoDuelo(venceu, treino, feitosHoje = 0, wo = false) {
+  if (feitosHoje >= (treino ? DUELO_TREINOS_DIA : DUELO_DUELOS_DIA)) return 0;
+  if (!venceu && wo) return 0;
+  if (treino) return venceu ? DUELO_XP.treinoVitoria : DUELO_XP.treinoDerrota;
+  return venceu ? DUELO_XP.vitoria : DUELO_XP.derrota;
+}
+
+async function terminarDuelo(estado) {
+  clearTimeout(estado.relogio);
+  if (estado.encerrado) return;
+  estado.encerrado = true;
+  const dia = new Date().toISOString().slice(0, 10);
+  for (const chave of treinosHoje.keys()) if (!chave.endsWith(dia)) treinosHoje.delete(chave);
+  const extra = [];
+  for (let i = 0; i < 2; i++) {
+    const l = estado.lutadores[i];
+    if (l.bot) continue;
+    const venceu = estado.vencedor === i;
+    const chaveDia = `${l.userId}:${estado.treino ? "treino" : "duelo"}:${dia}`;
+    const feitos = treinosHoje.get(chaveDia) || 0;
+    const ganho = xpDoDuelo(venceu, estado.treino, feitos, estado.motivo === "W.O.");
+    treinosHoje.set(chaveDia, feitos + 1);
+    const xpNovo = l.xpAntes + ganho;
+    const nivelNovo = nivelDoPersonagem(xpNovo);
+    /* Sem o kit: quem mexeu no /equipar durante o duelo nao perde a escolha. */
+    await sbPost("cyron_duelo_personagem", { user_id: l.userId, personagem: l.p.id, xp: xpNovo,
+      vitorias: l.vitorias + (venceu ? 1 : 0), derrotas: l.derrotas + (venceu ? 0 : 1), atualizado_em: new Date().toISOString() },
+    "resolution=merge-duplicates").catch((e) => console.error("duelo: nao gravei o XP:", e?.message || e));
+    extra.push(`✨ <@${l.userId}> · ${l.p.nome} +${ganho} XP${ganho === 0 && estado.motivo !== "W.O." ? " (limite de hoje)" : ""}`);
+    if (nivelNovo > l.nivel) {
+      extra.push(`⬆️ **${l.p.nome} chegou ao nível ${nivelNovo}!**`);
+      extra.push(`📜 *Códex ${nivelNovo}/10:* ${l.p.fatos[nivelNovo - 1]}`);
+      for (const espaco of ESPACOS_ORDEM) {
+        if (ESPACOS[espaco].nivelAlternativa === nivelNovo) {
+          const hab = l.p.kit[espaco][1];
+          extra.push(`🔓 Nova habilidade: ${hab.emoji} **${hab.nome}**. Equipe com /equipar`);
+        }
+      }
+    }
+  }
+  if (!extra.some((t) => t.startsWith("📜"))) {
+    /* Na primeira vez com um personagem, a pagina 1 do Codex. */
+    const novato = estado.lutadores.find((l) => !l.bot && l.xpAntes === 0);
+    if (novato) extra.push(`📜 *Códex 1/10 · ${novato.p.nome}:* ${novato.p.fatos[0]}`);
+  }
+  estado.extra = ["", ...extra];
+  await estado.msg?.edit({ content: "", ...telaDoDuelo(estado), allowedMentions: { parse: [] } }).catch(() => {});
+  cancelarDuelo(estado.id);
+}
+
+/* /equipar: as quatro listas do kit, com a alternativa so' quando liberada. */
+async function comandoEquipar(inter) {
+  await inter.deferReply({ flags: 64 });
+  const personagem = personagemPorId(inter.options.getString("personagem"));
+  if (!personagem) return inter.editReply({ content: "—" });
+  const prog = await progressoDoDuelista(inter.user.id, personagem.id);
+  return inter.editReply(telaDeEquipar(personagem, nivelDoPersonagem(prog.xp), prog.kit || {}, prog.xp));
+}
+
+function telaDeEquipar(personagem, nivel, kit, xp = 0) {
+  const nomes = { basica: "Básica", defesa: "Defesa", especial: "Especial", suprema: "Suprema" };
+  const linhas = ESPACOS_ORDEM.map((espaco) => {
+    const [a, b] = personagem.kit[espaco];
+    const libera = ESPACOS[espaco].nivelAlternativa;
+    return {
+      type: 1, components: [{ type: 3, custom_id: `equipar:${personagem.id}:${espaco}`,
+        placeholder: nomes[espaco],
+        options: [
+          { label: `${nomes[espaco]}: ${a.nome}`.slice(0, 100), value: "0", emoji: { name: a.emoji }, default: Number(kit?.[espaco]) !== 1 || nivel < libera },
+          { label: `${nomes[espaco]}: ${b.nome}${nivel < libera ? ` 🔒 Nv ${libera}` : ""}`.slice(0, 100), value: "1", emoji: { name: b.emoji },
+            default: Number(kit?.[espaco]) === 1 && nivel >= libera },
+        ] }],
+    };
+  });
+  const proximo = NIVEIS_DO_PERSONAGEM[nivel] ?? null;
+  const progresso = proximo === null ? " · MAX" : " · " + xp + " / " + proximo + " XP";
+  return {
+    content: `${personagem.bandeira} **${personagem.nome}** · Nv ${nivel}${progresso}`,
+    components: linhas,
+  };
+}
+
+async function cliqueEquipar(inter) {
+  const [, personagemId, espaco] = inter.customId.split(":");
+  const personagem = personagemPorId(personagemId);
+  if (!personagem || !ESPACOS[espaco]) return inter.deferUpdate();
+  const prog = await progressoDoDuelista(inter.user.id, personagem.id);
+  const nivel = nivelDoPersonagem(prog.xp);
+  const quer = inter.values?.[0] === "1" ? 1 : 0;
+  if (quer === 1 && nivel < ESPACOS[espaco].nivelAlternativa) {
+    const idioma = await linguaDe(inter);
+    const [t] = await nalingua(idioma, inter.guildId, `Essa habilidade libera no nível ${ESPACOS[espaco].nivelAlternativa}.`);
+    return inter.reply({ flags: 64, content: `🔒 ${t}` });
+  }
+  const kit = { ...(prog.kit || {}), [espaco]: quer };
+  /* So' o kit: o XP e' de quem termina o duelo, e um nao apaga o outro. */
+  await sbPost("cyron_duelo_personagem", { user_id: inter.user.id, personagem: personagem.id, kit,
+    atualizado_em: new Date().toISOString() }, "resolution=merge-duplicates").catch(() => {});
+  return inter.update(telaDeEquipar(personagem, nivel, kit, prog.xp));
+}
+
+/* /codex: o album -- quantas paginas de cada personagem; com um personagem,
+   as paginas liberadas. */
+async function comandoCodex(inter) {
+  await inter.deferReply({ flags: 64 });
+  const escolhido = personagemPorId(inter.options.getString("personagem"));
+  const todos = await sb(`cyron_duelo_personagem?user_id=eq.${inter.user.id}&select=personagem,xp,vitorias,derrotas`).catch(() => []) || [];
+  const xpDe = (id) => Number(todos.find((r) => r.personagem === id)?.xp) || 0;
+  if (escolhido) {
+    const nivel = xpDe(escolhido.id) > 0 ? nivelDoPersonagem(xpDe(escolhido.id)) : 0;
+    const paginas = escolhido.fatos.map((f, i) => (i < nivel ? `**${i + 1}.** ${f}` : `**${i + 1}.** 🔒`)).join("\n");
+    return inter.editReply({ embeds: [{ color: 0xF5C542, title: `📜 ${escolhido.bandeira} ${escolhido.nome} · ${nivel}/10`.slice(0, 256),
+      description: paginas.slice(0, 4000) }] });
+  }
+  const linhas = PERSONAGENS.map((p) => {
+    const nivel = xpDe(p.id) > 0 ? nivelDoPersonagem(xpDe(p.id)) : 0;
+    return `${p.bandeira} ${p.nome} · 📜 ${nivel}/10${nivel === 10 ? " 👑" : ""}`;
+  });
+  return inter.editReply({ embeds: [{ color: 0xF5C542, title: "📜 Códex", description: linhas.join("\n") }] });
+}
+
 /* A terceira camada: quem escreveu antes de tocar em qualquer botão.
 
    E aqui a oferta vai NA LÍNGUA DELA, que é o ponto inteiro. Um convite em
@@ -17990,6 +18498,10 @@ async function comandoDeInteracao(inter) {
   if (nome === "admin") return comandoAdmin(inter);
   if (nome === "arena") return inter.reply({ flags: 64, content: ARENA_ENCERRADA });
   if (nome === "hora") return comandoHora(inter);
+  if (nome === "duelo" || nome === "equipar" || nome === "codex") {
+    if (!inter.guildId && nome === "duelo") return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
+    return nome === "duelo" ? comandoDuelo(inter) : nome === "equipar" ? comandoEquipar(inter) : comandoCodex(inter);
+  }
   if (nome === "sorteio" || INTERACOES[nome]) {
     if (!inter.guildId) return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
     return nome === "sorteio" ? comandoSorteio(inter) : comandoInteracao(inter, nome);
@@ -18133,6 +18645,12 @@ client.on("interactionCreate", async (inter) => {
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("evento:")) {
       return await cliqueEvento(inter);
+    }
+    if (inter.isMessageComponent() && inter.customId.startsWith("duelo:")) {
+      return await cliqueDuelo(inter);
+    }
+    if (inter.isMessageComponent() && inter.customId.startsWith("equipar:")) {
+      return await cliqueEquipar(inter);
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("sorteio:")) {
       return await cliqueSorteio(inter);
@@ -18717,7 +19235,7 @@ client.on("messageReactionAdd", async (reacao, quem) => {
    separarComandos leria /admin como comando do jogo e o empurraria pros
    servidores com alianca -- exatamente o contrario do que ele e'. */
 const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento", "hora", "boas-vindas", "perfil", "top", "niveis", "xp",
-  "sorteio", "abraco", "beijo", "tapa", "cafune"]);
+  "sorteio", "abraco", "beijo", "tapa", "cafune", "duelo", "equipar", "codex"]);
 
 async function separarComandos() {
   try {
@@ -19153,6 +19671,7 @@ const NOMES_MEUS = new Set([
   "cyron", "help", "admin", "mylanguage", "arena", "evento", "settings", "portal", "player", "events", "ranking",
   "hora", "time", "boas-vindas", "welcome-card", "perfil", "profile", "top", "niveis", "levels", "xp",
   "sorteio", "giveaway", "abraco", "hug", "beijo", "kiss", "tapa", "slap", "cafune", "pat",
+  "duelo", "duel", "equipar", "equip", "codex",
 ]);
 
 /* Uma linha do formulario que carrega duas respostas: "todos 60".
@@ -19840,6 +20359,30 @@ const GLOBAIS_DO_CYRON = [
         description: "O que mais precisa ser dito",
         descriptionLocalizations: TRADUCOES_DO_EVENTO.detalhes },
     ],
+  },
+  {
+    name: "duelo",
+    nameLocalizations: { "en-US": "duel", "en-GB": "duel", "es-ES": "duelo" },
+    description: "Duelo de personagens da história / History duel",
+    descriptionLocalizations: { "en-US": "Duel with characters from history", "en-GB": "Duel with characters from history",
+      "es-ES": "Duelo de personajes de la historia", "pt-BR": "Duelo de personagens da história" },
+    dmPermission: false,
+    options: [{ type: 6, name: "oponente", required: false, description: "Contra quem (vazio: treino contra a CYRON) / Opponent (empty: training)" }],
+  },
+  {
+    name: "equipar",
+    nameLocalizations: { "en-US": "equip", "en-GB": "equip", "es-ES": "equipar" },
+    description: "Escolher as habilidades do personagem / Pick your character's skills",
+    dmPermission: true,
+    options: [{ type: 3, name: "personagem", required: true, description: "Qual personagem / Which character",
+      choices: PERSONAGENS.map((p) => ({ name: `${p.bandeira} ${p.nome}`.slice(0, 100), value: p.id })) }],
+  },
+  {
+    name: "codex",
+    description: "Seu álbum de curiosidades do Duelo / Your Duel codex",
+    dmPermission: true,
+    options: [{ type: 3, name: "personagem", required: false, description: "Ver as páginas de um personagem / See a character's pages",
+      choices: PERSONAGENS.map((p) => ({ name: `${p.bandeira} ${p.nome}`.slice(0, 100), value: p.id })) }],
   },
   {
     /* De quem administra: sorteio e' do servidor, nao de qualquer um. */

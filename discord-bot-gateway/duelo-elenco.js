@@ -31,22 +31,28 @@ export const ESPACOS = {
 export const MOLDES = {
   basica: [[10, null], [7, "energia"], [7, "perfurar"], [7, "drenar"]],
   defesa: [[0, "escudo"], [0, "esquiva"], [0, "cura"], [0, "preparar"]],
-  especial: [[28, null], [18, "queimar"], [18, "atordoar"], [18, "confundir"], [18, "perfurar"], [18, "drenar"], [18, "preparar"]],
+  especial: [[26, null], [18, "queimar"], [18, "atordoar"], [18, "confundir"], [18, "perfurar"], [18, "drenar"], [18, "preparar"]],
   suprema: [[50, null], [38, "atordoar"], [38, "perfurar"], [38, "drenar"], [38, "cura"], [38, "queimar"]],
 };
 
-/* O que cada efeito faz, em números. */
+/* O que cada efeito faz, em números.
+ *
+ * Os números saíram de 12 mil duelos simulados (bot contra bot): com eles,
+ * todo personagem vence entre ~44% e ~58%, e um duelo dura umas 20 jogadas.
+ * Na primeira versão (queimar 8, preparar +50%, especial pura 28) os de
+ * "preparar" venciam 30% e os de golpe puro 65%. Mexeu num número aqui?
+ * Rode a simulação de novo antes de mandar. */
 export const EFEITOS = {
-  escudo: { valor: 20, texto: "escudo de 20" },
+  escudo: { valor: 25, texto: "escudo de 25 até a próxima vez" },
   esquiva: { texto: "esquiva o próximo golpe" },
   cura: { valor: 15, texto: "cura 15" },
   energia: { valor: 10, texto: "+10 de energia" },
   atordoar: { texto: "o outro perde a vez" },
-  queimar: { valor: 8, turnos: 2, texto: "queima 8 por 2 turnos" },
-  perfurar: { texto: "ignora o escudo" },
+  queimar: { valor: 5, turnos: 2, texto: "queima 5 por 2 turnos" },
+  perfurar: { texto: "atravessa escudo e esquiva; sem defesa, +30% de dano" },
   drenar: { texto: "cura metade do dano causado" },
-  preparar: { texto: "o próximo golpe causa +50%" },
-  confundir: { texto: "o próximo golpe do outro tem 50% de chance de errar" },
+  preparar: { multiplicador: 2, texto: "o próximo golpe causa o dobro" },
+  confundir: { chance: 0.6, texto: "o próximo golpe do outro tem 60% de chance de errar" },
 };
 
 /* Níveis do personagem: XP total para chegar em cada um (1 a 10). */
@@ -61,7 +67,7 @@ export const PERSONAGENS = [
     kit: {
       basica: [h("🗡️", "Golpe de Xiphos", 10), h("🏹", "Dardo Macedônio", 7, "perfurar")],
       defesa: [h("🛡️", "Falange Macedônica", 0, "escudo"), h("📐", "Lição de Aristóteles", 0, "preparar")],
-      especial: [h("🐎", "Carga de Bucéfalo", 18, "preparar"), h("⚔️", "Martelo e Bigorna", 28)],
+      especial: [h("🐎", "Carga de Bucéfalo", 18, "preparar"), h("⚔️", "Martelo e Bigorna", 26)],
       suprema: [h("✂️", "Corte do Nó Górdio", 38, "perfurar"), h("🌅", "Glória de Gaugamela", 38, "atordoar")],
     },
     fatos: [
@@ -127,7 +133,7 @@ export const PERSONAGENS = [
     kit: {
       basica: [h("🗡️", "Corte Duplo", 10), h("⚡", "Corte Rápido", 7, "energia")],
       defesa: [h("🌊", "Passo da Água", 0, "esquiva"), h("🗻", "Postura Imóvel", 0, "escudo")],
-      especial: [h("🪵", "Espada de Remo", 28), h("⏳", "Atraso Proposital", 18, "confundir")],
+      especial: [h("🪵", "Espada de Remo", 26), h("⏳", "Atraso Proposital", 18, "confundir")],
       suprema: [h("💍", "O Livro dos Cinco Anéis", 50), h("🏝️", "Duelo em Ganryū", 38, "perfurar")],
     },
     fatos: [
@@ -149,7 +155,7 @@ export const PERSONAGENS = [
     kit: {
       basica: [h("⚔️", "Golpe de Espada", 10), h("🏹", "Flecha no Ombro", 7, "drenar")],
       defesa: [h("🚩", "Estandarte de Orléans", 0, "escudo"), h("🕯️", "Coragem Inabalável", 0, "cura")],
-      especial: [h("🔥", "Rompendo o Cerco", 18, "preparar"), h("🏰", "Assalto às Muralhas", 28)],
+      especial: [h("🔥", "Rompendo o Cerco", 18, "preparar"), h("🏰", "Assalto às Muralhas", 26)],
       suprema: [h("🏰", "A Libertação de Orléans", 38, "cura"), h("👑", "Coroação em Reims", 38, "atordoar")],
     },
     fatos: [
@@ -215,7 +221,7 @@ export const PERSONAGENS = [
     kit: {
       basica: [h("⚔️", "Falcata Ibérica", 10), h("🪨", "Funda Balear", 7, "perfurar")],
       defesa: [h("🏔️", "Travessia dos Alpes", 0, "esquiva"), h("🛤️", "Acharemos um Caminho", 0, "preparar")],
-      especial: [h("🐘", "Carga dos Elefantes", 28), h("🔥", "Bois com Tochas", 18, "confundir")],
+      especial: [h("🐘", "Carga dos Elefantes", 26), h("🔥", "Bois com Tochas", 18, "confundir")],
       suprema: [h("🦀", "A Pinça de Canas", 38, "atordoar"), h("🐘", "Os Elefantes de Cartago", 50)],
     },
     fatos: [
@@ -281,7 +287,7 @@ export const PERSONAGENS = [
     kit: {
       basica: [h("🪓", "Machado Viking", 10), h("🗡️", "Saque Rápido", 7, "drenar")],
       defesa: [h("🛶", "Escudo de Drakkar", 0, "escudo"), h("🐍", "Calças Peludas", 0, "esquiva")],
-      especial: [h("🐻", "Fúria Berserker", 18, "preparar"), h("🌊", "Ataque pelo Rio", 28)],
+      especial: [h("🐻", "Fúria Berserker", 18, "preparar"), h("🌊", "Ataque pelo Rio", 26)],
       suprema: [h("⚡", "Saga de Ragnar", 38, "drenar"), h("🏰", "O Cerco de Paris", 38, "queimar")],
     },
     fatos: [
