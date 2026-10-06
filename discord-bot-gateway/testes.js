@@ -8394,7 +8394,10 @@ function conferirCartao(onde, embed, componentes = []) {
     /const canalId = servidor\?\.boas_vindas_canal;\s*if \(!canalId/.test(f));
   verdade("o /boas-vindas é de todos (não vai para os servidores do jogo)", /COMANDOS_DE_TODOS = new Set\([^)]*"boas-vindas"/.test(f));
   verdade("e só quem administra vê o comando",
-    /name: "boas-vindas",[^]{0,400}defaultMemberPermissions: PermissionFlagsBits\.ManageGuild/.test(f));
+    /name: "boas-vindas",[^]{0,800}defaultMemberPermissions: PermissionFlagsBits\.ManageGuild/.test(f));
+  verdade("o nome em inglês não é \"welcome\" (nome comum de comando do dono)",
+    /name: "boas-vindas",\s*(?:\/\*[^]*?\*\/\s*)?nameLocalizations: \{ "en-US": "welcome-card"/.test(f));
+  verdade("e o dono não pode criar comando com os nomes novos", /const NOMES_MEUS = new Set\(\[[^\]]*"boas-vindas", "welcome-card"/.test(f));
   verdade("quem entra é marcado, e só ele", /allowedMentions: \{ users: \[member\.id\] \}/.test(f));
 }
 
