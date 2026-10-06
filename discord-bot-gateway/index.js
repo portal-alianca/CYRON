@@ -9916,11 +9916,51 @@ function contaComoMensagem(msg) {
   return (String(msg.content || "").match(/[\p{L}\p{N}]/gu) || []).length >= 3;
 }
 
+/* XP em dobro: para quem da' boost no servidor, ou para um cargo escolhido
+   no /niveis. Nao soma (boost + cargo continua 2x): dobro e' dobro. */
+function multiplicadorDeXp(membro, servidor) {
+  if (!membro) return 1;
+  if (servidor?.niveis_dobro_boost && membro.premiumSince) return 2;
+  const cargo = String(servidor?.niveis_dobro_cargo || "");
+  if (cargo && membro.roles?.cache?.has?.(cargo)) return 2;
+  return 1;
+}
+
+/* Que cargos dar e quais tirar ao chegar num nivel. Acumulando, sao todos os
+   ate' o nivel que faltam; trocando, so' o do maior nivel alcancado -- e os
+   dos niveis de baixo saem. Puro, para o teste. */
+function cargosDoNivel(cargos, nivel, jaTem = new Set(), trocar = false) {
+  const validos = Object.entries(cargos)
+    .filter(([n, id]) => Number(n) <= nivel && /^\d{5,25}$/.test(String(id)))
+    .sort((a, b) => Number(a[0]) - Number(b[0]));
+  if (!trocar) return { dar: validos.map(([, id]) => String(id)).filter((id) => !jaTem.has(id)), tirar: [] };
+  const topo = validos.length ? String(validos[validos.length - 1][1]) : null;
+  const deNivel = new Set(Object.values(cargos).map(String));
+  return {
+    dar: topo && !jaTem.has(topo) ? [topo] : [],
+    tirar: [...jaTem].filter((id) => deNivel.has(id) && id !== topo),
+  };
+}
+
+/* O anuncio de nivel: o texto do administrador (o ✏️ do /niveis), ou o
+   padrao, que e' so' simbolo e serve em qualquer lingua. */
+const NV_TEXTO_PADRAO = "🎉 {usuario} → **Lv. {nivel}** {cargos}";
+const NV_TEXTO_MAX = 500;
+function textoDeNivel(modelo, { id, nome, nivel, cargos = [] }) {
+  const limpo = (t) => String(t || "").replace(/([*_`~|>\\])/g, "\\$1");
+  return String(modelo || NV_TEXTO_PADRAO).slice(0, NV_TEXTO_MAX)
+    .replace(/\{(usuario|usuário|user|mention)\}/gi, () => `<@${id}>`)
+    .replace(/\{(nome|name)\}/gi, () => limpo(nome))
+    .replace(/\{(nivel|nível|level)\}/gi, () => String(nivel))
+    .replace(/\{(cargos?|roles?)\}/gi, () => cargos.map((c) => `<@&${c}>`).join(" "))
+    .replace(/[ \t]+$/gm, "").trim().slice(0, 2000);
+}
+
 async function ganharXp(msg, servidor, agora = Date.now()) {
   if (!servidor?.niveis_ligado || msg.author?.bot) return;
   if (salasSemXp(servidor).has(String(msg.channel?.id)) || salasSemXp(servidor).has(String(msg.channel?.parentId))) return;
   if (!contaComoMensagem(msg)) return;
-  const ganho = XP_MIN + Math.floor(Math.random() * (XP_MAX - XP_MIN + 1));
+  const ganho = (XP_MIN + Math.floor(Math.random() * (XP_MAX - XP_MIN + 1))) * multiplicadorDeXp(msg.member, servidor);
   await somarXp(msg.guild, msg.author.id, ganho, servidor, msg.channel, agora, { espera: XP_ESPERA, mensagem: true });
 }
 
@@ -9959,19 +9999,24 @@ async function subiuDeNivel(guild, userId, servidor, nivel, canalPadrao) {
   const membro = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
   /* Os cargos primeiro: o anuncio pode falhar (canal sem permissao) e o
      cargo ainda assim tem que chegar. */
-  const faltam = membro ? cargosQueFaltam(cargosDosNiveis(servidor), nivel, new Set(membro.roles.cache.keys())) : [];
+  const { dar, tirar } = membro
+    ? cargosDoNivel(cargosDosNiveis(servidor), nivel, new Set(membro.roles.cache.keys()), !!servidor.niveis_trocar)
+    : { dar: [], tirar: [] };
   const ganhos = [];
-  for (const id of faltam) {
+  for (const id of dar) {
     const cargo = guild.roles.cache.get(id);
     if (!cargo?.editable) continue;   // cargo acima do meu: nao tenho como dar
     if (await membro.roles.add(cargo, `CYRON: nivel ${nivel}`).then(() => true).catch(() => false)) ganhos.push(id);
   }
+  for (const id of tirar) {
+    const cargo = guild.roles.cache.get(id);
+    if (cargo?.editable) await membro.roles.remove(cargo, `CYRON: trocou pelo cargo do nivel ${nivel}`).catch(() => {});
+  }
   const canal = (servidor.niveis_canal && guild.channels.cache.get(String(servidor.niveis_canal))) || canalPadrao;
   if (!canal?.send) return;
-  /* Sem palavra nenhuma: "Lv." e o emoji servem em toda lingua, e nao gastam
-     tradutor a cada nivel de cada pessoa. */
+  /* So' quem subiu e' marcado, escreva o administrador o que escrever. */
   await canal.send({
-    content: `🎉 <@${userId}> → **Lv. ${nivel}**${ganhos.length ? ` · ${ganhos.map((id) => `<@&${id}>`).join(" ")}` : ""}`,
+    content: textoDeNivel(servidor.niveis_texto, { id: userId, nome: membro?.displayName, nivel, cargos: ganhos }),
     allowedMentions: { users: [userId] },
   });
 }
@@ -10004,9 +10049,22 @@ async function rodarXpDeVoz(agora = Date.now()) {
     for (const [sala, id] of quem) {
       const canal = guild.channels.cache.get(sala);
       if (semXp.has(String(sala)) || semXp.has(String(canal?.parentId))) continue;
-      await somarXp(guild, id, XP_VOZ_POR_MINUTO, servidor, canal, agora).catch(() => {});
+      await somarXp(guild, id, XP_VOZ_POR_MINUTO * multiplicadorDeXp(guild.members.cache.get(id), servidor),
+        servidor, canal, agora).catch(() => {});
     }
   }
+}
+
+/* A semana do ranking semanal, no mesmo formato que o banco grava
+   (to_char 'IYYY-"W"IW', em UTC): "2026-W41". Segunda a domingo. */
+function semanaDoXp(agora = Date.now()) {
+  const d = new Date(agora);
+  const dia = (d.getUTCDay() + 6) % 7;                    // segunda = 0
+  const quinta = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - dia + 3));
+  const ano = quinta.getUTCFullYear();
+  const primeira = new Date(Date.UTC(ano, 0, 4));
+  const semana = 1 + Math.round(((quinta - primeira) / 864e5 - 3 + ((primeira.getUTCDay() + 6) % 7)) / 7);
+  return `${ano}-W${String(semana).padStart(2, "0")}`;
 }
 
 /* A cada minuto: tudo o que somou desce numa chamada so'. */
@@ -10147,6 +10205,72 @@ function linhasDaGuerra(bandeiras) {
     .map((b, i) => `${i === 0 ? "👑 " : ""}${nomeNaPropriaLingua(b.idioma)} · **${Number(b.xp).toLocaleString("en-US")} XP** · 👥 ${b.pessoas}`);
 }
 
+/* O podio do /top: os tres primeiros com foto, no fundo do servidor. */
+const POD_LARGURA = 1024;
+const POD_ALTURA = 400;
+async function desenharPodio(sharp, { lugares, fundo }, fontfile = FONTE_DA_IMAGEM) {
+  const fonte = await fonteDoDesenho(fontfile);
+  const W = POD_LARGURA, H = POD_ALTURA;
+  /* Ordem do podio de verdade: o 2o a esquerda, o 1o no meio e mais alto. */
+  const posicoes = [{ cx: 512, cy: 140, r: 92, cor: "#F5C542" }, { cx: 230, cy: 175, r: 72, cor: "#C9D6E3" }, { cx: 794, cy: 175, r: 72, cor: "#D9925B" }];
+  const centro = (t, cx, y, tam, cor, maxL) => {
+    let s2 = tam;
+    while (s2 > 10 && fonte.getAdvanceWidth(t, s2) > maxL) s2 -= 2;
+    return `<path d="${fonte.getPath(t, cx - fonte.getAdvanceWidth(t, s2) / 2, y, s2).toPathData(2)}" fill="${cor}" filter="url(#s)"/>`;
+  };
+  const base = await sharp(fundo || FUNDO_DA_CYRON).resize(W, H, { fit: "cover" }).blur(6).toBuffer();
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
+    `<linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.35"/>` +
+    `<stop offset="1" stop-color="#000" stop-opacity="0.75"/></linearGradient>` +
+    `<filter id="g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10"/></filter>` +
+    `<filter id="s"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000" flood-opacity="0.6"/></filter></defs>` +
+    `<rect width="${W}" height="${H}" fill="url(#v)"/>`;
+  const camadas = [];
+  for (let i = 0; i < lugares.length && i < 3; i++) {
+    const { cx, cy, r, cor } = posicoes[i];
+    const l = lugares[i];
+    svg += `<circle cx="${cx}" cy="${cy}" r="${r + 10}" fill="${cor}" opacity="0.8" filter="url(#g)"/>` +
+      `<circle cx="${cx}" cy="${cy}" r="${r + 6}" fill="${cor}"/>` +
+      (l.foto ? "" : `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#404249"/>`) +
+      centro(l.nome, cx, cy + r + 52, i === 0 ? 34 : 28, "#FFFFFF", 280) +
+      centro(l.legenda, cx, cy + r + 86, 22, "#C9D6E3", 280);
+    if (l.foto) camadas.push({ input: await sharp(l.foto).resize(r * 2, r * 2).toBuffer(), left: cx - r, top: cy - r });
+  }
+  svg += `</svg>`;
+  /* A medalha com o numero vai numa camada POR CIMA das fotos -- desenhada
+     junto do fundo, a foto a cobria. */
+  let medalhas = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">` +
+    `<defs><filter id="s"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.6"/></filter></defs>`;
+  for (let i = 0; i < lugares.length && i < 3; i++) {
+    const { cx, cy, r, cor } = posicoes[i];
+    medalhas += `<circle cx="${cx + r * 0.72}" cy="${cy - r * 0.72}" r="22" fill="${cor}" stroke="#1E1F22" stroke-width="3" filter="url(#s)"/>` +
+      centro(String(i + 1), cx + r * 0.72, cy - r * 0.72 + 10, 28, "#1E1F22", 40).replace(' filter="url(#s)"', "");
+  }
+  medalhas += `</svg>`;
+  return await sharp(base).composite([{ input: Buffer.from(svg) }, ...camadas, { input: Buffer.from(medalhas) }])
+    .jpeg({ quality: 88 }).toBuffer();
+}
+
+async function imagemDoPodio(guild, top3, pontos, semana) {
+  if (!top3.length) return null;
+  const sharp = await carregarSharp();
+  if (!sharp || process.memoryUsage().rss > MEMORIA_PARA_DESENHAR) return null;
+  return await naFilaDeDesenho(async () => {
+    const fonte = await fonteDoDesenho(FONTE_DA_IMAGEM);
+    const lugares = [];
+    for (const l of top3) {
+      const m = guild.members.cache.get(l.user_id) || await guild.members.fetch(l.user_id).catch(() => null);
+      const nome = [soLetrasDaFonte(fonte, m?.displayName), soLetrasDaFonte(fonte, m?.user?.username)].find(temLetra) || "?";
+      const r = lugares.length === 0 ? 92 : 72;
+      const foto = m ? await fotoRedonda(sharp, m.displayAvatarURL({ extension: "png", size: 256 })) : null;
+      lugares.push({ nome, foto: foto ? await sharp(foto).resize(r * 2, r * 2).toBuffer() : null,
+        legenda: `${semana ? "" : `LV. ${nivelDoXp(l.xp).nivel} · `}${pontos(l).toLocaleString("en-US")} XP` });
+    }
+    const fundo = await fundoDe(guild);
+    return await desenharPodio(sharp, { lugares, fundo }).catch(() => desenharPodio(sharp, { lugares, fundo: null }));
+  });
+}
+
 async function comandoTop(inter) {
   await inter.deferReply();
   const idioma = await linguaDe(inter);
@@ -10156,14 +10280,24 @@ async function comandoTop(inter) {
     return inter.editReply({ content: `🏆 ${t}` });
   }
   await descarregarXp().catch(() => {});
-  const top = await sb(`cyron_xp?guild_id=eq.${inter.guildId}&select=user_id,xp&order=xp.desc&limit=10`).catch(() => []) || [];
+  const semana = inter.options.getString("periodo") === "semana";
+  /* Na semana o nivel nao aparece: ele e' de sempre, e "Lv. 30 · 120 XP"
+     leria como erro. */
+  const top = (semana
+    ? await sb(`cyron_xp?guild_id=eq.${inter.guildId}&semana=eq.${semanaDoXp()}&select=user_id,xp,xp_semana&order=xp_semana.desc&limit=10`).catch(() => [])
+    : await sb(`cyron_xp?guild_id=eq.${inter.guildId}&select=user_id,xp&order=xp.desc&limit=10`).catch(() => [])) || [];
+  const pontos = (l) => Number(semana ? l.xp_semana : l.xp) || 0;
   const medalha = ["🥇", "🥈", "🥉"];
-  const linhas = top.map((l, i) => `${medalha[i] || `**${i + 1}.**`} <@${l.user_id}> · Lv. ${nivelDoXp(l.xp).nivel} · ${Number(l.xp).toLocaleString("en-US")} XP`);
-  const bandeiras = await rpc("cyron_xp_por_idioma", { p_guild: inter.guildId }).catch(() => null) || [];
-  const guerra = linhasDaGuerra(bandeiras);
-  return inter.editReply({ embeds: [{ color: COR, title: `🏆 ${inter.guild.name}`.slice(0, 256),
+  const linhas = top.filter((l) => pontos(l) > 0).map((l, i) => `${medalha[i] || `**${i + 1}.**`} <@${l.user_id}>` +
+    (semana ? "" : ` · Lv. ${nivelDoXp(l.xp).nivel}`) + ` · ${pontos(l).toLocaleString("en-US")} XP`);
+  const guerra = semana ? [] : linhasDaGuerra(await rpc("cyron_xp_por_idioma", { p_guild: inter.guildId }).catch(() => null) || []);
+  const titulo = `🏆 ${inter.guild.name}${semana ? " · 📅 7d" : ""}`.slice(0, 256);
+  const podio = await imagemDoPodio(inter.guild, top.filter((l) => pontos(l) > 0).slice(0, 3), pontos, semana).catch(() => null);
+  return inter.editReply({ embeds: [{ color: COR, title: titulo,
     description: linhas.join("\n") || "—",
+    ...(podio ? { image: { url: "attachment://top.jpg" } } : {}),
     ...(guerra.length ? { fields: [{ name: "🏳️ ⚔️", value: guerra.join("\n").slice(0, 1024) }] } : {}) }],
+    ...(podio ? { files: [{ attachment: podio, name: "top.jpg" }] } : {}),
     allowedMentions: { parse: [] } });
 }
 
@@ -10186,6 +10320,13 @@ async function comandoNiveis(inter) {
     if (l.has(semXp.id)) l.delete(semXp.id); else l.add(semXp.id);
     muda.niveis_sem_xp = [...l].slice(0, 50);
   }
+  const trocar = inter.options.getBoolean("trocar");
+  if (trocar !== null) muda.niveis_trocar = trocar;
+  const dobroBoost = inter.options.getBoolean("dobro-boost");
+  if (dobroBoost !== null) muda.niveis_dobro_boost = dobroBoost;
+  const dobroCargo = inter.options.getRole("dobro-cargo");
+  /* O mesmo cargo de novo desliga o dobro: um campo so' para os dois lados. */
+  if (dobroCargo) muda.niveis_dobro_cargo = String(servidor.niveis_dobro_cargo || "") === dobroCargo.id ? null : dobroCargo.id;
   const nivel = inter.options.getInteger("nivel");
   const cargo = inter.options.getRole("cargo");
   let aviso = "";
@@ -10215,12 +10356,87 @@ async function comandoNiveis(inter) {
     "Para dar um cargo num nível: /niveis nivel:5 cargo:@Cargo. Para tirar: /niveis nivel:5 (sem cargo).", aviso,
     "Salas sem XP", "Escolher a mesma sala de novo em sem-xp tira ela da lista. Quem fica em call (com mais alguém) também ganha XP.");
   const semLista = [...salasSemXp(atual)];
-  return inter.editReply({ embeds: [{ color: atual.niveis_ligado ? COR_OK : COR,
+  const [trocaT, acumulaT, dobroT, ninguemT, msgT, editarT, padraoT] = await nalingua(idioma, inter.guildId,
+    "Ao subir, o cargo novo substitui o anterior", "Os cargos de nível se acumulam", "XP em dobro", "ninguém",
+    "Mensagem de nível", "Editar mensagem de nível", "Voltar ao padrão");
+  const dobro = [atual.niveis_dobro_boost ? "🚀 Boost" : "", atual.niveis_dobro_cargo ? `<@&${atual.niveis_dobro_cargo}>` : ""].filter(Boolean);
+  return inter.editReply({ components: [{ type: 1, components: [
+      { type: 2, custom_id: "nv:editar", style: 1, emoji: { name: "✏️" }, label: editarT.slice(0, 80) },
+      ...(atual.niveis_texto ? [{ type: 2, custom_id: "nv:padrao", style: 2, emoji: { name: "↩️" }, label: padraoT.slice(0, 80) }] : []),
+    ] }],
+    embeds: [{ color: atual.niveis_ligado ? COR_OK : COR,
     title: `📊 ${atual.niveis_ligado ? ligadoT : desligadoT}`,
     description: `${ondeT}: ${atual.niveis_canal ? `<#${atual.niveis_canal}>` : mesmoT}\n\n**${cargosT}**\n` +
       (cargos.length ? cargos.map(([n, id]) => `Lv. ${n} → <@&${id}>`).join("\n") : `_${nenhumT}_`) +
+      `\n🔁 ${atual.niveis_trocar ? trocaT : acumulaT}` +
       `\n\n**${semT}**\n` + (semLista.length ? semLista.map((id) => `<#${id}>`).join(" · ") : `_${nenhumT}_`) +
+      `\n\n**⚡ ${dobroT}:** ${dobro.length ? dobro.join(" · ") : `_${ninguemT}_`}` +
+      `\n**${msgT}:** ${textoDeNivel(atual.niveis_texto, { id: inter.user.id, nome: inter.member?.displayName, nivel: 5 }).slice(0, 300)}` +
       `\n\n-# ${comoT}\n-# ${comoSemT}` + (avisoT ? `\n\n⚠️ ${avisoT}` : "") }], allowedMentions: { parse: [] } });
+}
+
+/* ✏️ do /niveis: a mensagem de quem sobe, com marcadores. */
+async function cliqueNiveis(inter) {
+  const acao = inter.customId.split(":")[1];
+  const idioma = await linguaDe(inter);
+  if (!inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    const [t] = await nalingua(idioma, inter.guildId, "Só quem administra o servidor mexe nos níveis.");
+    return inter.reply({ flags: 64, content: t });
+  }
+  const servidor = await servidorDoGuild(inter.guildId);
+  if (!servidor) return inter.reply({ flags: 64, content: "Ainda não terminei de me instalar aqui." });
+  if (acao === "editar") {
+    const [rotulo, titulo, marca, nome, nivel, cargos] = await nalingua(idioma, inter.guildId,
+      "Mensagem de quem sobe de nível", "Marcadores: trocados na hora",
+      "marca quem subiu", "o nome da pessoa", "o nível novo", "os cargos que a pessoa ganhou");
+    return inter.showModal({
+      custom_id: "nv:janela", title: "🎉",
+      components: [
+        { type: 10, content: `**${titulo}**\n\`{usuario}\` ${marca}\n\`{nome}\` ${nome}\n\`{nivel}\` ${nivel}\n\`{cargos}\` ${cargos}` },
+        { type: 18, label: rotulo.slice(0, 45),
+          component: { type: 4, custom_id: "texto", style: 2, required: true, max_length: NV_TEXTO_MAX,
+            value: String(servidor.niveis_texto || NV_TEXTO_PADRAO).slice(0, NV_TEXTO_MAX) } },
+      ],
+    });
+  }
+  await inter.deferReply({ flags: 64 });
+  if (acao !== "janela" && acao !== "padrao") return inter.editReply({ content: "—" });
+  const modelo = acao === "janela" ? (String(inter.fields.getTextInputValue("texto") || "").trim().slice(0, NV_TEXTO_MAX) || null) : null;
+  await sbPatch(`cyron_servidor?id=eq.${servidor.id}`, { niveis_texto: modelo });
+  cacheServidor.delete(inter.guildId);
+  const [salvo] = await nalingua(idioma, inter.guildId, modelo ? "Mensagem salva. Fica assim:" : "Voltou à mensagem padrão:");
+  return inter.editReply({ content: `✅ ${salvo}\n\n${textoDeNivel(modelo, { id: inter.user.id, nome: inter.member?.displayName, nivel: 5 })}`,
+    allowedMentions: { parse: [] } });
+}
+
+/* /xp: o administrador corrige (trapaca) ou premia. Soma e zera no banco
+   pela mesma funcao, e a memoria do bot esquece a pessoa -- a proxima
+   mensagem dela le de novo a base certa. */
+async function comandoXp(inter) {
+  await inter.deferReply({ flags: 64 });
+  const idioma = await linguaDe(inter);
+  const servidor = await servidorDoGuild(inter.guildId);
+  if (!servidor?.niveis_ligado) {
+    const [t] = await nalingua(idioma, inter.guildId, "Os níveis estão desligados neste servidor. Ligue com /niveis.");
+    return inter.editReply({ content: `📊 ${t}` });
+  }
+  const sub = inter.options.getSubcommand();
+  const alvo = inter.options.getUser("membro");
+  if (!alvo || alvo.bot) return inter.editReply({ content: "—" });
+  const qtd = Math.abs(inter.options.getInteger("quantidade") || 0);
+  await descarregarXp().catch(() => {});
+  const chave = `${inter.guildId}:${alvo.id}`;
+  const delta = sub === "dar" ? qtd : sub === "tirar" ? -qtd : 0;
+  const novo = Number(await rpc("cyron_ajustar_xp", { p_guild: inter.guildId, p_user: alvo.id, p_delta: delta, p_zerar: sub === "zerar" })) || 0;
+  xpDasPessoas.delete(chave);
+  if (sub === "zerar") xpPendente.delete(chave);
+  const antes = nivelDoXp(Math.max(0, novo - delta)).nivel;
+  const depois = nivelDoXp(novo).nivel;
+  if (sub === "dar" && depois > antes) {
+    await subiuDeNivel(inter.guild, alvo.id, servidor, depois, inter.channel).catch(() => {});
+  }
+  return inter.editReply({ content: `📊 <@${alvo.id}> · **Lv. ${depois}** · ${novo.toLocaleString("en-US")} XP`,
+    allowedMentions: { parse: [] } });
 }
 
 /* A terceira camada: quem escreveu antes de tocar em qualquer botão.
@@ -17560,9 +17776,10 @@ async function comandoDeInteracao(inter) {
   if (nome === "admin") return comandoAdmin(inter);
   if (nome === "arena") return inter.reply({ flags: 64, content: ARENA_ENCERRADA });
   if (nome === "hora") return comandoHora(inter);
-  if (nome === "perfil" || nome === "top" || nome === "niveis") {
+  if (nome === "perfil" || nome === "top" || nome === "niveis" || nome === "xp") {
     if (!inter.guildId) return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
-    return nome === "perfil" ? comandoPerfil(inter) : nome === "top" ? comandoTop(inter) : comandoNiveis(inter);
+    return nome === "perfil" ? comandoPerfil(inter) : nome === "top" ? comandoTop(inter)
+      : nome === "xp" ? comandoXp(inter) : comandoNiveis(inter);
   }
   if (nome === "boas-vindas") {
     if (!inter.guildId) return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
@@ -17698,6 +17915,9 @@ client.on("interactionCreate", async (inter) => {
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("evento:")) {
       return await cliqueEvento(inter);
+    }
+    if ((inter.isMessageComponent() || inter.isModalSubmit()) && inter.customId.startsWith("nv:")) {
+      return await cliqueNiveis(inter);
     }
     if ((inter.isMessageComponent() || inter.isModalSubmit()) && inter.customId.startsWith("bv:")) {
       return await cliqueBoasVindas(inter);
@@ -18275,7 +18495,7 @@ client.on("messageReactionAdd", async (reacao, quem) => {
    A lista diz "nao mexa nisto", e nao "todo mundo usa". Sem ele aqui,
    separarComandos leria /admin como comando do jogo e o empurraria pros
    servidores com alianca -- exatamente o contrario do que ele e'. */
-const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento", "hora", "boas-vindas", "perfil", "top", "niveis"]);
+const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento", "hora", "boas-vindas", "perfil", "top", "niveis", "xp"]);
 
 async function separarComandos() {
   try {
@@ -18709,7 +18929,7 @@ async function janelaDeComando(existente) {
    por isso salvarComando tambem pergunta ao Discord o que ja' existe. */
 const NOMES_MEUS = new Set([
   "cyron", "help", "admin", "mylanguage", "arena", "evento", "settings", "portal", "player", "events", "ranking",
-  "hora", "time", "boas-vindas", "welcome-card", "perfil", "profile", "top", "niveis", "levels",
+  "hora", "time", "boas-vindas", "welcome-card", "perfil", "profile", "top", "niveis", "levels", "xp",
 ]);
 
 /* Uma linha do formulario que carrega duas respostas: "todos 60".
@@ -19414,6 +19634,8 @@ const GLOBAIS_DO_CYRON = [
     descriptionLocalizations: { "en-US": "Most active members of the server", "en-GB": "Most active members of the server",
       "es-ES": "Quienes más participan en el servidor", "pt-BR": "Quem mais participa no servidor" },
     dmPermission: false,
+    options: [{ type: 3, name: "periodo", required: false, description: "Desde sempre ou só esta semana / All time or this week",
+      choices: [{ name: "🏆 Sempre · All time", value: "sempre" }, { name: "📅 Semana · This week", value: "semana" }] }],
   },
   {
     /* So' de quem administra: liga, escolhe o canal e os cargos. */
@@ -19431,6 +19653,28 @@ const GLOBAIS_DO_CYRON = [
       { type: 8, name: "cargo", required: false, description: "Cargo desse nível (vazio tira) / Role for that level (empty removes)" },
       { type: 7, name: "sem-xp", required: false, channelTypes: [0, 2, 4, 5, 13, 15],
         description: "Sala (ou categoria) sem XP; de novo tira / Channel with no XP; again removes" },
+      { type: 5, name: "trocar", required: false, description: "Cargo novo substitui o anterior / New role replaces the old one" },
+      { type: 5, name: "dobro-boost", required: false, description: "XP em dobro para quem dá boost / Double XP for boosters" },
+      { type: 8, name: "dobro-cargo", required: false, description: "XP em dobro para um cargo; de novo tira / Double XP for a role; again removes" },
+    ],
+  },
+  {
+    /* So' de quem administra: corrigir trapaca e premiar. */
+    name: "xp",
+    description: "Dar, tirar ou zerar XP de alguém / Give, take or reset someone's XP",
+    descriptionLocalizations: { "en-US": "Give, take or reset someone's XP", "en-GB": "Give, take or reset someone's XP",
+      "es-ES": "Dar, quitar o reiniciar la XP de alguien", "pt-BR": "Dar, tirar ou zerar XP de alguém" },
+    defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
+    dmPermission: false,
+    options: [
+      { type: 1, name: "dar", nameLocalizations: { "en-US": "give", "en-GB": "give" }, description: "Dar XP / Give XP", options: [
+        { type: 6, name: "membro", required: true, description: "Quem / Who" },
+        { type: 4, name: "quantidade", required: true, min_value: 1, max_value: 1000000, description: "Quanto / How much" }] },
+      { type: 1, name: "tirar", nameLocalizations: { "en-US": "take", "en-GB": "take" }, description: "Tirar XP / Take XP", options: [
+        { type: 6, name: "membro", required: true, description: "Quem / Who" },
+        { type: 4, name: "quantidade", required: true, min_value: 1, max_value: 1000000, description: "Quanto / How much" }] },
+      { type: 1, name: "zerar", nameLocalizations: { "en-US": "reset", "en-GB": "reset" }, description: "Zerar a XP / Reset XP", options: [
+        { type: 6, name: "membro", required: true, description: "Quem / Who" }] },
     ],
   },
   {
