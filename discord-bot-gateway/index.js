@@ -11165,6 +11165,220 @@ async function editarDuelo(estado) {
     .catch((e) => console.error("duelo: nao editei:", e?.message || e));
 }
 
+/* A FICHA DO PERSONAGEM (/codex personagem): um pergaminho com o retrato,
+   os dados, as habilidades equipadas e as paginas do Codex que a pessoa ja'
+   liberou. Arte desenhada aqui mesmo -- fundo, molduras e enfeites sao
+   formas simples em SVG, nada copiado de outro jogo.
+
+   Fontes: Cinzel (titulos) e EB Garamond (texto), as duas na licenca livre
+   OFL, em fontes/ com as licencas ao lado. */
+const FONTE_TITULO = fileURLToPath(new URL("./fontes/Cinzel_700Bold.ttf", import.meta.url));
+const FONTE_LIVRO = fileURLToPath(new URL("./fontes/EBGaramond_400Regular.ttf", import.meta.url));
+const FONTE_LIVRO_ITALICO = fileURLToPath(new URL("./fontes/EBGaramond_400Regular_Italic.ttf", import.meta.url));
+const FONTE_LIVRO_NEGRITO = fileURLToPath(new URL("./fontes/EBGaramond_700Bold.ttf", import.meta.url));
+const FI_LARGURA = 900;
+const FI_ALTURA = 1350;
+const FI_TINTA = "#4A3424";
+const FI_SEPIA = "#8B6B3E";
+
+/* O que a habilidade faz, numa linha. */
+function descricaoDaHabilidade(hab) {
+  const efeito = hab.efeito ? EFEITOS[hab.efeito]?.texto : "";
+  if (hab.dano > 0) return efeito ? `${hab.dano} de dano · ${efeito}` : `${hab.dano} de dano`;
+  return efeito || "";
+}
+
+/* Quebra o texto em linhas de no maximo `w` pixels, no tamanho dado. */
+function linhasDoTexto(fonte, texto, tam, w) {
+  const linhas = [];
+  let atual = "";
+  for (const palavra of String(texto).split(/\s+/).filter(Boolean)) {
+    const tenta = atual ? `${atual} ${palavra}` : palavra;
+    if (!atual || fonte.getAdvanceWidth(tenta, tam) <= w) atual = tenta;
+    else { linhas.push(atual); atual = palavra; }
+  }
+  if (atual) linhas.push(atual);
+  return linhas;
+}
+
+/* Um texto como caminho SVG, a' esquerda (x), centralizado (meio) ou a'
+   direita (fim). Encolhe ate' caber em `max` se for preciso. */
+function escreverEm(fonte, texto, x, y, tam, cor, { alinhar = "esquerda", max = 0, espaco = 0 } = {}) {
+  let t = tam;
+  const largura = (tt) => fonte.getAdvanceWidth(texto, tt) + espaco * Math.max(0, [...texto].length - 1) * (tt / tam);
+  while (max && t > 10 && largura(t) > max) t -= 1;
+  const w = largura(t);
+  let x0 = alinhar === "meio" ? x - w / 2 : alinhar === "fim" ? x - w : x;
+  if (!espaco) return `<path d="${fonte.getPath(texto, x0, y, t).toPathData(2)}" fill="${cor}"/>`;
+  /* Com espacamento entre as letras (o "C Ó D E X" do titulo). */
+  let d = "";
+  for (const letra of texto) {
+    d += fonte.getPath(letra, x0, y, t).toPathData(2);
+    x0 += fonte.getAdvanceWidth(letra, t) + espaco * (t / tam);
+  }
+  return `<path d="${d}" fill="${cor}"/>`;
+}
+
+/* Um enfeite: linha com um losango no meio. */
+function enfeite(cx, y, larg, cor = FI_SEPIA) {
+  return `<line x1="${cx - larg / 2}" y1="${y}" x2="${cx - 12}" y2="${y}" stroke="${cor}" stroke-width="2"/>` +
+    `<line x1="${cx + 12}" y1="${y}" x2="${cx + larg / 2}" y2="${y}" stroke="${cor}" stroke-width="2"/>` +
+    `<path d="M ${cx} ${y - 7} L ${cx + 8} ${y} L ${cx} ${y + 7} L ${cx - 8} ${y} Z" fill="${cor}"/>` +
+    `<circle cx="${cx - larg / 2}" cy="${y}" r="3" fill="${cor}"/><circle cx="${cx + larg / 2}" cy="${y}" r="3" fill="${cor}"/>`;
+}
+
+/* Titulo de secao: "‹ TEXTO ›" com filetes dos dois lados. */
+function tituloDeSecao(fonte, texto, cx, y, larg) {
+  const w = fonte.getAdvanceWidth(texto, 30);
+  return escreverEm(fonte, texto, cx, y, 30, FI_TINTA, { alinhar: "meio" }) +
+    `<line x1="${cx - larg / 2}" y1="${y - 10}" x2="${cx - w / 2 - 18}" y2="${y - 10}" stroke="${FI_SEPIA}" stroke-width="1.5"/>` +
+    `<line x1="${cx + w / 2 + 18}" y1="${y - 10}" x2="${cx + larg / 2}" y2="${y - 10}" stroke="${FI_SEPIA}" stroke-width="1.5"/>` +
+    `<path d="M ${cx - w / 2 - 14} ${y - 10} l -6 -5 v 10 Z M ${cx + w / 2 + 14} ${y - 10} l 6 -5 v 10 Z" fill="${FI_SEPIA}"/>`;
+}
+
+/* `dados`: { p, nivel, xp, vitorias, derrotas, kit (o equipado), liberadas }.
+   `liberadas`: quantas paginas do Codex (0 = nunca duelou com ele). */
+async function desenharFicha(sharp, dados, pasta = RETRATOS_DO_DUELO,
+  fontes = { titulo: FONTE_TITULO, livro: FONTE_LIVRO, italico: FONTE_LIVRO_ITALICO, negrito: FONTE_LIVRO_NEGRITO }) {
+  const [titulo, livro, italico, negrito] = await Promise.all([fontes.titulo, fontes.livro, fontes.italico, fontes.negrito].map(fonteDoDesenho));
+  const { p, nivel, xp, vitorias, derrotas, kit, liberadas } = dados;
+  const W = FI_LARGURA, H = FI_ALTURA;
+  const m = 34;                 // margem da folha
+  const esq = 78, colEsq = 410; // coluna da esquerda
+  let svg = "";
+
+  /* A folha: duas folhas de tras (so' as bordas aparecem) e a da frente. */
+  svg += `<rect x="${m + 10}" y="${m + 14}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="#CDB98F" transform="rotate(0.8 ${W / 2} ${H / 2})"/>`;
+  svg += `<rect x="${m - 6}" y="${m + 6}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="#D9C7A0" transform="rotate(-0.6 ${W / 2} ${H / 2})"/>`;
+  svg += `<rect x="${m}" y="${m}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="url(#papel)"/>`;
+  svg += `<rect x="${m}" y="${m}" width="${W - 2 * m}" height="${H - 2 * m}" rx="6" fill="url(#borda)"/>`;
+  /* Moldura dupla e cantos. */
+  svg += `<rect x="${m + 18}" y="${m + 18}" width="${W - 2 * m - 36}" height="${H - 2 * m - 36}" fill="none" stroke="${FI_SEPIA}" stroke-width="2.5"/>`;
+  svg += `<rect x="${m + 26}" y="${m + 26}" width="${W - 2 * m - 52}" height="${H - 2 * m - 52}" fill="none" stroke="${FI_SEPIA}" stroke-width="1" opacity="0.7"/>`;
+  for (const [cx, cy] of [[m + 22, m + 22], [W - m - 22, m + 22], [m + 22, H - m - 22], [W - m - 22, H - m - 22]]) {
+    svg += `<path d="M ${cx} ${cy - 14} L ${cx + 14} ${cy} L ${cx} ${cy + 14} L ${cx - 14} ${cy} Z" fill="#E9DCBC" stroke="${FI_SEPIA}" stroke-width="2"/>` +
+      `<circle cx="${cx}" cy="${cy}" r="4" fill="${FI_SEPIA}"/>`;
+  }
+
+  /* Faixa do titulo. */
+  const fy = 108;
+  svg += `<path d="M 280 ${fy - 34} L 620 ${fy - 34} L 640 ${fy - 8} L 620 ${fy + 18} L 280 ${fy + 18} L 260 ${fy - 8} Z" fill="#E6D3A8" stroke="${FI_SEPIA}" stroke-width="2"/>` +
+    `<path d="M 260 ${fy - 8} L 232 ${fy - 26} L 244 ${fy - 8} L 232 ${fy + 10} Z M 640 ${fy - 8} L 668 ${fy - 26} L 656 ${fy - 8} L 668 ${fy + 10} Z" fill="${FI_SEPIA}"/>`;
+  svg += escreverEm(titulo, "CÓDEX", W / 2, fy + 6, 38, FI_TINTA, { alinhar: "meio", espaco: 10 });
+
+  /* Nome e titulo. */
+  svg += enfeite(esq + colEsq / 2, 182, colEsq - 20);
+  svg += escreverEm(titulo, soLetrasDaFonte(titulo, p.curto || p.nome), esq + colEsq / 2, 248, 54, FI_TINTA, { alinhar: "meio", max: colEsq });
+  svg += escreverEm(italico, soLetrasDaFonte(italico, p.titulo), esq + colEsq / 2, 290, 30, FI_SEPIA, { alinhar: "meio", max: colEsq });
+  svg += enfeite(esq + colEsq / 2, 316, colEsq - 20);
+
+  /* Os dados, com a linha pontilhada ate' o valor. */
+  const virgula = p.epoca.lastIndexOf(",");
+  const lugar = virgula > 0 ? p.epoca.slice(0, virgula) : p.epoca;
+  const quando = virgula > 0 ? p.epoca.slice(virgula + 1).trim() : "";
+  const dadosLinhas = [["Origem", lugar], ["Época", quando], ["Nível", `${nivel} de 10`], ["Duelos", `${vitorias} vitórias · ${derrotas} derrotas`]];
+  dadosLinhas.forEach(([rotulo, valor], i) => {
+    const y = 372 + i * 50;
+    const wr = negrito.getAdvanceWidth(rotulo, 27);
+    const valorTxt = soLetrasDaFonte(livro, valor);
+    const wv = Math.min(livro.getAdvanceWidth(valorTxt, 25), colEsq - wr - 30);
+    svg += escreverEm(negrito, rotulo, esq, y, 27, FI_TINTA);
+    svg += `<line x1="${esq + wr + 8}" y1="${y - 4}" x2="${esq + colEsq - wv - 8}" y2="${y - 4}" stroke="${FI_SEPIA}" stroke-width="2" stroke-dasharray="2 5"/>`;
+    svg += escreverEm(livro, valorTxt, esq + colEsq, y, 25, FI_TINTA, { alinhar: "fim", max: colEsq - wr - 30 });
+  });
+
+  /* Habilidades equipadas. */
+  svg += tituloDeSecao(titulo, "Habilidades", esq + colEsq / 2, 600, colEsq);
+  const rotulos = { basica: "BÁSICA", defesa: "DEFESA", especial: "ESPECIAL", suprema: "SUPREMA" };
+  kit.forEach((hab, i) => {
+    const y = 650 + i * 74;
+    const custo = ESPACOS[hab.espaco].energia;
+    svg += `<rect x="${esq - 6}" y="${y - 24}" width="4" height="58" fill="${["#9C8A6A", "#5B7FA6", "#B5652E", "#9E2B25"][i]}"/>`;
+    svg += escreverEm(titulo, `${rotulos[hab.espaco]}${custo ? ` · ${custo} DE ENERGIA` : ""}`, esq + 8, y - 6, 15, FI_SEPIA);
+    svg += escreverEm(negrito, soLetrasDaFonte(negrito, hab.nome), esq + 8, y + 18, 25, FI_TINTA, { max: colEsq - 10 });
+    svg += escreverEm(italico, soLetrasDaFonte(italico, descricaoDaHabilidade(hab)), esq + 8, y + 41, 19, "#6B5338", { max: colEsq - 10 });
+  });
+
+  /* Nivel e XP, embaixo do retrato. */
+  const dx = 520, dl = 300;
+  const proximo = NIVEIS_DO_PERSONAGEM[nivel];
+  const anterior = NIVEIS_DO_PERSONAGEM[nivel - 1] || 0;
+  const parte = proximo === undefined ? 1 : Math.max(0, Math.min(1, (xp - anterior) / (proximo - anterior)));
+  svg += escreverEm(titulo, nivel >= 10 ? "NÍVEL MÁXIMO" : `NÍVEL ${nivel}`, dx + dl / 2, 742, 30, FI_TINTA, { alinhar: "meio" });
+  svg += `<rect x="${dx}" y="758" width="${dl}" height="16" rx="8" fill="#D6C49C" stroke="${FI_SEPIA}" stroke-width="1.5"/>` +
+    `<rect x="${dx}" y="758" width="${Math.round(dl * parte)}" height="16" rx="8" fill="#B8862F"/>`;
+  svg += escreverEm(italico, proximo === undefined ? `${xp} XP` : `${xp} / ${proximo} XP`, dx + dl / 2, 800, 21, "#6B5338", { alinhar: "meio" });
+  svg += escreverEm(italico, soLetrasDaFonte(italico, `“${p.frase}”`), dx + dl / 2, 846, 21, FI_SEPIA, { alinhar: "meio", max: dl + 40 });
+
+  /* As paginas do Codex: as liberadas, das mais novas para tras, ate'
+     encher a area; o resto fica trancado. */
+  const topoCodex = 960;
+  svg += tituloDeSecao(titulo, `Páginas ${Math.max(0, liberadas)}/10`, W / 2, topoCodex, W - 2 * esq);
+  const larguraTexto = W - 2 * esq - 50, tam = 21, alt = 26, fim = H - m - 90;
+  let blocos = [];
+  if (liberadas <= 0) {
+    blocos = [{ n: "", linhas: linhasDoTexto(italico, soLetrasDaFonte(italico, "Nenhuma página liberada ainda. Duele com este personagem para abrir a primeira."), tam, larguraTexto), fonte: italico }];
+  } else {
+    let usado = 0;
+    for (let i = liberadas - 1; i >= 0; i--) {
+      const linhas = linhasDoTexto(livro, soLetrasDaFonte(livro, p.fatos[i]), tam, larguraTexto);
+      if (usado + linhas.length * alt + 10 > fim - topoCodex - 48 && blocos.length) break;
+      blocos.unshift({ n: `${i + 1}`, linhas, fonte: livro });
+      usado += linhas.length * alt + 10;
+    }
+  }
+  let y = topoCodex + 48;
+  for (const b of blocos) {
+    if (b.n) svg += escreverEm(titulo, b.n, esq + 14, y, 24, "#9E2B25", { alinhar: "meio" });
+    for (const l of b.linhas) { svg += escreverEm(b.fonte, l, esq + 40, y, tam, FI_TINTA); y += alt; }
+    y += 10;
+  }
+  const trancadas = 10 - Math.max(0, liberadas);
+  if (trancadas > 0) {
+    svg += escreverEm(italico, `${trancadas} ${trancadas === 1 ? "página trancada" : "páginas trancadas"} · suba de nível para ler`, W / 2, H - m - 62, 20, FI_SEPIA, { alinhar: "meio" });
+  }
+  svg += escreverEm(titulo, "CYRON · DUELO", W / 2, H - m - 34, 14, "#A88C5E", { alinhar: "meio", espaco: 3 });
+
+  const fundo = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
+    `<radialGradient id="papel" cx="50%" cy="45%" r="70%"><stop offset="0" stop-color="#F4EBD3"/><stop offset="0.75" stop-color="#EADBB7"/><stop offset="1" stop-color="#D9C294"/></radialGradient>` +
+    `<radialGradient id="borda" cx="50%" cy="50%" r="72%"><stop offset="0.8" stop-color="#7A5A30" stop-opacity="0"/><stop offset="1" stop-color="#7A5A30" stop-opacity="0.35"/></radialGradient>` +
+    `</defs>${svg}</svg>`;
+
+  /* O retrato preso na folha: borda de papel, levemente torto, com sombra
+     e um alfinete. */
+  const rl = 300, ra = 400;
+  const foto = await sharp(`${pasta}${p.id}.jpg`).resize(rl, ra, { fit: "cover" })
+    .extend({ top: 10, bottom: 10, left: 10, right: 10, background: "#FBF5E6" }).toBuffer();
+  const torta = await sharp(foto).ensureAlpha().rotate(2.5, { background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+  const meta = await sharp(torta).metadata();
+  const sombra = await sharp({ create: { width: meta.width + 30, height: meta.height + 30, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${meta.width + 30}" height="${meta.height + 30}"><rect x="18" y="20" width="${meta.width - 14}" height="${meta.height - 14}" fill="#3A2614" opacity="0.45"/></svg>`) }])
+    .blur(8).png().toBuffer();
+  const fx = 505, fy2 = 190;
+  const alfinete = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><circle cx="20" cy="20" r="11" fill="#9E2B25" stroke="#5A1612" stroke-width="2"/><circle cx="16" cy="16" r="3.5" fill="#E8A49A"/></svg>`);
+
+  const ruido = await sharp({ create: { width: W, height: H, channels: 3, background: { r: 128, g: 128, b: 128 },
+    noise: { type: "gaussian", mean: 128, sigma: 18 } } }).blur(0.6).png().toBuffer();
+  return await sharp({ create: { width: W, height: H, channels: 3, background: "#3B2A1E" } })
+    .composite([
+      { input: Buffer.from(fundo) },
+      { input: ruido, blend: "soft-light" },
+      { input: sombra, left: fx - 10, top: fy2 - 6 },
+      { input: torta, left: fx, top: fy2 },
+      { input: alfinete, left: fx + Math.round(meta.width / 2) - 20, top: fy2 - 12 },
+    ]).jpeg({ quality: 86 }).toBuffer();
+}
+
+async function fichaDoPersonagem(dados) {
+  if (process.memoryUsage().rss > MEMORIA_PARA_DESENHAR) return null;
+  const sharp = await carregarSharp();
+  if (!sharp) return null;
+  return await naFilaDeDesenho(() => desenharFicha(sharp, dados)).catch((e) => {
+    console.error("codex: nao desenhei a ficha:", e?.message || e);
+    return null;
+  });
+}
+
 async function jogar(estado, i, hab) {
   if (!duelos.has(estado.id) || estado.vencedor !== null) return;
   estado.historico.push(...usarHabilidade(estado, i, hab));
@@ -11283,21 +11497,31 @@ async function cliqueEquipar(inter) {
 /* /codex: o album -- quantas paginas de cada personagem; com um personagem,
    as paginas liberadas. */
 async function comandoCodex(inter) {
-  await inter.deferReply({ flags: 64 });
   const escolhido = personagemPorId(inter.options.getString("personagem"));
-  const todos = await sb(`cyron_duelo_personagem?user_id=eq.${inter.user.id}&select=personagem,xp,vitorias,derrotas`).catch(() => []) || [];
-  const xpDe = (id) => Number(todos.find((r) => r.personagem === id)?.xp) || 0;
+  /* Com personagem, a ficha e' para mostrar: vai no canal. A lista geral e'
+     so' de quem pediu. */
+  await inter.deferReply(escolhido ? {} : { flags: 64 });
+  const todos = await sb(`cyron_duelo_personagem?user_id=eq.${inter.user.id}&select=personagem,xp,kit,vitorias,derrotas`).catch(() => []) || [];
+  const linhaDe = (id) => todos.find((r) => r.personagem === id) || null;
   if (escolhido) {
-    const nivel = xpDe(escolhido.id) > 0 ? nivelDoPersonagem(xpDe(escolhido.id)) : 0;
-    const paginas = escolhido.fatos.map((f, i) => (i < nivel ? `**${i + 1}.** ${f}` : `**${i + 1}.** 🔒`)).join("\n");
-    return inter.editReply({ embeds: [{ color: 0xF5C542, title: `📜 ${escolhido.bandeira} ${escolhido.nome} · ${nivel}/10`.slice(0, 256),
+    const r = linhaDe(escolhido.id);
+    const xp = Number(r?.xp) || 0;
+    const nivel = nivelDoPersonagem(xp);
+    const liberadas = r ? nivel : 0;
+    const imagem = await fichaDoPersonagem({ p: escolhido, nivel, xp, vitorias: Number(r?.vitorias) || 0, derrotas: Number(r?.derrotas) || 0,
+      kit: kitEquipado(escolhido, nivel, r?.kit || {}), liberadas });
+    if (imagem) return inter.editReply({ files: [{ attachment: imagem, name: `codex-${escolhido.id}.jpg` }] });
+    const paginas = escolhido.fatos.map((f, i) => (i < liberadas ? `**${i + 1}.** ${f}` : `**${i + 1}.** 🔒`)).join("\n");
+    return inter.editReply({ embeds: [{ color: 0xF5C542, title: `📜 ${escolhido.bandeira} ${escolhido.nome} · ${liberadas}/10`.slice(0, 256),
       description: paginas.slice(0, 4000) }] });
   }
   const linhas = PERSONAGENS.map((p) => {
-    const nivel = xpDe(p.id) > 0 ? nivelDoPersonagem(xpDe(p.id)) : 0;
+    const r = linhaDe(p.id);
+    const nivel = r ? nivelDoPersonagem(Number(r.xp) || 0) : 0;
     return `${p.bandeira} ${p.nome} · 📜 ${nivel}/10${nivel === 10 ? " 👑" : ""}`;
   });
-  return inter.editReply({ embeds: [{ color: 0xF5C542, title: "📜 Códex", description: linhas.join("\n") }] });
+  return inter.editReply({ embeds: [{ color: 0xF5C542, title: "📜 Códex", description: linhas.join("\n") +
+    "\n\n-# Use /codex com um personagem para ver a ficha dele." }] });
 }
 
 /* A terceira camada: quem escreveu antes de tocar em qualquer botão.
