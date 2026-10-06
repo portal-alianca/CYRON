@@ -392,6 +392,18 @@ export const RECURSOS = [
     prova: "cartaoDoEvento",
   },
   {
+    chave: "boas-vindas",
+    categoria: "chegar",
+    plano: "gratis",
+    nome: { pt: "Boas-vindas com foto, em todas as línguas", en: "Welcome card with photo, in every language" },
+    como: { pt: "/boas-vindas #canal", en: "/welcome #channel" },
+    oque: {
+      pt: "Quem entra ganha um cartão com a própria foto, o nome e o número de membro — e o “bem-vindo” vem em todas as línguas do servidor, lado a lado: “Boas-vindas · Добро пожаловать · Welcome”. Ligado só quando você escolhe o canal.",
+      en: "Whoever joins gets a card with their own photo, name and member number — and the “welcome” comes in every language of the server, side by side: “Boas-vindas · Добро пожаловать · Welcome”. On only when you pick the channel.",
+    },
+    prova: "desenharBoasVindas",
+  },
+  {
     chave: "hora",
     categoria: "viver",
     plano: "gratis",

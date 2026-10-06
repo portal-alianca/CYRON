@@ -8353,6 +8353,51 @@ function conferirCartao(onde, embed, componentes = []) {
   }
 }
 
+/* ============ boas-vindas com imagem ============ */
+{
+  const sharp = (await import("sharp")).default;
+  const FONTE = new URL("./fontes/DejaVuSans-Bold.ttf", import.meta.url).pathname;
+  const b = carregar(["SAUDACOES", "SAUDACOES_SO_NO_TEXTO", "BV_LARGURA", "BV_ALTURA", "BV_POR_MINUTO", "entradasRecentes",
+    "saudacoesDoServidor", "soLetrasDaFonte", "linhaEmCaminho", "FONTES_LIDAS", "fonteDoDesenho", "desenharBoasVindas",
+    "podeDarBoasVindas"]);
+
+  const s1 = b.saudacoesDoServidor(["pt", "ru"]);
+  ok("na imagem: as línguas do servidor e o inglês", s1.naImagem, ["Boas-vindas", "Добро пожаловать", "Welcome"]);
+  const s2 = b.saudacoesDoServidor(["ar", "ja", "pt"]);
+  ok("árabe e japonês ficam fora da IMAGEM (a letra sairia quebrada)", s2.naImagem, ["Boas-vindas", "Welcome"]);
+  verdade("mas entram no texto, que o Discord desenha", s2.noTexto.includes("أهلاً وسهلاً") && s2.noTexto.includes("ようこそ"));
+  ok("servidor sem sala de idioma: só o inglês", b.saudacoesDoServidor([]).naImagem, ["Welcome"]);
+  verdade("no máximo três na imagem", b.saudacoesDoServidor(["pt", "es", "fr", "de", "ru"]).naImagem.length === 3);
+
+  const fonte = await b.fonteDoDesenho(FONTE);
+  ok("emoji e letra que a fonte não tem saem do nome", b.soLetrasDaFonte(fonte, "Tiago 🎮 さくら"), "Tiago");
+  ok("nome todo em japonês fica vazio (e cai no @usuário)", b.soLetrasDaFonte(fonte, "さくら"), "");
+
+  const png = await b.desenharBoasVindas(sharp, { nome: "さくら", reserva: "sakura_01",
+    saudacoes: ["Boas-vindas", "Welcome"], servidor: "Kingdom #2311", numero: 1234, foto: null }, FONTE);
+  const meta = await sharp(png).metadata();
+  ok("o cartão sai em PNG 960x320", [meta.format, meta.width, meta.height], ["png", 960, 320]);
+  const { data } = await sharp(png).extract({ left: 300, top: 140, width: 300, height: 60 }).raw().toBuffer({ resolveWithObject: true });
+  let claros = 0;
+  for (let i = 0; i < data.length; i += 4) if (data[i] > 200 && data[i + 1] > 200 && data[i + 2] > 200) claros++;
+  verdade("e o nome está desenhado de verdade (pixels brancos onde vai o nome)", claros > 300);
+
+  const AG = Date.UTC(2026, 9, 6, 12);
+  let deram = 0;
+  for (let i = 0; i < 20; i++) if (b.podeDarBoasVindas("g1", AG + i * 1000)) deram++;
+  ok("entrada em massa: no máximo 8 cartões por minuto", deram, 8);
+  verdade("um minuto depois volta", b.podeDarBoasVindas("g1", AG + 61000 + 20000));
+  verdade("e cada servidor conta o seu", b.podeDarBoasVindas("g2", AG));
+
+  const f = readFileSync(`${aqui}/index.js`, "utf8");
+  verdade("só liga pelo /boas-vindas: sem canal guardado, ninguém ganha cartão",
+    /const canalId = servidor\?\.boas_vindas_canal;\s*if \(!canalId/.test(f));
+  verdade("o /boas-vindas é de todos (não vai para os servidores do jogo)", /COMANDOS_DE_TODOS = new Set\([^)]*"boas-vindas"/.test(f));
+  verdade("e só quem administra vê o comando",
+    /name: "boas-vindas",[^]{0,400}defaultMemberPermissions: PermissionFlagsBits\.ManageGuild/.test(f));
+  verdade("quem entra é marcado, e só ele", /allowedMentions: \{ users: \[member\.id\] \}/.test(f));
+}
+
 /* A IMAGEM TRADUZIDA (🖼️ Ver na imagem).
  *
  * O print volta com o texto trocado no lugar. O desenho aqui roda DE VERDADE,
