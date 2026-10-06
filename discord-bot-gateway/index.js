@@ -555,6 +555,20 @@ function idiomaDaBandeira(emoji) {
   return pais ? IDIOMA_DO_PAIS[pais] || "" : "";
 }
 
+/* A assinatura da CYRON no pe de cada fala traduzida: um "CYRON" miudo,
+   em link para o perfil dela. Quem le' a conversa traduzida e se pergunta
+   "como isso funciona?" toca ali e cai no perfil -- onde fica o botao de
+   adicionar o app. E' o jeito de cada sala espelhada espalhar a CYRON sem
+   mandar uma linha a mais na conversa.
+
+   So' quando a fala foi traduzida de fato (o selo tem seta): na propria
+   lingua nao ha' o que creditar. */
+function creditoDaCyron(selo) {
+  const id = typeof client !== "undefined" ? client?.user?.id : null;
+  if (!id || !String(selo || "").includes("→")) return "";
+  return ` · [CYRON](https://discord.com/users/${id})`;
+}
+
 function seloDeOrigem(idiomaOrigem, idiomaDestino, traduziu) {
   const de = bandeiraDoIdioma(idiomaOrigem);
   if (!de) return "";
@@ -3902,7 +3916,7 @@ async function espelharMensagem(msg, lista, origem, texto, motor = MOTOR_AUTO, s
         : (midiaLink && !video ? { image: { url: midiaLink } } : {})),
       description: `${(corpoDoCartao || (figurinha ? `🎨 ${figurinha.nome}` : "")).slice(0, LIMITE_DO_CARTAO)}` +
         `\n-# [${assinatura}](https://discord.com/users/${msg.author.id})` +
-        (selo ? ` · ${selo}` : ""),
+        (selo ? ` · ${selo}` : "") + creditoDaCyron(selo),
     });
 
     const webhook = clienteDoWebhook(destino.webhook);

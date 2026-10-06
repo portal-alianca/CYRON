@@ -1076,7 +1076,7 @@ function conferirCartao(onde, embed, componentes = []) {
      normal, e o sintoma vira "um cartão por fala" -- longe da causa. */
   const { espelharMensagem, ultimaFalaDaSala } = carregar([
     "JANELA_DE_GRUPO", "LIMITE_DO_CARTAO", "MAX_SALAS_LEMBRADAS", "TEXTO_MAXIMO",
-    "LINGUAS_MENU", "bandeiraDoIdioma", "seloDeOrigem", "MOTIVOS_QUE_DOEM", "anotarSemTraducao",
+    "LINGUAS_MENU", "bandeiraDoIdioma", "seloDeOrigem", "creditoDaCyron", "MOTIVOS_QUE_DOEM", "anotarSemTraducao",
     "peDoCartao", "MAX_PES_LEMBRADOS", "guardarPe",
     "falasNoCartao", "MAX_CARTOES_LEMBRADOS", "guardarFalas",
     "figurinhaDe", "textoDaEnquete", "midiaDeLink",
@@ -1173,7 +1173,7 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("as três frases estão no mesmo cartão",
       /I'm about to go in\nI was tweaking my translation system\n😅/.test(emIngles.embed.description));
     verdade("a assinatura aparece uma vez só",
-      emIngles.embed.description.split("discord.com/users/").length - 1 === 1);
+      emIngles.embed.description.split("](https://discord.com/users/").filter((p, i) => i > 0 && !p.startsWith(String(globalThis.client?.user?.id ?? "\u0000"))).length === 1);
   }
 
   /* O VÍDEO NUMA MENSAGEM PRÓPRIA, SEM CARTÃO.
@@ -1437,7 +1437,8 @@ function conferirCartao(onde, embed, componentes = []) {
 
     /* E o rodapé conta qual é qual, sem depender de o leitor perceber. */
     verdade("o cartão não traduzido mostra só a origem", /🇧🇷$/.test(en[0].embed.description));
-    verdade("o traduzido mostra a seta", /🇧🇷 → 🇬🇧$/.test(en[1].embed.description));
+    verdade("o traduzido mostra a seta (e o crédito da CYRON, quando ela tem usuário)",
+      /🇧🇷 → 🇬🇧( · \[CYRON\]\(https:\/\/discord\.com\/users\/\w+\))?$/.test(en[1].embed.description));
 
     /* De volta ao normal para os testes seguintes. */
     globalThis.porQueNaoTraduzir = () => "curto";
@@ -1772,6 +1773,19 @@ function conferirCartao(onde, embed, componentes = []) {
   /* Bandeira errada é pior que bandeira nenhuma: dizer "veio do inglês" sobre
      uma fala que veio de outro lugar engana com ar de precisão. */
   ok("origem desconhecida não ganha selo", seloDeOrigem("xx", "ar", true), "");
+  {
+    globalThis.client = globalThis.client || {};
+    const antes = globalThis.client.user;
+    globalThis.client.user = { id: "999" };
+    const { creditoDaCyron } = carregar(["creditoDaCyron"]);
+    ok("fala traduzida leva o crédito da CYRON, em link pro perfil dela",
+      creditoDaCyron("🇬🇧 → 🇧🇷"), " · [CYRON](https://discord.com/users/999)");
+    ok("fala na própria língua não leva crédito", creditoDaCyron("🇧🇷"), "");
+    ok("sem selo, sem crédito", creditoDaCyron(""), "");
+    globalThis.client.user = undefined;
+    ok("bot ainda sem usuário: sem crédito, sem quebrar", creditoDaCyron("🇬🇧 → 🇧🇷"), "");
+    globalThis.client.user = antes;
+  }
   ok("destino desconhecido mantém a origem", seloDeOrigem("en", "xx", true), "🇬🇧");
 }
 
@@ -7122,7 +7136,7 @@ function conferirCartao(onde, embed, componentes = []) {
 {
   const { espelharMensagem, ultimaFalaDaSala } = carregar([
     "JANELA_DE_GRUPO", "LIMITE_DO_CARTAO", "MAX_SALAS_LEMBRADAS", "TEXTO_MAXIMO",
-    "LINGUAS_MENU", "bandeiraDoIdioma", "seloDeOrigem", "MOTIVOS_QUE_DOEM", "anotarSemTraducao",
+    "LINGUAS_MENU", "bandeiraDoIdioma", "seloDeOrigem", "creditoDaCyron", "MOTIVOS_QUE_DOEM", "anotarSemTraducao",
     "peDoCartao", "MAX_PES_LEMBRADOS", "guardarPe",
     "falasNoCartao", "MAX_CARTOES_LEMBRADOS", "guardarFalas",
     "figurinhaDe", "textoDaEnquete", "midiaDeLink",
