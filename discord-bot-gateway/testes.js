@@ -8437,7 +8437,8 @@ function conferirCartao(onde, embed, componentes = []) {
   const FONTE = new URL("./fontes/DejaVuSans-Bold.ttf", import.meta.url).pathname;
   globalThis.FUNDO_DA_CYRON = new URL("./img/fundo-cyron.jpg", import.meta.url).pathname;
   const x = carregar(["XP_MIN", "XP_MAX", "XP_ESPERA", "XP_NA_MEMORIA_MAX", "xpParaSubir", "nivelDoXp", "xpDasPessoas", "xpPendente",
-    "xpBase", "cargosDosNiveis", "cargosQueFaltam", "ganharXp", "descarregarXp",
+    "xpBase", "cargosDosNiveis", "cargosQueFaltam", "salasSemXp", "contaComoMensagem", "ganharXp", "somarXp",
+    "XP_VOZ_POR_MINUTO", "quemGanhaNaVoz", "descarregarXp", "linhasDaGuerra", "LINGUAS_MENU", "nomeNaPropriaLingua",
     "FONTES_LIDAS", "fonteDoDesenho", "soLetrasDaFonte", "temLetra", "BV_FOTO", "PF_LARGURA", "PF_ALTURA", "desenharPerfil"]);
 
   ok("a curva do MEE6: nível 0 → 1 pede 100", x.xpParaSubir(0), 100);
@@ -8456,8 +8457,9 @@ function conferirCartao(onde, embed, componentes = []) {
   /* ganhar: uma vez por minuto, e soma na memória (não no banco) */
   const anuncios = [];
   globalThis.sb = async () => [{ xp: 90 }];
-  globalThis.subiuDeNivel = async (_m, _s, n) => { anuncios.push(n); };
-  const msg = { guild: { id: "900000000000000001" }, author: { id: "800000000000000001", bot: false } };
+  globalThis.subiuDeNivel = async (_g, _u, _s, n) => { anuncios.push(n); };
+  const msg = { guild: { id: "900000000000000001" }, author: { id: "800000000000000001", bot: false },
+    channel: { id: "700000000000000001" }, content: "bora atacar" };
   const servidor = { niveis_ligado: true };
   const T = Date.UTC(2026, 9, 6, 12);
   await x.ganharXp(msg, servidor, T);
@@ -8471,6 +8473,29 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("depois de um minuto conta", x.xpPendente.get(chave).xp > depois1);
   await x.ganharXp(msg, { niveis_ligado: false }, T + 200000);
   verdade("servidor com níveis desligados não ganha nada", x.xpPendente.get(chave).m === 2);
+  await x.ganharXp({ ...msg, content: "k" }, servidor, T + 400000);
+  verdade("anti-farm: \"k\" não vale XP", x.xpPendente.get(chave).m === 2);
+  await x.ganharXp({ ...msg, content: "👍👍" }, servidor, T + 500000);
+  verdade("nem emoji solto", x.xpPendente.get(chave).m === 2);
+  await x.ganharXp({ ...msg, content: "", attachments: { size: 1 } }, servidor, T + 600000);
+  verdade("mas foto sem legenda vale", x.xpPendente.get(chave).m === 3);
+  await x.ganharXp(msg, { niveis_ligado: true, niveis_sem_xp: ["700000000000000001"] }, T + 700000);
+  verdade("sala sem XP não conta", x.xpPendente.get(chave).m === 3);
+  await x.ganharXp({ ...msg, channel: { id: "1", parentId: "700000000000000001" } }, { niveis_ligado: true, niveis_sem_xp: ["700000000000000001"] }, T + 800000);
+  verdade("nem a sala dentro de uma categoria sem XP", x.xpPendente.get(chave).m === 3);
+
+  /* voz: quem ganha a cada minuto */
+  const vs = (id, canal, extra = {}) => [id, { id, channelId: canal, member: { user: { bot: false } }, ...extra }];
+  const g = { afkChannelId: "afk", voiceStates: { cache: new Map([
+    vs("1", "sala"), vs("2", "sala"), vs("3", "sala", { selfDeaf: true }),
+    vs("4", "sozinho"), vs("5", "afk"), vs("6", "afk"), vs("7", "sala", { member: { user: { bot: true } } })]) } };
+  ok("voz: só quem está em call com mais alguém, sem surdo, sem bot e fora do AFK",
+    x.quemGanhaNaVoz(g).map(([, id]) => id).sort(), ["1", "2"]);
+
+  /* guerra de bandeiras */
+  const guerra = x.linhasDaGuerra([{ idioma: "ru", xp: 300, pessoas: 2 }, { idioma: "pt", xp: 900, pessoas: 5 }, { idioma: "?", xp: 50, pessoas: 1 }]);
+  ok("guerra de bandeiras: maior primeiro, com coroa, sem quem não escolheu língua", guerra,
+    ["👑 🇧🇷 Português · **900 XP** · 👥 5", "🇷🇺 Русский · **300 XP** · 👥 2"]);
 
   /* descarga: uma chamada, e o que falhar volta */
   const chamadas = [];
@@ -8487,18 +8512,21 @@ function conferirCartao(onde, embed, componentes = []) {
   x.xpPendente.clear();
 
   const card = await x.desenharPerfil(sharp, { nome: "𝓕𝓮𝓻𝓷𝓪𝓷𝓭𝓸 †", reserva: "f", nivel: 7, dentro: 120, precisa: 495,
-    posicao: 3, xp: 2340, mensagens: 150, foto: null, fundo: null }, FONTE);
+    posicao: 3, xp: 2340, mensagens: 150, foto: null, fundo: null,
+    idioma: { codigo: "ru", nome: "Русский", bandeira: await sharp({ create: { width: 72, height: 72, channels: 4, background: "#c00" } }).png().toBuffer() } }, FONTE);
   const meta = await sharp(card).metadata();
   ok("o cartão do /perfil sai em JPEG 1024x340", [meta.format, meta.width, meta.height], ["jpeg", 1024, 340]);
 
   const f = readFileSync(`${aqui}/index.js`, "utf8");
   verdade("a XP é somada antes do corte de texto vazio (foto também conta)",
     f.indexOf("ganharXp(msg, servidor)") < f.indexOf('const texto = String(msg.content || "").trim();\n\n    /* Reconhecer a língua'));
+  verdade("a XP de voz roda no mesmo relógio de um minuto", /rodarXpDeVoz\(\)\.catch/.test(f));
+  verdade("e o bot recebe quem está em call", /GatewayIntentBits\.GuildVoiceStates/.test(f));
   verdade("e desce junto com o uso, a cada minuto e ao desligar", (f.match(/descarregarXp\(\)\.catch/g) || []).length >= 2);
   verdade("os três comandos são de todos (não vão para os servidores do jogo)",
     /COMANDOS_DE_TODOS = new Set\([^)]*"perfil", "top", "niveis"/.test(f));
   verdade("o /niveis é só de quem administra", /name: "niveis",[^]{0,700}defaultMemberPermissions: PermissionFlagsBits\.ManageGuild/.test(f));
-  verdade("o anúncio de nível só marca quem subiu", /content: `🎉 <@\$\{msg\.author\.id\}>[^]{0,200}allowedMentions: \{ users: \[msg\.author\.id\] \}/.test(f));
+  verdade("o anúncio de nível só marca quem subiu", /content: `🎉 <@\$\{userId\}>[^]{0,200}allowedMentions: \{ users: \[userId\] \}/.test(f));
 }
 
 /* A IMAGEM TRADUZIDA (🖼️ Ver na imagem).

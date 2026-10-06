@@ -410,8 +410,8 @@ export const RECURSOS = [
     nome: { pt: "Níveis, /perfil e cargos por nível", en: "Levels, /profile and level roles" },
     como: { pt: "/niveis · /perfil · /top", en: "/levels · /profile · /top" },
     oque: {
-      pt: "Quem conversa ganha XP (uma vez por minuto, nada de spam), sobe de nível e ganha o cargo que você escolheu para cada nível. O /perfil mostra um cartão com a foto, o nível e a barra de progresso no fundo do próprio servidor; o /top, quem mais participa. Ligado só quando você quer.",
-      en: "Whoever chats earns XP (once a minute, no spam), levels up and gets the role you picked for each level. /profile shows a card with the photo, level and progress bar on your server's own background; /top, who participates most. On only when you want it.",
+      pt: "Quem conversa ganha XP (uma vez por minuto, e “k” não conta) e quem fica em call também. Sobe de nível e ganha o cargo que você escolheu para cada nível. O /perfil mostra um cartão com a foto, o nível, a língua e a barra de progresso no fundo do próprio servidor; o /top traz quem mais participa e a guerra de bandeiras: 🇧🇷 contra 🇷🇺 contra 🇺🇸. Salas sem XP você escolhe. Ligado só quando você quer.",
+      en: "Whoever chats earns XP (once a minute, and “k” doesn't count), and so does whoever stays in a call. They level up and get the role you picked for each level. /profile shows a card with the photo, level, language and progress bar on your server's own background; /top shows the most active members and the flag war: 🇧🇷 vs 🇷🇺 vs 🇺🇸. You pick which channels give no XP. On only when you want it.",
     },
     prova: "desenharPerfil",
   },

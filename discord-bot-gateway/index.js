@@ -59,6 +59,9 @@ const client = new Client({
        comigo recebe silencio. E' o primeiro contato de quem achou o bot pela
        lista de servidores ou pelo perfil, e ele estava caindo no vazio. */
     GatewayIntentBits.DirectMessages,
+    /* Quem esta' em qual call: a XP de voz conta os minutos na call, sem
+       ouvir nada. Nao e' intent privilegiada. */
+    GatewayIntentBits.GuildVoiceStates,
   ],
   /* Reaction e User entram junto com a intent: sem eles, reagir a uma mensagem
      ANTERIOR ao ultimo religamento do bot chega como objeto pela metade e o
@@ -9900,55 +9903,110 @@ function cargosQueFaltam(cargos, nivel, jaTem = new Set()) {
     .map(([, id]) => String(id));
 }
 
+/* As salas onde nao se ganha XP (sala de comandos, de spam, de bot). */
+function salasSemXp(servidor) {
+  const l = servidor?.niveis_sem_xp;
+  return new Set(Array.isArray(l) ? l.map(String) : []);
+}
+
+/* Anti-farm: "k", "ok", um emoji solto nao valem XP. Tres letras ou numeros,
+   ou um anexo (foto, video, figurinha) -- isso e' participar. */
+function contaComoMensagem(msg) {
+  if (msg.attachments?.size || msg.stickers?.size) return true;
+  return (String(msg.content || "").match(/[\p{L}\p{N}]/gu) || []).length >= 3;
+}
+
 async function ganharXp(msg, servidor, agora = Date.now()) {
   if (!servidor?.niveis_ligado || msg.author?.bot) return;
-  const chave = `${msg.guild.id}:${msg.author.id}`;
+  if (salasSemXp(servidor).has(String(msg.channel?.id)) || salasSemXp(servidor).has(String(msg.channel?.parentId))) return;
+  if (!contaComoMensagem(msg)) return;
+  const ganho = XP_MIN + Math.floor(Math.random() * (XP_MAX - XP_MIN + 1));
+  await somarXp(msg.guild, msg.author.id, ganho, servidor, msg.channel, agora, { espera: XP_ESPERA, mensagem: true });
+}
+
+/* O coracao: soma na memoria e ve se subiu. A mensagem e a call passam por
+   aqui -- duas copias desta conta divergiriam no primeiro ajuste. */
+async function somarXp(guild, userId, ganho, servidor, canalPadrao, agora = Date.now(), { espera = 0, mensagem = false } = {}) {
+  const chave = `${guild.id}:${userId}`;
   let p = xpDasPessoas.get(chave);
   if (!p) {
     p = { base: null, pend: 0, ultima: 0, carregando: null };
     xpDasPessoas.set(chave, p);
     while (xpDasPessoas.size > XP_NA_MEMORIA_MAX) xpDasPessoas.delete(xpDasPessoas.keys().next().value);
   }
-  if (agora - p.ultima < XP_ESPERA) return;
-  p.ultima = agora;
-  const ganho = XP_MIN + Math.floor(Math.random() * (XP_MAX - XP_MIN + 1));
+  if (espera && agora - p.ultima < espera) return;
+  if (espera) p.ultima = agora;
   p.pend += ganho;
   const leva = xpPendente.get(chave) || { xp: 0, m: 0 };
-  leva.xp += ganho; leva.m += 1;
+  leva.xp += ganho; leva.m += mensagem ? 1 : 0;
   xpPendente.set(chave, leva);
 
   /* Sem saber a base nao da' para saber se subiu: na duvida, nao anuncia --
      anunciar nivel errado e' pior que atrasar um anuncio. */
   if (p.base === null) {
-    p.carregando ??= xpBase(msg.guild.id, msg.author.id).then((v) => { p.base = v; })
+    p.carregando ??= xpBase(guild.id, userId).then((v) => { p.base = v; })
       .catch(() => {}).finally(() => { p.carregando = null; });
     await p.carregando;
     if (p.base === null) return;
   }
   const antes = nivelDoXp(p.base + p.pend - ganho).nivel;
   const depois = nivelDoXp(p.base + p.pend).nivel;
-  if (depois > antes) await subiuDeNivel(msg, servidor, depois).catch((e) =>
+  if (depois > antes) await subiuDeNivel(guild, userId, servidor, depois, canalPadrao).catch((e) =>
     console.error("niveis: nao consegui anunciar:", e?.message || e));
 }
 
-async function subiuDeNivel(msg, servidor, nivel) {
-  const membro = msg.member || await msg.guild.members.fetch(msg.author.id).catch(() => null);
+async function subiuDeNivel(guild, userId, servidor, nivel, canalPadrao) {
+  const membro = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
   /* Os cargos primeiro: o anuncio pode falhar (canal sem permissao) e o
      cargo ainda assim tem que chegar. */
   const faltam = membro ? cargosQueFaltam(cargosDosNiveis(servidor), nivel, new Set(membro.roles.cache.keys())) : [];
   const ganhos = [];
   for (const id of faltam) {
-    const cargo = msg.guild.roles.cache.get(id);
+    const cargo = guild.roles.cache.get(id);
     if (!cargo?.editable) continue;   // cargo acima do meu: nao tenho como dar
     if (await membro.roles.add(cargo, `CYRON: nivel ${nivel}`).then(() => true).catch(() => false)) ganhos.push(id);
   }
-  const canal = (servidor.niveis_canal && msg.guild.channels.cache.get(String(servidor.niveis_canal))) || msg.channel;
+  const canal = (servidor.niveis_canal && guild.channels.cache.get(String(servidor.niveis_canal))) || canalPadrao;
+  if (!canal?.send) return;
   /* Sem palavra nenhuma: "Lv." e o emoji servem em toda lingua, e nao gastam
      tradutor a cada nivel de cada pessoa. */
   await canal.send({
-    content: `🎉 <@${msg.author.id}> → **Lv. ${nivel}**${ganhos.length ? ` · ${ganhos.map((id) => `<@&${id}>`).join(" ")}` : ""}`,
-    allowedMentions: { users: [msg.author.id] },
+    content: `🎉 <@${userId}> → **Lv. ${nivel}**${ganhos.length ? ` · ${ganhos.map((id) => `<@&${id}>`).join(" ")}` : ""}`,
+    allowedMentions: { users: [userId] },
   });
+}
+
+/* XP de voz: quem esta' em call ganha por minuto -- sem ouvir nada, so'
+   contando quem esta' la'. Para valer: duas pessoas de verdade na sala (call
+   sozinho nao e' conversa), ninguem surdo (ensurdecido nao esta' ali), e
+   fora da sala AFK. */
+const XP_VOZ_POR_MINUTO = 8;
+function quemGanhaNaVoz(guild) {
+  const porSala = new Map();
+  for (const vs of guild.voiceStates?.cache?.values?.() || []) {
+    if (!vs.channelId || vs.channelId === guild.afkChannelId) continue;
+    if (vs.member?.user?.bot || vs.selfDeaf || vs.serverDeaf) continue;
+    if (!porSala.has(vs.channelId)) porSala.set(vs.channelId, []);
+    porSala.get(vs.channelId).push(vs.id);
+  }
+  const fora = [];
+  for (const [sala, gente] of porSala) if (gente.length >= 2) for (const id of gente) fora.push([sala, id]);
+  return fora;
+}
+
+async function rodarXpDeVoz(agora = Date.now()) {
+  for (const [, guild] of client.guilds.cache) {
+    const quem = quemGanhaNaVoz(guild);
+    if (!quem.length) continue;
+    const servidor = await servidorDoGuild(guild.id).catch(() => null);
+    if (!servidor?.niveis_ligado) continue;
+    const semXp = salasSemXp(servidor);
+    for (const [sala, id] of quem) {
+      const canal = guild.channels.cache.get(sala);
+      if (semXp.has(String(sala)) || semXp.has(String(canal?.parentId))) continue;
+      await somarXp(guild, id, XP_VOZ_POR_MINUTO, servidor, canal, agora).catch(() => {});
+    }
+  }
 }
 
 /* A cada minuto: tudo o que somou desce numa chamada so'. */
@@ -9989,7 +10047,7 @@ async function xpAgora(guildId, userId) {
    da CYRON), a foto, o nivel e a barra. */
 const PF_LARGURA = 1024;
 const PF_ALTURA = 340;
-async function desenharPerfil(sharp, { nome, reserva, nivel, dentro, precisa, posicao, xp, mensagens, foto, fundo }, fontfile = FONTE_DA_IMAGEM) {
+async function desenharPerfil(sharp, { nome, reserva, nivel, dentro, precisa, posicao, xp, mensagens, foto, fundo, idioma = null }, fontfile = FONTE_DA_IMAGEM) {
   const fonte = await fonteDoDesenho(fontfile);
   const W = PF_LARGURA, H = PF_ALTURA, x = 300, larg = W - x - 50;
   const quem = [soLetrasDaFonte(fonte, nome), soLetrasDaFonte(fonte, reserva)].find(temLetra) || "?";
@@ -10003,6 +10061,10 @@ async function desenharPerfil(sharp, { nome, reserva, nivel, dentro, precisa, po
     return `<path d="${fonte.getPath(t, W - 50 - w, y, tam).toPathData(2)}" fill="${cor}" filter="url(#s)"/>`;
   };
   const pct = Math.max(0, Math.min(1, dentro / Math.max(1, precisa)));
+  /* A lingua da pessoa, escrita nela mesma ("Русский"). Lingua que a fonte
+     nao desenha (japones, arabe) sai pelo codigo, e a bandeira diz o resto. */
+  const nomeDoIdioma = idioma ? (temLetra(soLetrasDaFonte(fonte, idioma.nome)) && soLetrasDaFonte(fonte, idioma.nome) === idioma.nome
+    ? idioma.nome : String(idioma.codigo || "").toUpperCase()) : "";
   const fmt = (n) => Number(n || 0).toLocaleString("en-US");
   const base = await sharp(fundo || FUNDO_DA_CYRON).resize(W, H, { fit: "cover" }).blur(6).toBuffer();
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
@@ -10017,14 +10079,33 @@ async function desenharPerfil(sharp, { nome, reserva, nivel, dentro, precisa, po
     (foto ? "" : `<circle cx="150" cy="170" r="110" fill="#404249"/>`) +
     linha(quem, 120, 56, "#FFFFFF", larg - 230) +
     direita(`LV. ${nivel}`, 120, 52, "#7FD3FF") +
-    linha(`#${fmt(posicao)} · ${fmt(xp)} XP · ${fmt(mensagens)} msg`, 172, 26, "#C9D6E3") +
+    linha(`#${fmt(posicao)} · ${fmt(xp)} XP · ${fmt(mensagens)} msg`, 172, 26, "#C9D6E3", idioma ? larg - 250 : larg) +
+    (nomeDoIdioma ? direita(nomeDoIdioma, 172, 26, "#FFFFFF") : "") +
     `<rect x="${x}" y="212" width="${larg}" height="34" rx="17" fill="#000" opacity="0.45"/>` +
     `<rect x="${x}" y="212" width="${Math.max(34, Math.round(larg * pct))}" height="34" rx="17" fill="url(#b)"/>` +
     direita(`${fmt(dentro)} / ${fmt(precisa)}`, 284, 22, "#E6F4FF") +
     `</svg>`;
   const camadas = [{ input: Buffer.from(svg) }];
   if (foto) camadas.push({ input: foto, left: 150 - BV_FOTO / 2, top: 170 - BV_FOTO / 2 });
+  if (idioma?.bandeira && nomeDoIdioma) {
+    const w = fonte.getAdvanceWidth(nomeDoIdioma, 26);
+    camadas.push({ input: await sharp(idioma.bandeira).resize(36, 36).png().toBuffer(),
+      left: Math.round(W - 50 - w - 46), top: 143 });
+  }
   return await sharp(base).composite(camadas).jpeg({ quality: 88 }).toBuffer();
+}
+
+/* A bandeira como imagem (o desenho da fonte nao tem emoji colorido): o
+   mesmo Twemoji que o Discord usa, baixado uma vez por lingua. */
+const bandeirasBaixadas = new Map();
+async function imagemDaBandeira(codigo) {
+  const achado = LINGUAS_MENU.find(([c]) => c === codigo);
+  if (!achado) return null;
+  if (bandeirasBaixadas.has(codigo)) return bandeirasBaixadas.get(codigo);
+  const pontos = [...achado[2]].map((c) => c.codePointAt(0).toString(16)).join("-");
+  const bytes = await baixarImagem(`https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/72x72/${pontos}.png`);
+  bandeirasBaixadas.set(codigo, bytes);
+  return bytes;
 }
 
 async function comandoPerfil(inter) {
@@ -10045,14 +10126,25 @@ async function comandoPerfil(inter) {
     imagem = await naFilaDeDesenho(async () => {
       const [foto, fundo] = await Promise.all([
         fotoRedonda(sharp, alvo.displayAvatarURL({ extension: "png", size: 256 })), fundoDe(inter.guild)]);
+      const codigo = await idiomaEscolhido(alvo.id).catch(() => "");
+      const achado = LINGUAS_MENU.find(([c]) => c === codigo);
+      const idioma = achado ? { codigo, nome: achado[3] || achado[1], bandeira: await imagemDaBandeira(codigo).catch(() => null) } : null;
       const args = { nome: alvo.displayName, reserva: alvo.user?.username, ...n, posicao: (Number(acima) || 0) + 1,
-        xp, mensagens, foto, fundo };
+        xp, mensagens, foto, fundo, idioma };
       return await desenharPerfil(sharp, args).catch(() => desenharPerfil(sharp, { ...args, fundo: null }));
     }).catch(() => null);
   }
   const texto = `📊 <@${alvo.id}> · **Lv. ${n.nivel}** · ${xp.toLocaleString("en-US")} XP`;
   return inter.editReply({ content: imagem ? `<@${alvo.id}>` : texto, allowedMentions: { parse: [] },
     ...(imagem ? { files: [{ attachment: imagem, name: "perfil.jpg" }] } : {}) });
+}
+
+/* A guerra de bandeiras: a XP de cada lingua, somada. So' a CYRON sabe a
+   lingua de cada um -- e' o placar que nenhum outro bot de nivel tem. */
+function linhasDaGuerra(bandeiras) {
+  return (bandeiras || []).filter((b) => b?.idioma && b.idioma !== "?" && Number(b.xp) > 0)
+    .sort((a, b) => Number(b.xp) - Number(a.xp)).slice(0, 8)
+    .map((b, i) => `${i === 0 ? "👑 " : ""}${nomeNaPropriaLingua(b.idioma)} · **${Number(b.xp).toLocaleString("en-US")} XP** · 👥 ${b.pessoas}`);
 }
 
 async function comandoTop(inter) {
@@ -10067,8 +10159,12 @@ async function comandoTop(inter) {
   const top = await sb(`cyron_xp?guild_id=eq.${inter.guildId}&select=user_id,xp&order=xp.desc&limit=10`).catch(() => []) || [];
   const medalha = ["🥇", "🥈", "🥉"];
   const linhas = top.map((l, i) => `${medalha[i] || `**${i + 1}.**`} <@${l.user_id}> · Lv. ${nivelDoXp(l.xp).nivel} · ${Number(l.xp).toLocaleString("en-US")} XP`);
+  const bandeiras = await rpc("cyron_xp_por_idioma", { p_guild: inter.guildId }).catch(() => null) || [];
+  const guerra = linhasDaGuerra(bandeiras);
   return inter.editReply({ embeds: [{ color: COR, title: `🏆 ${inter.guild.name}`.slice(0, 256),
-    description: linhas.join("\n") || "—" }], allowedMentions: { parse: [] } });
+    description: linhas.join("\n") || "—",
+    ...(guerra.length ? { fields: [{ name: "🏳️ ⚔️", value: guerra.join("\n").slice(0, 1024) }] } : {}) }],
+    allowedMentions: { parse: [] } });
 }
 
 /* /niveis: ligar, onde anunciar, e o cargo de cada nivel. Uma tela so'. */
@@ -10082,6 +10178,14 @@ async function comandoNiveis(inter) {
   if (ligar !== null) muda.niveis_ligado = ligar;
   const canal = inter.options.getChannel("canal");
   if (canal) muda.niveis_canal = canal.id;
+  const semXp = inter.options.getChannel("sem-xp");
+  if (semXp) {
+    /* Escolher de novo a mesma sala tira ela da lista: um campo so' para os
+       dois sentidos. */
+    const l = salasSemXp(servidor);
+    if (l.has(semXp.id)) l.delete(semXp.id); else l.add(semXp.id);
+    muda.niveis_sem_xp = [...l].slice(0, 50);
+  }
   const nivel = inter.options.getInteger("nivel");
   const cargo = inter.options.getRole("cargo");
   let aviso = "";
@@ -10105,15 +10209,18 @@ async function comandoNiveis(inter) {
   }
   const atual = { ...servidor, ...muda };
   const cargos = Object.entries(cargosDosNiveis(atual)).sort((a, b) => Number(a[0]) - Number(b[0]));
-  const [ligadoT, desligadoT, ondeT, mesmoT, cargosT, nenhumT, comoT, avisoT] = await nalingua(idioma, inter.guildId,
+  const [ligadoT, desligadoT, ondeT, mesmoT, cargosT, nenhumT, comoT, avisoT, semT, comoSemT] = await nalingua(idioma, inter.guildId,
     "Níveis ligados", "Níveis desligados", "Anúncio de nível em", "no mesmo canal da mensagem",
     "Cargos por nível", "nenhum ainda",
-    "Para dar um cargo num nível: /niveis nivel:5 cargo:@Cargo. Para tirar: /niveis nivel:5 (sem cargo).", aviso);
+    "Para dar um cargo num nível: /niveis nivel:5 cargo:@Cargo. Para tirar: /niveis nivel:5 (sem cargo).", aviso,
+    "Salas sem XP", "Escolher a mesma sala de novo em sem-xp tira ela da lista. Quem fica em call (com mais alguém) também ganha XP.");
+  const semLista = [...salasSemXp(atual)];
   return inter.editReply({ embeds: [{ color: atual.niveis_ligado ? COR_OK : COR,
     title: `📊 ${atual.niveis_ligado ? ligadoT : desligadoT}`,
     description: `${ondeT}: ${atual.niveis_canal ? `<#${atual.niveis_canal}>` : mesmoT}\n\n**${cargosT}**\n` +
       (cargos.length ? cargos.map(([n, id]) => `Lv. ${n} → <@&${id}>`).join("\n") : `_${nenhumT}_`) +
-      `\n\n-# ${comoT}` + (avisoT ? `\n\n⚠️ ${avisoT}` : "") }], allowedMentions: { parse: [] } });
+      `\n\n**${semT}**\n` + (semLista.length ? semLista.map((id) => `<#${id}>`).join(" · ") : `_${nenhumT}_`) +
+      `\n\n-# ${comoT}\n-# ${comoSemT}` + (avisoT ? `\n\n⚠️ ${avisoT}` : "") }], allowedMentions: { parse: [] } });
 }
 
 /* A terceira camada: quem escreveu antes de tocar em qualquer botão.
@@ -19322,6 +19429,8 @@ const GLOBAIS_DO_CYRON = [
       { type: 7, name: "canal", required: false, channelTypes: [0, 5], description: "Onde anunciar quem subiu / Where to announce level-ups" },
       { type: 4, name: "nivel", required: false, min_value: 1, max_value: 500, description: "Nível do cargo / Level for the role" },
       { type: 8, name: "cargo", required: false, description: "Cargo desse nível (vazio tira) / Role for that level (empty removes)" },
+      { type: 7, name: "sem-xp", required: false, channelTypes: [0, 2, 4, 5, 13, 15],
+        description: "Sala (ou categoria) sem XP; de novo tira / Channel with no XP; again removes" },
     ],
   },
   {
@@ -19877,6 +19986,7 @@ client.once("clientReady", () => {
   setInterval(() => {
     sincronizarRecentes().catch((e) => console.error("espelho: passada curta falhou:", e?.message || e));
     descarregarUso().catch((e) => console.error("uso: descarga falhou:", e?.message || e));
+    rodarXpDeVoz().catch((e) => console.error("niveis: voz falhou:", e?.message || e));
     descarregarXp().catch((e) => console.error("niveis: descarga falhou:", e?.message || e));
     /* A agenda precisa do minuto: lembrete "10 min antes" numa ronda de dez
        em dez chegaria na hora do evento. */
