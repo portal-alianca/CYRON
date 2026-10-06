@@ -8841,15 +8841,13 @@ function conferirCartao(onde, embed, componentes = []) {
     const ids = (t) => t.components.flatMap((r) => r.components.map((c) => c.custom_id));
     verdade("heróis: ◀ ▶ e usar", ids(herois).includes(`dp:aba:herois:${zumbi - 1}`) && ids(herois).includes(`dp:aba:herois:${zumbi + 1}`));
     verdade("o herói ativo não se escolhe de novo", herois.components[0].components.find((c) => c.custom_id === `dp:usar:${zumbi}`).disabled);
-    verdade("três abas no fim", ids(herois).slice(-3).join() === `dp:aba:herois:${zumbi},dp:aba:hab:${zumbi},dp:aba:duelar:${zumbi}`);
+    verdade("no fim: Heróis, Habilidades e o botão Duelar", ids(herois).slice(-3).join() === `dp:aba:herois:${zumbi},dp:aba:hab:${zumbi},dp:duelar:${zumbi}`);
     const hab = await pn.telaDoPainel("111111", "hab", zumbi);
     const trocas = hab.components[0].components;
     ok("nível 3 (160 XP): defesa liberada, o resto trancado", trocas.map((c) => c.disabled), [true, false, true, true]);
     verdade("o trancado diz o nível", trocas[0].label.includes("Nv 4"));
-    const duelar = await pn.telaDoPainel("111111", "duelar", 0);
-    verdade("duelar: treino, aberto e a lista de pessoas", ids(duelar).includes("dp:treinar:0") && ids(duelar).includes("dp:aberto:0") &&
-      duelar.components[1].components[0].type === 5);
-    verdade("sem desenho, o painel vira texto", !duelar.embeds[0].image && duelar.files.length === 0);
+    verdade("sem desenho, o painel vira texto", !herois.embeds[0].image && herois.files.length === 0);
+    ok("aba desconhecida cai em Heróis", ids(await pn.telaDoPainel("111111", "xyz", 0))[2], "dp:usar:0");
     verdade("o ◀ do primeiro volta para o último", ids(await pn.telaDoPainel("111111", "herois", -1)).includes(`dp:usar:${elenco.PERSONAGENS.length - 1}`));
     Object.assign(globalThis, antes);
   }
@@ -8858,6 +8856,8 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("só quem está na vez joga", /if \(estado\.vez !== indice\)[^]{0,200}Ainda não é a sua vez/.test(idx));
   verdade("clique duplo não joga duas vezes", /if \(estado\.ocupado\) return inter\.deferUpdate\(\)/.test(idx));
   verdade("os comandos do duelo são de todos", /COMANDOS_DE_TODOS = new Set\([^)]*"duelo", "equipar", "codex"/.test(idx));
+  verdade("o Duelar publica o desafio com Aceitar e Treinar", /acao !== "duelar"[^]{0,2500}duelo:aceitar:\$\{estado\.id\}[^]{0,300}duelo:treino:\$\{estado\.id\}/.test(idx));
+  verdade("só quem desafiou treina com a CYRON", /acao === "treino"[^]{0,200}estado\.pessoas\[0\]\.userId !== inter\.user\.id/.test(idx));
   verdade("os botões do duelo têm rota", idx.includes('inter.customId.startsWith("duelo:")') && idx.includes('inter.customId.startsWith("equipar:")'));
   const sql = readFileSync(`${aqui}/../supabase/migracoes/019-duelo.sql`, "utf8");
   verdade("no banco, uma linha por pessoa e personagem", /primary key \(user_id, personagem\)/.test(sql));
