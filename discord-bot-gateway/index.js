@@ -10106,9 +10106,47 @@ async function xpAgora(guildId, userId) {
    da CYRON), a foto, o nivel e a barra. */
 const PF_LARGURA = 1024;
 const PF_ALTURA = 340;
-async function desenharPerfil(sharp, { nome, reserva, nivel, dentro, precisa, posicao, xp, mensagens, foto, fundo, idioma = null }, fontfile = FONTE_DA_IMAGEM) {
+const PF_FAIXA_DUELO = 130;
+
+/* A PATENTE DO DUELO: pelas vitorias somadas de todos os herois. Simples de
+   entender ("faltam 3 vitorias para Ouro") e nao cai: perder nao rebaixa. */
+const PATENTES = [
+  { min: 0, nome: "Recruta", cor: "#9AA5B1" }, { min: 5, nome: "Bronze", cor: "#CD7F32" },
+  { min: 15, nome: "Prata", cor: "#C8CDD3" }, { min: 35, nome: "Ouro", cor: "#F5C542" },
+  { min: 70, nome: "Platina", cor: "#7FE0D6" }, { min: 120, nome: "Diamante", cor: "#7FB8FF" },
+  { min: 200, nome: "Lenda", cor: "#FF6B9A" },
+];
+function patenteDe(vitorias) {
+  const v = Math.max(0, Number(vitorias) || 0);
+  let i = 0;
+  for (let k = 0; k < PATENTES.length; k++) if (v >= PATENTES[k].min) i = k;
+  return { ...PATENTES[i], indice: i, proxima: PATENTES[i + 1] || null };
+}
+
+/* O resumo do duelo de alguem: vitorias, derrotas e o heroi mais usado.
+   null para quem nunca duelou. */
+function resumoDoDuelo(linhas) {
+  let vitorias = 0, derrotas = 0, fav = null, usos = -1;
+  for (const r of linhas || []) {
+    const v = Number(r.vitorias) || 0, d = Number(r.derrotas) || 0;
+    vitorias += v; derrotas += d;
+    if (v + d > usos && v + d > 0) { usos = v + d; fav = r; }
+  }
+  if (vitorias + derrotas === 0) return null;
+  return { vitorias, derrotas, favorito: fav ? { id: fav.personagem, nivel: nivelDoPersonagem(Number(fav.xp) || 0) } : null };
+}
+
+/* Os textos da faixa do duelo no perfil (vao pelo tradutor, uma vez). */
+const TEXTOS_DO_PERFIL_DUELO = {
+  duelo: "Duelo", vitorias: "vitórias", derrotas: "derrotas", servidor: "no servidor", para: "para", maximo: "patente máxima",
+  ...Object.fromEntries(PATENTES.map((p) => [`p_${p.nome}`, p.nome])),
+};
+const PERFIL_DUELO_NA_LINGUA = new Map();
+
+async function desenharPerfil(sharp, { nome, reserva, nivel, dentro, precisa, posicao, xp, mensagens, foto, fundo, idioma = null,
+  duelo = null, semXp = false }, fontfile = FONTE_DA_IMAGEM) {
   const fonte = await fonteDoDesenho(fontfile);
-  const W = PF_LARGURA, H = PF_ALTURA, x = 300, larg = W - x - 50;
+  const W = PF_LARGURA, H = PF_ALTURA + (duelo ? PF_FAIXA_DUELO : 0), x = 300, larg = W - x - 50;
   const quem = [soLetrasDaFonte(fonte, nome), soLetrasDaFonte(fonte, reserva)].find(temLetra) || "?";
   const linha = (t, y, tam, cor, maxL = larg) => {
     let s2 = tam;
@@ -10136,22 +10174,67 @@ async function desenharPerfil(sharp, { nome, reserva, nivel, dentro, precisa, po
     `<circle cx="150" cy="170" r="122" fill="#7FD3FF" opacity="0.7" filter="url(#g)"/>` +
     `<circle cx="150" cy="170" r="118" fill="#FFFFFF"/>` +
     (foto ? "" : `<circle cx="150" cy="170" r="110" fill="#404249"/>`) +
-    linha(quem, 120, 56, "#FFFFFF", larg - 230) +
-    direita(`LV. ${nivel}`, 120, 52, "#7FD3FF") +
-    linha(`#${fmt(posicao)} · ${fmt(xp)} XP · ${fmt(mensagens)} msg`, 172, 26, "#C9D6E3", idioma ? larg - 250 : larg) +
+    linha(quem, 120, 56, "#FFFFFF", semXp ? larg : larg - 230) +
+    (semXp ? "" : direita(`LV. ${nivel}`, 120, 52, "#7FD3FF") +
+      linha(`#${fmt(posicao)} · ${fmt(xp)} XP · ${fmt(mensagens)} msg`, 172, 26, "#C9D6E3", idioma ? larg - 250 : larg)) +
     (nomeDoIdioma ? direita(nomeDoIdioma, 172, 26, "#FFFFFF") : "") +
-    `<rect x="${x}" y="212" width="${larg}" height="34" rx="17" fill="#000" opacity="0.45"/>` +
-    `<rect x="${x}" y="212" width="${Math.max(34, Math.round(larg * pct))}" height="34" rx="17" fill="url(#b)"/>` +
-    direita(`${fmt(dentro)} / ${fmt(precisa)}`, 284, 22, "#E6F4FF") +
+    (semXp ? "" : `<rect x="${x}" y="212" width="${larg}" height="34" rx="17" fill="#000" opacity="0.45"/>` +
+      `<rect x="${x}" y="212" width="${Math.max(34, Math.round(larg * pct))}" height="34" rx="17" fill="url(#b)"/>` +
+      direita(`${fmt(dentro)} / ${fmt(precisa)}`, 284, 22, "#E6F4FF")) +
+    (duelo ? faixaDoDuelo(fonte, duelo, W, PF_ALTURA) : "") +
     `</svg>`;
   const camadas = [{ input: Buffer.from(svg) }];
   if (foto) camadas.push({ input: foto, left: 150 - BV_FOTO / 2, top: 170 - BV_FOTO / 2 });
+  /* O heroi favorito, redondo, no canto direito da faixa do duelo. */
+  if (duelo?.heroiFoto) {
+    const r = 46;
+    const masc = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${2 * r}" height="${2 * r}"><circle cx="${r}" cy="${r}" r="${r}"/></svg>`);
+    const rosto = await sharp(duelo.heroiFoto).resize(2 * r, 2 * r, { fit: "cover", position: "north" })
+      .composite([{ input: masc, blend: "dest-in" }]).png().toBuffer().catch(() => null);
+    if (rosto) camadas.push({ input: rosto, left: W - 50 - 2 * r, top: PF_ALTURA + 6 });
+  }
   if (idioma?.bandeira && nomeDoIdioma) {
     const w = fonte.getAdvanceWidth(nomeDoIdioma, 26);
     camadas.push({ input: await sharp(idioma.bandeira).resize(36, 36).png().toBuffer(),
       left: Math.round(W - 50 - w - 46), top: 143 });
   }
   return await sharp(base).composite(camadas).jpeg({ quality: 88 }).toBuffer();
+}
+
+/* A faixa do duelo, embaixo do perfil: escudo da patente, placar, barra ate'
+   a proxima patente e o heroi favorito (a foto entra por fora). */
+function faixaDoDuelo(fonte, d, W, y0) {
+  const tx = d.tx || TEXTOS_DO_PERFIL_DUELO;
+  const p = patenteDe(d.vitorias);
+  const txt = (t) => soLetrasDaFonte(fonte, String(t)) || String(t).replace(/[^\x20-\x7E]/g, "");
+  const escrever = (t, x, y, tam, cor, alinhar = "esquerda", max = 0) => {
+    const texto = txt(t);
+    let s2 = tam;
+    while (max && s2 > 10 && fonte.getAdvanceWidth(texto, s2) > max) s2 -= 1;
+    const w = fonte.getAdvanceWidth(texto, s2);
+    const x0 = alinhar === "meio" ? x - w / 2 : alinhar === "fim" ? x - w : x;
+    return `<path d="${fonte.getPath(texto, x0, y, s2).toPathData(2)}" fill="${cor}" filter="url(#s)"/>`;
+  };
+  const total = d.vitorias + d.derrotas;
+  const pct = Math.round((100 * d.vitorias) / Math.max(1, total));
+  const xT = 300, fimT = W - 50 - (d.heroiFoto ? 112 : 0), larg = fimT - xT;
+  const prox = p.proxima;
+  const parte = prox ? Math.max(0, Math.min(1, (d.vitorias - p.min) / (prox.min - p.min))) : 1;
+  /* Escudo: forma de brasao, na cor da patente. */
+  const cx = 150, cy = y0 + 58;
+  const escudo = `M ${cx - 34} ${cy - 40} L ${cx + 34} ${cy - 40} L ${cx + 34} ${cy + 4} Q ${cx + 34} ${cy + 34} ${cx} ${cy + 48} Q ${cx - 34} ${cy + 34} ${cx - 34} ${cy + 4} Z`;
+  const nomeP = tx[`p_${p.nome}`] || p.nome;
+  return `<rect x="24" y="${y0 + 4}" width="${W - 48}" height="${PF_FAIXA_DUELO - 16}" rx="18" fill="#000" opacity="0.5"/>` +
+    `<path d="${escudo}" fill="${p.cor}" stroke="#FFFFFF" stroke-width="4" filter="url(#s)"/>` +
+    escrever(String(p.indice + 1), cx, cy + 16, 40, "#1E1F22", "meio") +
+    escrever(String(tx.duelo).toUpperCase(), xT, y0 + 38, 20, "#C9D6E3") +
+    escrever(nomeP, xT + fonte.getAdvanceWidth(txt(String(tx.duelo).toUpperCase()), 20) + 14, y0 + 38, 30, p.cor, "esquerda", 260) +
+    (d.posicao ? escrever(`#${d.posicao} ${tx.servidor}`, fimT, y0 + 38, 22, "#FFFFFF", "fim", 220) : "") +
+    escrever(`${d.vitorias} ${tx.vitorias} · ${d.derrotas} ${tx.derrotas} · ${pct}%`, xT, y0 + 70, 24, "#FFFFFF", "esquerda", larg) +
+    `<rect x="${xT}" y="${y0 + 80}" width="${larg}" height="14" rx="7" fill="#000" opacity="0.55"/>` +
+    `<rect x="${xT}" y="${y0 + 80}" width="${Math.max(14, Math.round(larg * parte))}" height="14" rx="7" fill="${p.cor}"/>` +
+    escrever(prox ? `${d.vitorias}/${prox.min} ${tx.para} ${tx[`p_${prox.nome}`] || prox.nome}` : tx.maximo, fimT, y0 + 112, 16, "#C9D6E3", "fim", larg) +
+    (d.heroiNivel ? escrever(`Nv ${d.heroiNivel}`, W - 50 - 46, y0 + 112, 16, "#FFD95A", "meio") : "");
 }
 
 /* A bandeira como imagem (o desenho da fonte nao tem emoji colorido): o
@@ -10171,13 +10254,26 @@ async function comandoPerfil(inter) {
   await inter.deferReply();
   const idioma = await linguaDe(inter);
   const servidor = await servidorDoGuild(inter.guildId);
-  if (!servidor?.niveis_ligado) {
+  const alvo = inter.options.getMember("membro") || inter.member;
+  /* O duelo entra no perfil de quem ja' duelou -- mesmo com os niveis do
+     chat desligados, ai' o perfil mostra so' o duelo. */
+  const resumo = resumoDoDuelo(await sb(`cyron_duelo_personagem?user_id=eq.${alvo.id}&select=personagem,xp,vitorias,derrotas`).catch(() => null));
+  if (!servidor?.niveis_ligado && !resumo) {
     const [t] = await nalingua(idioma, inter.guildId, "Os níveis estão desligados neste servidor. Quem administra liga com /niveis.");
     return inter.editReply({ content: `📊 ${t}` });
   }
-  const alvo = inter.options.getMember("membro") || inter.member;
-  const { xp, mensagens } = await xpAgora(inter.guildId, alvo.id);
-  const acima = await rpc("cyron_posicao_xp", { p_guild: inter.guildId, p_xp: xp }).catch(() => null);
+  const semXp = !servidor?.niveis_ligado;
+  let duelo = null;
+  if (resumo) {
+    const ranking = await rankingDoServidor(inter.guildId).catch(() => []);
+    const lugar = ranking.findIndex((r) => r.userId === alvo.id);
+    const heroi = personagemPorId(resumo.favorito?.id);
+    duelo = { ...resumo, posicao: lugar >= 0 ? lugar + 1 : null, heroiNivel: heroi ? resumo.favorito.nivel : null,
+      heroiFoto: heroi ? `${RETRATOS_DO_DUELO}${heroi.id}.jpg` : null,
+      tx: await textosNaLingua(TEXTOS_DO_PERFIL_DUELO, idioma, inter.guildId, PERFIL_DUELO_NA_LINGUA).catch(() => TEXTOS_DO_PERFIL_DUELO) };
+  }
+  const { xp, mensagens } = semXp ? { xp: 0, mensagens: 0 } : await xpAgora(inter.guildId, alvo.id);
+  const acima = semXp ? 0 : await rpc("cyron_posicao_xp", { p_guild: inter.guildId, p_xp: xp }).catch(() => null);
   const n = nivelDoXp(xp);
   const sharp = await carregarSharp();
   let imagem = null;
@@ -10189,11 +10285,12 @@ async function comandoPerfil(inter) {
       const achado = LINGUAS_MENU.find(([c]) => c === codigo);
       const idioma = achado ? { codigo, nome: achado[3] || achado[1], bandeira: await imagemDaBandeira(codigo).catch(() => null) } : null;
       const args = { nome: alvo.displayName, reserva: alvo.user?.username, ...n, posicao: (Number(acima) || 0) + 1,
-        xp, mensagens, foto, fundo, idioma };
+        xp, mensagens, foto, fundo, idioma, duelo, semXp };
       return await desenharPerfil(sharp, args).catch(() => desenharPerfil(sharp, { ...args, fundo: null }));
     }).catch(() => null);
   }
-  const texto = `📊 <@${alvo.id}> · **Lv. ${n.nivel}** · ${xp.toLocaleString("en-US")} XP`;
+  const texto = `📊 <@${alvo.id}>` + (semXp ? "" : ` · **Lv. ${n.nivel}** · ${xp.toLocaleString("en-US")} XP`) +
+    (duelo ? ` · ⚔️ **${duelo.tx[`p_${patenteDe(duelo.vitorias).nome}`] || patenteDe(duelo.vitorias).nome}** · ${duelo.vitorias}🏆` : "");
   return inter.editReply({ content: imagem ? `<@${alvo.id}>` : texto, allowedMentions: { parse: [] },
     ...(imagem ? { files: [{ attachment: imagem, name: "perfil.jpg" }] } : {}) });
 }
