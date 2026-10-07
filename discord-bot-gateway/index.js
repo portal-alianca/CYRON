@@ -9153,7 +9153,7 @@ async function cliqueEvento(inter) {
   /* Ligar a votação e apagar são do LÍDER. A checagem é no clique, e não só
      no botão: botão escondido não é botão protegido. */
   if (acao === "votacao" || acao === "apagar") {
-    if (!inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    if (!podeAdministrar(inter)) {
       return inter.reply({ flags: 64, content: "Só quem administra o servidor pode mexer no evento." });
     }
     await inter.deferUpdate();
@@ -9809,7 +9809,7 @@ async function previaDeBoasVindas(inter, idioma, alvo, modelo, cabeca) {
 async function cliqueBoasVindas(inter) {
   const acao = inter.customId.split(":")[1];
   const idioma = await linguaDe(inter);
-  if (!inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (!podeAdministrar(inter)) {
     const [t] = await nalingua(idioma, inter.guildId, "Só quem administra o servidor mexe nas boas-vindas.");
     return inter.reply({ flags: 64, content: t });
   }
@@ -10380,7 +10380,7 @@ async function comandoNiveis(inter) {
 async function cliqueNiveis(inter) {
   const acao = inter.customId.split(":")[1];
   const idioma = await linguaDe(inter);
-  if (!inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (!podeAdministrar(inter)) {
     const [t] = await nalingua(idioma, inter.guildId, "Só quem administra o servidor mexe nos níveis.");
     return inter.reply({ flags: 64, content: t });
   }
@@ -10525,7 +10525,7 @@ async function cliqueSorteio(inter) {
   if (!s) return inter.reply({ flags: 64, content: "😶" });
 
   if (acao === "refazer") {
-    if (!inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    if (!podeAdministrar(inter)) {
       const [t] = await nalingua(idioma, inter.guildId, "Só quem administra o servidor pode sortear de novo.");
       return inter.reply({ flags: 64, content: t });
     }
@@ -10652,6 +10652,139 @@ async function comandoInteracao(inter, chave) {
       description: `**${de}** → **${para}**`, ...(gif ? { image: { url: gif } } : {}) }],
     allowedMentions: { users: marcar ? [alvoUser.id] : [] },
   });
+}
+
+/* ---------------- 🛠️ /suporte: acesso do dono da CYRON, COM permissao ----------------
+
+   O dono da CYRON NAO configura servidor alheio por conta propria -- nem
+   por cargo, nem por "modo dono". Quem decide e' o ADM de cada servidor:
+     /suporte liberar  -- o ADM libera por 1, 6, 24 ou 72 horas, e o canal
+                         recebe um aviso a' vista de todos
+     /suporte abrir    -- so' o dono da CYRON, so' enquanto valer: abre o
+                         painel da CYRON, os niveis e as boas-vindas
+     /suporte status   -- ate' quando vale e o que foi mexido
+     /suporte encerrar -- o ADM (ou o proprio suporte) corta na hora
+   O Discord esconde os comandos de ADM de quem nao tem a permissao, e o bot
+   nao muda isso; por isso o suporte entra pelo /suporte abrir, e os botoes
+   dos paineis conferem `podeAdministrar`. Tudo o que o suporte toca vai para
+   o registro, que o ADM ve no /suporte status. */
+const SUPORTE_HORAS = [1, 6, 24, 72];
+const suportes = new Map();          // guildId -> { ate, por, canal, registro }
+const donosConfirmados = new Set();  // userIds que ja' passaram pelo ehDono
+
+/* Vale o acesso de suporte desta pessoa neste servidor agora? Sincrono: o
+   dono so' entra na lista depois do ehDono do /suporte abrir. */
+function suporteValido(guildId, userId, agora = Date.now()) {
+  const s = suportes.get(guildId);
+  return !!(s && s.ate > agora && donosConfirmados.has(userId));
+}
+
+/* Quem pode mexer na configuracao: quem tem Gerenciar Servidor, ou o
+   suporte liberado. Cada uso pelo suporte entra no registro. */
+function podeAdministrar(inter) {
+  if (inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
+  if (!inter.guildId || !suporteValido(inter.guildId, inter.user?.id)) return false;
+  anotarSuporte(inter.guildId, String(inter.customId || inter.commandName || "?").split(":").slice(0, 2).join(":"));
+  return true;
+}
+
+function anotarSuporte(guildId, oque) {
+  const s = suportes.get(guildId);
+  if (!s) return;
+  s.registro.push({ t: new Date().toISOString(), oque: String(oque).slice(0, 60) });
+  s.registro = s.registro.slice(-50);
+  sbPatch(`cyron_suporte?guild_id=eq.${guildId}`, { registro: s.registro }).catch(() => {});
+}
+
+async function carregarSuporte(guildId) {
+  const r = (await sb(`cyron_suporte?guild_id=eq.${guildId}&select=*`).catch(() => null))?.[0];
+  if (!r || Date.parse(r.ate) <= Date.now()) { suportes.delete(guildId); return null; }
+  const s = { ate: Date.parse(r.ate), por: r.liberado_por, canal: r.canal_id, registro: Array.isArray(r.registro) ? r.registro : [] };
+  suportes.set(guildId, s);
+  return s;
+}
+
+/* O painel da CYRON (o mesmo do /cyron), para quem ja' passou na checagem. */
+async function abrirPainelDaCyron(inter) {
+  if (!inter.deferred && !inter.replied) await inter.deferReply({ flags: 64 });
+  const servidor = await servidorDoGuild(inter.guildId);
+  if (!servidor) return inter.editReply({ content: "Ainda não terminei de me instalar aqui. Tente de novo em um minuto." });
+  const meu = (await idiomaEscolhido(inter.user.id)) || idiomaDoAplicativo(inter.locale);
+  const { embed, componentes } = await montarPainel(inter.guild, servidor, meu);
+  return inter.editReply({ embeds: [embed], components: componentes });
+}
+
+/* Os comandos de configuracao chamados por botao: as opcoes vem vazias, e
+   eles abrem o painel de como esta'. */
+function semOpcoes(inter) {
+  const vazio = () => null;
+  const sombra = Object.create(inter);
+  sombra.options = { getString: vazio, getChannel: vazio, getRole: vazio, getInteger: vazio, getBoolean: vazio,
+    getUser: vazio, getMember: vazio, getNumber: vazio, getSubcommand: vazio, getAttachment: vazio };
+  return sombra;
+}
+
+async function comandoSuporte(inter) {
+  const sub = inter.options.getSubcommand(false);
+  const fala = async (t) => (await nalingua(await linguaDe(inter), inter.guildId, t))[0];
+  if (!inter.guildId) return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
+  const admin = inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+
+  if (sub === "liberar") {
+    if (!admin) return inter.reply({ flags: 64, content: `🛠️ ${await fala("Só quem administra o servidor (Gerenciar servidor) pode liberar o suporte.")}` });
+    const horas = SUPORTE_HORAS.includes(inter.options.getInteger("horas")) ? inter.options.getInteger("horas") : 1;
+    const ate = Date.now() + horas * 3600 * 1000;
+    const s = { ate, por: inter.user.id, canal: inter.channelId, registro: [] };
+    suportes.set(inter.guildId, s);
+    await sbPost("cyron_suporte", { guild_id: inter.guildId, ate: new Date(ate).toISOString(), liberado_por: inter.user.id,
+      canal_id: inter.channelId, registro: [] }, "resolution=merge-duplicates").catch((e) => console.error("suporte: nao gravei:", e?.message || e));
+    return inter.reply({ content: `🛠️ <@${inter.user.id}> ${await fala("liberou o suporte da CYRON para configurar o bot neste servidor até")} <t:${Math.floor(ate / 1000)}:f> (<t:${Math.floor(ate / 1000)}:R>).\n` +
+      `-# ${await fala("Tudo o que o suporte mexer fica registrado em /suporte status. Para cortar antes: /suporte encerrar.")}`,
+      allowedMentions: { parse: [] } });
+  }
+
+  if (sub === "encerrar") {
+    const ehOSuporte = await ehDono(inter.user.id);
+    if (!admin && !ehOSuporte) return inter.reply({ flags: 64, content: `🛠️ ${await fala("Só quem administra o servidor pode encerrar o suporte.")}` });
+    const s = suportes.get(inter.guildId) || await carregarSuporte(inter.guildId);
+    suportes.delete(inter.guildId);
+    await sbDel(`cyron_suporte?guild_id=eq.${inter.guildId}`).catch(() => {});
+    const feito = (s?.registro || []).length;
+    return inter.reply({ content: `🛠️ ${await fala("Acesso do suporte da CYRON encerrado.")}${feito ? ` (${feito} ${await fala("ações registradas")})` : ""}`,
+      allowedMentions: { parse: [] } });
+  }
+
+  if (sub === "status") {
+    const s = suportes.get(inter.guildId) || await carregarSuporte(inter.guildId);
+    if (!s) return inter.reply({ flags: 64, content: `🛠️ ${await fala("O suporte da CYRON não tem acesso a este servidor.")}` });
+    const linhas = s.registro.slice(-15).map((r) => `<t:${Math.floor(Date.parse(r.t) / 1000)}:t> · \`${r.oque}\``);
+    return inter.reply({ flags: 64, content: `🛠️ ${await fala("Suporte liberado até")} <t:${Math.floor(s.ate / 1000)}:f> · <@${s.por}>\n` +
+      (linhas.length ? linhas.join("\n") : `-# ${await fala("Nada foi mexido ainda.")}`), allowedMentions: { parse: [] } });
+  }
+
+  /* abrir: so' o dono da CYRON, so' com a liberacao valendo. */
+  if (!await ehDono(inter.user.id)) return inter.reply({ flags: 64, content: `🛠️ ${await fala("Este é o acesso do suporte da CYRON. Para pedir ajuda, use /help.")}` });
+  donosConfirmados.add(inter.user.id);
+  const s = suportes.get(inter.guildId) || await carregarSuporte(inter.guildId);
+  if (!s || s.ate <= Date.now()) {
+    return inter.reply({ flags: 64, content: "🛠️ Este servidor não liberou o suporte. Peça para um ADM usar /suporte liberar." });
+  }
+  anotarSuporte(inter.guildId, "abrir");
+  return inter.reply({ flags: 64, content: `🛠️ Suporte liberado até <t:${Math.floor(s.ate / 1000)}:R> por <@${s.por}>. O que abrir?`,
+    components: [{ type: 1, components: [
+      { type: 2, custom_id: "sa:cyron", style: 1, emoji: { name: "⚙️" }, label: "Painel da CYRON" },
+      { type: 2, custom_id: "sa:niveis", style: 2, emoji: { name: "📈" }, label: "Níveis" },
+      { type: 2, custom_id: "sa:boas-vindas", style: 2, emoji: { name: "👋" }, label: "Boas-vindas" },
+    ] }], allowedMentions: { parse: [] } });
+}
+
+async function cliqueAcessoSuporte(inter) {
+  if (!podeAdministrar(inter)) return inter.reply({ flags: 64, content: "🛠️ O acesso do suporte expirou ou foi encerrado." });
+  const qual = inter.customId.split(":")[1];
+  if (qual === "cyron") return abrirPainelDaCyron(inter);
+  if (qual === "niveis") return comandoNiveis(semOpcoes(inter));
+  if (qual === "boas-vindas") return comandoBoasVindas(semOpcoes(inter));
+  return inter.deferUpdate();
 }
 
 /* ---------------- ⚔️ Duelo CYRON ----------------
@@ -14399,7 +14532,7 @@ async function cliquePainel(inter) {
 
   /* A sala e' da administracao, mas cargo muda e convidado entra. A checagem
      e' no clique, nao na visibilidade do canal. */
-  if (!inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (!podeAdministrar(inter)) {
     return inter.reply({ flags: 64, content: "🔒 Só quem tem **Gerenciar Servidor** pode mexer aqui." });
   }
 
@@ -14708,7 +14841,7 @@ function janelaValida(j) {
 }
 
 async function salvarMotor(inter) {
-  if (!inter.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (!podeAdministrar(inter)) {
     return inter.reply({ flags: 64, content: "🔒 Só quem tem **Gerenciar Servidor** pode mexer aqui." });
   }
   const servidor = await servidorDoGuild(inter.guildId);
@@ -19495,6 +19628,7 @@ async function comandoDeInteracao(inter) {
   if (nome === "admin") return comandoAdmin(inter);
   if (nome === "arena") return inter.reply({ flags: 64, content: ARENA_ENCERRADA });
   if (nome === "hora") return comandoHora(inter);
+  if (nome === "suporte") return comandoSuporte(inter);
   if (nome === "duelo" || nome === "equipar" || nome === "codex") {
     if (!inter.guildId && nome === "duelo") return inter.reply({ flags: 64, content: "Este comando só funciona dentro de um servidor." });
     return nome === "duelo" ? comandoDuelo(inter) : nome === "equipar" ? comandoEquipar(inter) : comandoCodex(inter);
@@ -19543,17 +19677,9 @@ async function comandoDeInteracao(inter) {
     /* Reconhecer antes de ir ao banco. Com o `servidorDoGuild` na frente, um
        banco lento gastava os três segundos e o painel morria em "O aplicativo
        não respondeu" -- sem nada no canal de erros, porque nada falhou. */
-    await inter.deferReply({ flags: 64 });
-    const servidor = await servidorDoGuild(inter.guildId);
-    if (!servidor) {
-      return inter.editReply({ content: "Ainda não terminei de me instalar aqui. Tente de novo em um minuto." });
-    }
-    /* Efêmero e de uma pessoa só: aqui dá para falar a língua dela.
-       O palpite do Discord entra como no resto -- quem nunca escolheu idioma
-       ainda assim lê o painel na língua do aparelho. */
-    const meu = (await idiomaEscolhido(inter.user.id)) || idiomaDoAplicativo(inter.locale);
-    const { embed, componentes } = await montarPainel(inter.guild, servidor, meu);
-    return inter.editReply({ embeds: [embed], components: componentes });
+    /* Efêmero e de uma pessoa só: o painel fala a língua dela (a escolhida,
+       ou a do aparelho). */
+    return abrirPainelDaCyron(inter);
   }
 
   if (nome === "mylanguage") {
@@ -19642,6 +19768,10 @@ client.on("interactionCreate", async (inter) => {
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("evento:")) {
       return await cliqueEvento(inter);
+    }
+    /* "sa:" e nao "sup:": o "sup:ler:" e' do botao 🌐 do servidor de suporte. */
+    if (inter.isMessageComponent() && inter.customId.startsWith("sa:")) {
+      return await cliqueAcessoSuporte(inter);
     }
     if (inter.isMessageComponent() && inter.customId.startsWith("dp:")) {
       return await cliqueDoPainel(inter);
@@ -20235,7 +20365,7 @@ client.on("messageReactionAdd", async (reacao, quem) => {
    separarComandos leria /admin como comando do jogo e o empurraria pros
    servidores com alianca -- exatamente o contrario do que ele e'. */
 const COMANDOS_DE_TODOS = new Set(["mylanguage", "Translate", "cyron", "help", "admin", "arena", "evento", "Criar evento", "hora", "boas-vindas", "perfil", "top", "niveis", "xp",
-  "sorteio", "abraco", "beijo", "tapa", "cafune", "duelo", "equipar", "codex"]);
+  "sorteio", "abraco", "beijo", "tapa", "cafune", "duelo", "equipar", "codex", "suporte"]);
 
 async function separarComandos() {
   try {
@@ -20671,7 +20801,7 @@ const NOMES_MEUS = new Set([
   "cyron", "help", "admin", "mylanguage", "arena", "evento", "settings", "portal", "player", "events", "ranking",
   "hora", "time", "boas-vindas", "welcome-card", "perfil", "profile", "top", "niveis", "levels", "xp",
   "sorteio", "giveaway", "abraco", "hug", "beijo", "kiss", "tapa", "slap", "cafune", "pat",
-  "duelo", "duel", "equipar", "equip", "codex",
+  "duelo", "duel", "equipar", "equip", "codex", "suporte", "support",
 ]);
 
 /* Uma linha do formulario que carrega duas respostas: "todos 60".
@@ -21358,6 +21488,22 @@ const GLOBAIS_DO_CYRON = [
       { type: 3, name: "detalhes", required: false, max_length: 800,
         description: "O que mais precisa ser dito",
         descriptionLocalizations: TRADUCOES_DO_EVENTO.detalhes },
+    ],
+  },
+  {
+    /* Sem permissao padrao DE PROPOSITO: o dono da CYRON precisa ver o
+       comando para o "abrir". Quem decide cada subcomando e' o codigo. */
+    name: "suporte",
+    nameLocalizations: { "en-US": "support", "en-GB": "support", "es-ES": "soporte" },
+    description: "Liberar o suporte da CYRON para configurar o bot / Allow CYRON support",
+    dmPermission: false,
+    options: [
+      { type: 1, name: "liberar", description: "ADM: liberar o suporte da CYRON por um tempo / Admin: allow support for a while",
+        options: [{ type: 4, name: "horas", required: true, description: "Por quanto tempo / For how long",
+          choices: SUPORTE_HORAS.map((h) => ({ name: `${h} h`, value: h })) }] },
+      { type: 1, name: "status", description: "Até quando vale e o que foi mexido / Until when, and what was changed" },
+      { type: 1, name: "encerrar", description: "ADM: cortar o acesso do suporte agora / Admin: end support access now" },
+      { type: 1, name: "abrir", description: "Só o suporte da CYRON / CYRON support only" },
     ],
   },
   {
