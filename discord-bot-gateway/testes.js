@@ -8440,8 +8440,13 @@ function conferirCartao(onde, embed, componentes = []) {
     "xpBase", "cargosDosNiveis", "cargosQueFaltam", "salasSemXp", "contaComoMensagem", "multiplicadorDeXp", "cargosDoNivel", "NV_TEXTO_PADRAO", "NV_TEXTO_MAX", "textoDeNivel",
     "ganharXp", "somarXp", "semanaDoXp", "POD_LARGURA", "POD_ALTURA", "desenharPodio",
     "XP_VOZ_POR_MINUTO", "quemGanhaNaVoz", "descarregarXp", "linhasDaGuerra", "LINGUAS_MENU", "nomeNaPropriaLingua",
-    "FONTES_LIDAS", "fonteDoDesenho", "soLetrasDaFonte", "temLetra", "BV_FOTO", "PF_LARGURA", "PF_ALTURA", "desenharPerfil"]);
+    "FONTES_LIDAS", "fonteDoDesenho", "soLetrasDaFonte", "temLetra", "BV_FOTO", "PF_LARGURA", "PF_ALTURA", "PF_FAIXA_DUELO",
+    "PATENTES", "patenteDe", "TEXTOS_DO_PERFIL_DUELO", "faixaDoDuelo", "desenharPerfil"]);
 
+  ok("sem vitória: Recruta", x.patenteDe(0).nome, "Recruta");
+  ok("5 vitórias: Bronze", x.patenteDe(5).nome, "Bronze");
+  ok("34 vitórias ainda é Prata, faltando 1 para Ouro", [x.patenteDe(34).nome, x.patenteDe(34).proxima.min], ["Prata", 35]);
+  ok("200 vitórias: Lenda, sem próxima", [x.patenteDe(250).nome, x.patenteDe(250).proxima], ["Lenda", null]);
   ok("a curva do MEE6: nível 0 → 1 pede 100", x.xpParaSubir(0), 100);
   ok("nível 1 → 2 pede 155", x.xpParaSubir(1), 155);
   ok("0 XP é nível 0", x.nivelDoXp(0).nivel, 0);
@@ -8543,6 +8548,18 @@ function conferirCartao(onde, embed, componentes = []) {
   const card = await x.desenharPerfil(sharp, { nome: "𝓕𝓮𝓻𝓷𝓪𝓷𝓭𝓸 †", reserva: "f", nivel: 7, dentro: 120, precisa: 495,
     posicao: 3, xp: 2340, mensagens: 150, foto: null, fundo: null,
     idioma: { codigo: "ru", nome: "Русский", bandeira: await sharp({ create: { width: 72, height: 72, channels: 4, background: "#c00" } }).png().toBuffer() } }, FONTE);
+  {
+    const sharpP = (await import("sharp")).default;
+    const FONTE_P = new URL("./fontes/DejaVuSans-Bold.ttf", import.meta.url).pathname;
+    globalThis.FUNDO_DA_CYRON = new URL("./img/fundo-cyron.jpg", import.meta.url).pathname;
+    const comDuelo = await x.desenharPerfil(sharpP, { nome: "Tiago", reserva: "t", nivel: 3, dentro: 10, precisa: 100, posicao: 2, xp: 400, mensagens: 50,
+      foto: null, fundo: null, duelo: { vitorias: 12, derrotas: 3, posicao: 1, heroiNivel: 4,
+        heroiFoto: new URL("./img/duelo/zumbi.jpg", import.meta.url).pathname } }, FONTE_P);
+    ok("o perfil de quem duela ganha a faixa do duelo", (await sharpP(comDuelo).metadata()).height, x.PF_ALTURA + x.PF_FAIXA_DUELO);
+    const soDuelo = await x.desenharPerfil(sharpP, { nome: "Tiago", reserva: "t", nivel: 0, dentro: 0, precisa: 100, posicao: 1, xp: 0, mensagens: 0,
+      foto: null, fundo: null, semXp: true, duelo: { vitorias: 0, derrotas: 2, posicao: null } }, FONTE_P);
+    verdade("níveis desligados: o perfil sai só com o duelo", soDuelo.length > 10000);
+  }
   const meta = await sharp(card).metadata();
   ok("o cartão do /perfil sai em JPEG 1024x340", [meta.format, meta.width, meta.height], ["jpeg", 1024, 340]);
   const pod = await x.desenharPodio(sharp, { lugares: [{ nome: "Ana", legenda: "LV. 9 · 3,000 XP", foto: null },
