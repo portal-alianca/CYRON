@@ -8617,7 +8617,7 @@ function conferirCartao(onde, embed, componentes = []) {
   const elenco = await import(`${aqui}/duelo-elenco.js`);
   Object.assign(globalThis, { PERSONAGENS: elenco.PERSONAGENS, ESPACOS: elenco.ESPACOS, EFEITOS: elenco.EFEITOS,
     NIVEIS_DO_PERSONAGEM: elenco.NIVEIS_DO_PERSONAGEM });
-  const m = carregar(["DUELO_MORTE_SUBITA", "DUELO_PERFURAR", "danoPrevisto", "DUELO_VIDA", "DUELO_ENERGIA_INICIAL", "DUELO_ENERGIA_TURNO", "DUELO_ENERGIA_MAX", "DUELO_XP",
+  const m = carregar(["DUELO_TEXTOS", "DUELO_MORTE_SUBITA", "DUELO_PERFURAR", "danoPrevisto", "DUELO_VIDA", "DUELO_ENERGIA_INICIAL", "DUELO_ENERGIA_TURNO", "DUELO_ENERGIA_MAX", "DUELO_XP",
     "DUELO_TREINOS_DIA", "DUELO_DUELOS_DIA", "ESPACOS_ORDEM", "personagemPorId", "nivelDoPersonagem", "kitEquipado", "novoLutador", "podeUsar",
     "comecarVez", "usarHabilidade", "passarVez", "jogadaDoBot", "barra", "estadoDoLutador", "telaDoDuelo", "xpDoDuelo",
     "telaDeEquipar"]);
@@ -8844,7 +8844,7 @@ function conferirCartao(onde, embed, componentes = []) {
     globalThis.MEMORIA_PARA_DESENHAR = 1e12;
     const pn = carregar(["ESPACOS_ORDEM", "personagemPorId", "nivelDoPersonagem", "kitEquipado", "descricaoDaHabilidade",
       "ROTULOS_DA_FICHA", "LINGUAS_SEM_FONTE_NO_CARD", "linguaDoCard", "traduzirTextos", "HEROIS_NA_LINGUA", "heroiNaLingua",
-      "TEXTOS_DO_PAINEL", "PAINEL_NA_LINGUA", "textosDoPainel",
+      "TEXTOS_DO_PAINEL", "PAINEL_NA_LINGUA", "textosNaLingua", "textosDoPainel", "DUELO_TEXTOS", "DUELO_NA_LINGUA", "prepararLingua",
       "heroisAtivos", "cardsDoPainel", "CARDS_GUARDADOS", "heroiAtivo", "cardDoPainel", "progressoDeTodos", "abasDoPainel", "telaDoPainel"]);
     const zumbi = elenco.PERSONAGENS.findIndex((p) => p.id === "zumbi");
     ok("o herói ativo é o último mexido", await pn.heroiAtivo("111111"), "zumbi");
@@ -8859,6 +8859,12 @@ function conferirCartao(onde, embed, componentes = []) {
     verdade("em inglês, nome, habilidades e rótulos vão traduzidos", enHeroi.p.curto === "EN:Alexandre" &&
       enHeroi.p.kit.basica[0].nome.startsWith("EN:") && enHeroi.p.fatos[9].startsWith("EN:") && enHeroi.rot.libera === "EN:Libera no nível");
     verdade("o retrato e os números não mudam", enHeroi.p.id === "alexandre" && enHeroi.p.kit.especial[0].dano === 18);
+    const luta = { guildId: "1" };
+    await pn.prepararLingua(luta, "en");
+    ok("a luta pega as palavras fixas na língua de quem desafiou", luta.tx.errou, "EN:errou!");
+    const lutaPt = {};
+    await pn.prepararLingua(lutaPt, "pt");
+    ok("em português não vai ao tradutor", lutaPt.tx.errou, "errou!");
     const enPainel = await pn.textosDoPainel("en", "1");
     ok("os botões do painel também", enPainel.duelar, "EN:Duelar");
     const herois = await pn.telaDoPainel("111111", "herois", zumbi);
