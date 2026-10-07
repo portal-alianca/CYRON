@@ -157,6 +157,12 @@ function carregar(nomes) {
   }
 }
 
+/* A marca "texto do bot" (que nao conta acerto de cache no uso) e' usada por
+   varias funcoes que os testes carregam sozinhas; ela fica no escopo de todos. */
+globalThis.AsyncLocalStorage = (await import("node:async_hooks")).AsyncLocalStorage;
+Object.assign(globalThis, carregar(["textoDoBot", "comoTextoDoBot", "ehTextoDoBot", "traducoesDoBot", "MAX_DO_BOT",
+  "guardarDoBot", "traduzirEmbedDoBot"]));
+
 /* Comentário NÃO é código, e um teste que lê texto-fonte precisa saber disso.
 
    Isto já custou quatro reprovações erradas neste arquivo, todas do mesmo
@@ -4343,6 +4349,33 @@ function conferirCartao(onde, embed, componentes = []) {
     ok("vazio volta vazio, sem chamar o tradutor", [await C.traduzirComCache("   ", "en"), traduziu], ["   ", 3]);
     for (let i = 0; i < C.MAX_NA_MEMORIA + 50; i++) C.lembrarTraducao(`k${i}`, "x");
     verdade("a memória tem teto", C.traducoesNaMemoria.size <= C.MAX_NA_MEMORIA);
+  }
+
+  /* ---- texto do bot x mensagem de gente: o grafico so' conta gente ---- */
+  {
+    let usos = [];
+    globalThis.anotarUso = (_s, _m, u) => usos.push(u);
+    globalThis.doCache = async () => "do banco";
+    globalThis.traduzir = async (t) => `[${t}]`;
+    globalThis.sbPost = async () => {};
+    const C = carregar(["MAX_NA_MEMORIA", "traducoesNaMemoria", "lembrarTraducao", "textoDoCache", "traduzirComCache", "traduzirNucleo"]);
+    await C.traduzirComCache("mensagem de gente", "en");
+    ok("mensagem de gente vinda do cache conta no uso", usos, [{ cache: 1 }]);
+    usos = [];
+    const r1 = await comoTextoDoBot(() => C.traduzirComCache("Sua agenda", "ar"));
+    const r2 = await comoTextoDoBot(() => C.traduzirComCache("Sua agenda", "ar"));
+    ok("rótulo do bot vindo do cache não conta no gráfico", usos, []);
+    verdade("e fica na memória própria dos rótulos", r1 === "do banco" && r2 === "do banco" && traducoesDoBot.size > 0);
+    globalThis.doCache = async () => null;
+    await comoTextoDoBot(() => C.traduzirComCache("Rótulo novo", "ru"));
+    verdade("rótulo do bot traduzido pela primeira vez: o custo vem do traduzir (que anota os caracteres)", traducoesDoBot.size >= 2);
+    verdade("fora do comoTextoDoBot, nada é marcado", ehTextoDoBot() === false);
+    for (let i = 0; i < MAX_DO_BOT + 20; i++) guardarDoBot(`r${i}`, "x");
+    verdade("a memória dos rótulos também tem teto", traducoesDoBot.size <= MAX_DO_BOT);
+    const fonte = readFileSync(`${aqui}/index.js`, "utf8");
+    verdade("os avisos e telas (traduzirEmbed) são texto do bot", /async function traduzirEmbed\([^]{0,200}comoTextoDoBot/.test(fonte));
+    verdade("os moldes do painel (falaFixa) são texto do bot", /function falaFixa[^]{0,400}comoTextoDoBot\(\(\) => traduzirComCache/.test(fonte));
+    verdade("os cards (traduzirTextos) são texto do bot", /async function traduzirTextos[^]{0,600}comoTextoDoBot/.test(fonte));
   }
 
   /* ---- a configuração na memória: quem escreve, esquece ---- */

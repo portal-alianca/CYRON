@@ -14,6 +14,7 @@
 
 import { Client, GatewayIntentBits, Partials, Options, ActionRowBuilder, StringSelectMenuBuilder, PermissionFlagsBits, WebhookClient, ChannelType, MessageType } from "discord.js";
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 /* O catalogo do que eu faco. Mora fora daqui porque a pagina cyron/recursos.html
    nasce dele tambem -- uma lista so', e nao uma no bot e outra no site. */
 import { CATEGORIAS, doCliente } from "./catalogo.js";
@@ -1194,6 +1195,30 @@ async function usoDoMes(servidorId, hoje = hojeISO()) {
 const traducoesNaMemoria = new Map(); // chave -> traducao, a mais recente por ultimo
 const MAX_NA_MEMORIA = 10000; // ~2 MB: barato perto de uma ida ao banco por fala
 
+/* TEXTO DO BOT x MENSAGEM DE GENTE.
+
+   Os rotulos da CYRON (o card da agenda, botoes, avisos, os cards do duelo)
+   tambem passam pelo tradutor -- uma vez por lingua, e dai' pelo cache. So'
+   que cada redesenho de um card contava como "traducao do cache", e o
+   grafico de uso do servidor passou a mostrar milhares de "traducoes
+   gratis" que eram, na verdade, o bot relendo "Sua agenda" em arabe. O
+   grafico existe para mostrar mensagens de GENTE; misturar as duas coisas
+   enganava o dono do servidor (e a mim).
+
+   Agora: o que roda dentro de `comoTextoDoBot` nao conta acerto de cache no
+   uso (traducao nova conta, porque essa custa), e fica numa memoria propria
+   que as falas do chat nao empurram para fora -- depois do primeiro uso
+   apos um reinicio, nem o banco e' consultado. */
+const textoDoBot = new AsyncLocalStorage();
+function comoTextoDoBot(fn) { return textoDoBot.run(true, fn); }
+function ehTextoDoBot() { return textoDoBot.getStore() === true; }
+const traducoesDoBot = new Map();   // chave -> traducao dos rotulos do bot
+const MAX_DO_BOT = 8000;            // ~400 rotulos x 20 linguas
+function guardarDoBot(chave, traduzido) {
+  if (!traducoesDoBot.has(chave) && traducoesDoBot.size >= MAX_DO_BOT) traducoesDoBot.delete(traducoesDoBot.keys().next().value);
+  traducoesDoBot.set(chave, traduzido);
+}
+
 function lembrarTraducao(chave, traduzido) {
   traducoesNaMemoria.delete(chave);
   traducoesNaMemoria.set(chave, traduzido);
@@ -1232,22 +1257,31 @@ async function traduzirNucleo(texto, alvo, motor) {
      pra outro servidor. Barato e desonesto: a pessoa contratou a qualidade do
      motor que escolheu, nao a de quem passou ali antes. */
   const chave = createHash("sha256").update(`${motor.tipo} ${alvo} ${texto}`).digest("hex").slice(0, 40);
+  const doBot = ehTextoDoBot();
+  if (doBot && traducoesDoBot.has(chave)) return traducoesDoBot.get(chave);
   const lembrado = traducoesNaMemoria.get(chave);
   if (lembrado) {
-    lembrarTraducao(chave, lembrado);
-    anotarUso(motor.servidorId, motor.tipo, { cache: 1 });
+    if (doBot) guardarDoBot(chave, lembrado);
+    else {
+      lembrarTraducao(chave, lembrado);
+      anotarUso(motor.servidorId, motor.tipo, { cache: 1 });
+    }
     return lembrado;
   }
   const guardado = await doCache(chave);
   if (guardado) {
-    lembrarTraducao(chave, guardado);
-    anotarUso(motor.servidorId, motor.tipo, { cache: 1 });
+    if (doBot) guardarDoBot(chave, guardado);
+    else {
+      lembrarTraducao(chave, guardado);
+      anotarUso(motor.servidorId, motor.tipo, { cache: 1 });
+    }
     return guardado;
   }
 
   const novo = await traduzir(texto, alvo, motor);
   if (novo) {
-    lembrarTraducao(chave, novo);
+    if (doBot) guardarDoBot(chave, novo);
+    else lembrarTraducao(chave, novo);
     /* Sem await: a conversa nao espera o banco pra seguir. */
     sbPost("discord_traducao_cache", { chave, idioma: alvo, traduzido: novo, motor: motor.tipo })
       .catch(() => { /* ja traduzido; guardar e' bonus */ });
@@ -7001,7 +7035,7 @@ function falaFixa(idioma, motor = MOTOR_AUTO, origem = "pt") {
   const nativo = !idioma || idioma === origem;
   return async (molde, ...valores) => {
     if (nativo || !/\p{L}/u.test(molde)) return porMolde(molde, valores);
-    const t = await traduzirComCache(molde, idioma, motor);
+    const t = await comoTextoDoBot(() => traduzirComCache(molde, idioma, motor));
     const inteiro = t && valores.every((_, i) => t.includes(`{${i}}`));
     return porMolde(inteiro ? t : molde, valores);
   };
@@ -11872,7 +11906,7 @@ async function traduzirTextos(textos, idioma, guildId) {
   const pronto = new Map();
   for (let i = 0; i < unicos.length; i += 8) {
     await Promise.all(unicos.slice(i, i + 8).map(async (t) => {
-      pronto.set(t, (await traduzirComCache(t, idioma, motor).catch(() => null)) || t);
+      pronto.set(t, (await comoTextoDoBot(() => traduzirComCache(t, idioma, motor)).catch(() => null)) || t);
     }));
   }
   return textos.map((t) => pronto.get(t) ?? t);
@@ -18606,6 +18640,11 @@ ligarAlianca({ sb, rpc, responder, menuIdioma, SB_URL, SB_KEY, COR_OK });
    traduzir pt->pt seria pagar por devolver o mesmo texto. */
 async function traduzirEmbed(embed, idioma, motor = MOTOR_AUTO) {
   if (!idioma || idioma === "pt") return embed;
+  /* Todo uso daqui e' texto do bot (avisos, telas, cards). */
+  return comoTextoDoBot(() => traduzirEmbedDoBot(embed, idioma, motor));
+}
+
+async function traduzirEmbedDoBot(embed, idioma, motor) {
   const campo = async (t) => {
     if (typeof t !== "string" || !t.trim()) return t;
     /* Texto sem LETRA nenhuma nao vai pro tradutor.
