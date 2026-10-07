@@ -11048,7 +11048,7 @@ async function telaDoPainel(userId, aba, idx, aviso = "", { idioma = "pt", guild
   if (aba === "ranking") {
     const linhasRk = guildId ? await rankingDoServidor(guildId) : [];
     const guild = typeof client !== "undefined" && guildId ? client.guilds.cache.get(guildId) : null;
-    card = await cardDoPainel(`rank:${guildId}:${lingua.lingua}:${JSON.stringify(linhasRk.map((x) => [x.userId, x.vitorias, x.derrotas, x.favorito]))}`,
+    card = await cardDoPainel(`rank:${guildId}:${lingua.lingua}:${JSON.stringify(linhasRk.map((x) => [x.userId, x.vitorias, x.derrotas, x.favorito, x.foto]))}`,
       (sharp) => desenharRanking(sharp, linhasRk, guild?.name || "", { rot }));
     linhas.push(`🏆 **${tx.ranking}** · ${tx.rankingDica}`);
     if (!card) linhasRk.forEach((x, i) => linhas.push(`${i + 1}. <@${x.userId}> · ${x.vitorias} 🏆`));
@@ -11119,7 +11119,10 @@ async function rankingDoServidor(guildId) {
   if (guild && todos.length) {
     const membros = await guild.members.fetch({ user: todos.map((p) => p.userId) }).catch(() => null);
     aqui = todos.filter((p) => membros?.has(p.userId)).slice(0, 10)
-      .map((p) => ({ ...p, nome: membros.get(p.userId)?.displayName || membros.get(p.userId)?.user?.username || "?" }));
+      .map((p) => ({ ...p, nome: membros.get(p.userId)?.displayName || membros.get(p.userId)?.user?.username || "?",
+        /* A foto da pessoa (a do servidor, se tiver). Vem do Discord: sem
+           custo de cota, e o card fica guardado 5 minutos. */
+        foto: membros.get(p.userId)?.displayAvatarURL?.({ extension: "png", size: 128 }) || null }));
   }
   rankingsDoServidor.set(guildId, { ate: Date.now() + RANKING_GUARDADO, linhas: aqui });
   return aqui;
@@ -11154,11 +11157,23 @@ async function desenharRanking(sharp, linhas, nomeServidor, { rot = ROTULOS_DA_F
     if (i < 3) svg += `<circle cx="${m + 88}" cy="${cy}" r="24" fill="${medalhas[i]}" stroke="${FI_SEPIA}" stroke-width="2"/>`;
     svg += escreverEm(titulo, String(i + 1), m + 88, cy + 11, 30, i < 3 ? "#FFF8E6" : FI_TINTA, { alinhar: "meio" });
     const heroi = personagemPorId(p.favorito);
-    if (heroi) {
-      const rosto = await sharp(`${pasta}${heroi.id}.jpg`).resize(2 * r, 2 * r, { fit: "cover", position: "north" })
-        .composite([{ input: mascara, blend: "dest-in" }]).png().toBuffer();
+    /* A foto da pessoa; o heroi favorito vira um selo no canto. Sem foto
+       (ou se ela nao baixar), o retrato do heroi no lugar. */
+    const bytes = p.fotoBuffer || (p.foto ? await baixarImagem(p.foto) : null);
+    const redondo = async (entrada, raio, posicao = "centre") => {
+      const masc = raio === r ? mascara : Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${2 * raio}" height="${2 * raio}"><circle cx="${raio}" cy="${raio}" r="${raio}"/></svg>`);
+      return sharp(entrada).resize(2 * raio, 2 * raio, { fit: "cover", position: posicao }).composite([{ input: masc, blend: "dest-in" }]).png().toBuffer();
+    };
+    const foto = bytes ? await redondo(bytes, r).catch(() => null) : null;
+    const principal = foto || (heroi ? await redondo(`${pasta}${heroi.id}.jpg`, r, "north") : null);
+    if (principal) {
       svg += `<circle cx="${m + 168}" cy="${cy}" r="${r + 4}" fill="#B8862F"/>`;
-      camadas.push({ input: rosto, left: m + 168 - r, top: Math.round(cy - r) });
+      camadas.push({ input: principal, left: m + 168 - r, top: Math.round(cy - r) });
+    }
+    if (foto && heroi) {
+      const rs = 15, sx = m + 168 + 24, sy = Math.round(cy + 22);
+      svg += `<circle cx="${sx}" cy="${sy}" r="${rs + 3}" fill="#B8862F"/>`;
+      camadas.push({ input: await redondo(`${pasta}${heroi.id}.jpg`, rs, "north"), left: sx - rs, top: sy - rs });
     }
     const nome = soLetrasDaFonte(negrito, p.nome) || soLetrasDaFonte(negrito, `#${i + 1}`);
     svg += escreverEm(negrito, nome, m + 222, cy - 4, 30, FI_TINTA, { max: 380 });

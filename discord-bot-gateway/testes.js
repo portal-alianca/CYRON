@@ -8829,6 +8829,11 @@ function conferirCartao(onde, embed, componentes = []) {
     const cardRk = await rkd.desenharRanking(sharp, [{ userId: "1", nome: "Tiago †", vitorias: 12, derrotas: 3, favorito: "zumbi" },
       { userId: "2", nome: "さくら", vitorias: 4, derrotas: 4, favorito: "tesla" }], "[TOP] Best", {}, pasta, fontesDaFicha);
     verdade("o card do ranking sai (nome sem letra da fonte não quebra)", (await sharp(cardRk).metadata()).width === 900);
+    const fotoFalsa = await sharp({ create: { width: 128, height: 128, channels: 3, background: "#3366FF" } }).png().toBuffer();
+    const comFoto = await rkd.desenharRanking(sharp, [{ userId: "1", nome: "Tiago", vitorias: 3, derrotas: 0, favorito: "zumbi", fotoBuffer: fotoFalsa }],
+      "X", {}, pasta, fontesDaFicha);
+    const [rf, gf, bf] = [...(await sharp(comFoto).extract({ left: 34 + 168, top: 250 + 44, width: 1, height: 1 }).raw().toBuffer())];
+    verdade(`com foto, a foto da pessoa aparece no lugar do herói (${rf},${gf},${bf})`, bf > 180 && rf < 120);
     const vazio = await rkd.desenharRanking(sharp, [], "X", {}, pasta, fontesDaFicha);
     verdade("o ranking vazio também sai", vazio.length > 10000);
     ok("a habilidade se explica numa linha", fi.descricaoDaHabilidade({ dano: 18, efeito: "queimar" }), "18 de dano · queima 5 por 2 turnos");
