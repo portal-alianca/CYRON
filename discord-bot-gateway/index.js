@@ -11475,9 +11475,9 @@ async function desenharDuelo(sharp, a, b, pasta = RETRATOS_DO_DUELO, fontfile = 
     metades.push({ input: await sharp(`${pasta}${l.p.id}.jpg`).resize(W / 2, H, { fit: "cover" }).blur(14)
       .modulate({ brightness: 0.45 }).toBuffer(), left: k * (W / 2), top: 0 });
   }
-  const fotos = [];
+  const retratos = [];
   for (const l of lados) {
-    fotos.push({ input: await sharp(`${pasta}${l.p.id}.jpg`).resize(DU_FOTO_L, DU_FOTO_A, { fit: "cover" }).toBuffer(), left: l.x, top: topo });
+    retratos.push({ input: await sharp(`${pasta}${l.p.id}.jpg`).resize(DU_FOTO_L, DU_FOTO_A, { fit: "cover" }).toBuffer(), left: l.x, top: topo });
   }
   const nomes = lados.map((l, k) => {
     const nome = soLetrasDaFonte(fonte, l.p.curto || l.p.nome) || l.p.id;
@@ -11492,7 +11492,26 @@ async function desenharDuelo(sharp, a, b, pasta = RETRATOS_DO_DUELO, fontfile = 
     textoCentradoEm(fonte, "VS", W / 2, topo + DU_FOTO_A / 2 + 38, 108, 220, "#F5C542") +
     nomes + `</svg>`;
   return await sharp({ create: { width: W, height: H, channels: 3, background: "#14161A" } })
-    .composite([...metades, { input: Buffer.from(svg) }, ...fotos]).jpeg({ quality: 92 }).toBuffer();
+    .composite([...metades, { input: Buffer.from(svg) }, ...retratos]).jpeg({ quality: 92 }).toBuffer();
+}
+
+/* A foto de quem joga, num selo no canto de cima do retrato (anel vermelho
+   a' esquerda, azul a' direita). Vai por ultimo no quadro, por cima da
+   moldura de quem esta' na vez. Sem foto, nada. */
+async function selosDosJogadores(sharp, fotos = []) {
+  const rs = 40, selos = [];
+  const masc = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${2 * rs}" height="${2 * rs}"><circle cx="${rs}" cy="${rs}" r="${rs}"/></svg>`);
+  for (let k = 0; k < 2; k++) {
+    if (!fotos[k]) continue;
+    const redonda = await sharp(fotos[k]).resize(2 * rs, 2 * rs, { fit: "cover" }).composite([{ input: masc, blend: "dest-in" }]).png().toBuffer().catch(() => null);
+    if (!redonda) continue;
+    const cx = k === 0 ? xDoLado(0) - 2 : xDoLado(1) + DU_FOTO_L + 2;
+    const cy = DU_TOPO + 34;
+    const anel = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${2 * rs + 16}" height="${2 * rs + 16}">` +
+      `<circle cx="${rs + 8}" cy="${rs + 8}" r="${rs + 7}" fill="${k === 0 ? "#E74C3C" : "#3498DB"}"/><circle cx="${rs + 8}" cy="${rs + 8}" r="${rs + 3}" fill="#FFFFFF"/></svg>`);
+    selos.push({ input: anel, left: cx - rs - 8, top: cy - rs - 8 }, { input: redonda, left: cx - rs, top: cy - rs });
+  }
+  return selos;
 }
 
 function corDaVida(hp) {
@@ -11501,7 +11520,7 @@ function corDaVida(hp) {
 
 /* A parte que muda: vida, energia e quem esta' na vez. Por cima da base.
    `lutadores`: [{hp, en}, ...]; `vez`: 0/1; `vencedor`: 0/1 ou null. */
-async function desenharQuadroDoDuelo(sharp, base, lutadores, vez, vencedor = null, fontfile = FONTE_DA_IMAGEM, venceu = "VENCEU") {
+async function desenharQuadroDoDuelo(sharp, base, lutadores, vez, vencedor = null, fontfile = FONTE_DA_IMAGEM, venceu = "VENCEU", selos = []) {
   const fonte = await fonteDoDesenho(fontfile);
   const W = DU_LARGURA, H = DU_ALTURA, topo = DU_TOPO, larg = DU_FOTO_L + 40;
   const fim = vencedor !== null && vencedor !== undefined;
@@ -11526,7 +11545,24 @@ async function desenharQuadroDoDuelo(sharp, base, lutadores, vez, vencedor = nul
   }).join("");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
     `<filter id="s"><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.8"/></filter></defs>${partes}</svg>`;
-  return await sharp(base).composite([{ input: Buffer.from(svg) }]).jpeg({ quality: 84 }).toBuffer();
+  return await sharp(base).composite([{ input: Buffer.from(svg) }, ...selos]).jpeg({ quality: 84 }).toBuffer();
+}
+
+/* A foto de cada lutador (a do servidor, se tiver; a da CYRON no treino).
+   Baixada uma vez por duelo, fora da fila de desenho. */
+async function fotosDosLutadores(estado) {
+  if (typeof client === "undefined") return [];
+  const guild = client.guilds.cache.get(estado.guildId);
+  return Promise.all(estado.lutadores.map(async (l) => {
+    const opcoes = { extension: "png", size: 128 };
+    let url = null;
+    if (l.bot) url = client.user?.displayAvatarURL?.(opcoes);
+    else {
+      const membro = guild?.members.cache.get(l.userId) || await guild?.members.fetch(l.userId).catch(() => null);
+      url = membro?.displayAvatarURL?.(opcoes) || (await client.users.fetch(l.userId).catch(() => null))?.displayAvatarURL?.(opcoes);
+    }
+    return url ? await baixarImagem(url) : null;
+  })).catch(() => []);
 }
 
 /* O quadro de agora, se a maquina aguentar; senao null (barras em texto). */
@@ -11535,11 +11571,13 @@ async function cartazDoDuelo(estado) {
   const sharp = await carregarSharp();
   if (!sharp) return null;
   const [a, b] = estado.lutadores;
+  if (!estado.base && !estado.fotos) estado.fotos = await fotosDosLutadores(estado);
   return await naFilaDeDesenho(async () => {
     const tx = estado.tx || DUELO_TEXTOS;
     estado.base ??= await desenharDuelo(sharp, a.p, b.p, RETRATOS_DO_DUELO, FONTE_DA_IMAGEM, [a.nivel, b.nivel], tx.nv);
+    estado.selos ??= await selosDosJogadores(sharp, estado.fotos || []);
     return await desenharQuadroDoDuelo(sharp, estado.base, estado.lutadores, estado.vez, estado.vencedor, FONTE_DA_IMAGEM,
-      String(tx.cartazVenceu).toLocaleUpperCase());
+      String(tx.cartazVenceu).toLocaleUpperCase(), estado.selos);
   }).catch((e) => {
     console.error("duelo: nao desenhei o cartaz:", e?.message || e);
     return null;
@@ -11991,6 +12029,8 @@ async function terminarDuelo(estado) {
   for (const [id, r] of revanches) if (r.ate < Date.now()) revanches.delete(id);
   await editarDuelo(estado);
   estado.base = null;
+  estado.fotos = null;
+  estado.selos = null;
   cancelarDuelo(estado.id);
 }
 
