@@ -10725,10 +10725,43 @@ function podeUsar(l, hab) {
   return true;
 }
 
+/* As palavras fixas da luta no canal. Vao ao tradutor UMA vez por lingua
+   (com cache); os numeros e nomes entram depois, montados aqui. Traduzir a
+   linha pronta faria de cada jogada uma traducao paga nova. */
+const DUELO_TEXTOS = {
+  comeca: "começa", errou: "errou!", desviou: "desviou", queima: "queima", perdeuVez: "perdeu a vez", arena: "Arena",
+  venceu: "venceu!", pensando: "CYRON está pensando…", vezDe: "Vez de", nv: "Nv", limite: "limite de hoje",
+  subiu: "subiu para o nível", liberada: "liberada", codex: "Códex", cartazVenceu: "Venceu",
+  querDuelar: "quer duelar com", quemAceita: "Quem aceita?", abertoPor: "O desafio fica aberto por 2 minutos.",
+  aceitar: "Aceitar", treinar: "Treinar com a CYRON", aceitou: "aceitou o desafio de", escolhaAbaixo: "escolha o seu herói abaixo.",
+  escolhaSeu: "escolha seu personagem", vaiTreinar: "vai treinar contra", desafiou: "desafiou", paraDuelo: "para um duelo!",
+  cadaUm: "Cada um escolhe o seu personagem abaixo.", cancelado: "Duelo cancelado.",
+};
+
+/* Um dicionario de textos fixos na lingua pedida, guardado na memoria. */
+async function textosNaLingua(base, idioma, guildId, memo) {
+  if (!idioma || idioma === "pt") return base;
+  if (memo.has(idioma)) return memo.get(idioma);
+  const chaves = Object.keys(base);
+  const t = await traduzirTextos(chaves.map((k) => base[k]), idioma, guildId);
+  const pronto = Object.fromEntries(chaves.map((k, i) => [k, t[i]]));
+  memo.set(idioma, pronto);
+  return pronto;
+}
+const DUELO_NA_LINGUA = new Map();
+
+/* A lingua da luta: a de quem comecou o duelo. */
+async function prepararLingua(estado, idioma) {
+  estado.idioma = idioma || "pt";
+  estado.tx = await textosNaLingua(DUELO_TEXTOS, estado.idioma, estado.guildId, DUELO_NA_LINGUA).catch(() => DUELO_TEXTOS);
+  return estado.tx;
+}
+
 /* Comeco da vez de alguem: energia, queimadura e atordoamento. Devolve as
    linhas do historico. Puro sobre o estado. */
 function comecarVez(estado, i) {
   const l = estado.lutadores[i];
+  const tx = estado.tx || DUELO_TEXTOS;
   const log = [];
   l.turnos++;
   if (l.turnos > 1) l.en = Math.min(DUELO_ENERGIA_MAX, l.en + DUELO_ENERGIA_TURNO);
@@ -10739,12 +10772,12 @@ function comecarVez(estado, i) {
   if ((estado.jogadas || 0) >= DUELO_MORTE_SUBITA) {
     const perda = 5 * (1 + Math.floor((estado.jogadas - DUELO_MORTE_SUBITA) / 4));
     l.hp = Math.max(0, l.hp - perda);
-    log.push(`☠️ Arena: ${l.p.curto} −${perda}`);
+    log.push(`☠️ ${tx.arena}: ${l.p.curto} −${perda}`);
   }
   if (l.queimando > 0) {
     l.hp = Math.max(0, l.hp - EFEITOS.queimar.valor);
     l.queimando--;
-    log.push(`🔥 ${l.p.curto} queima −${EFEITOS.queimar.valor}`);
+    log.push(`🔥 ${l.p.curto} ${tx.queima} −${EFEITOS.queimar.valor}`);
   }
   estado.vez = i;
   return log;
@@ -10755,13 +10788,14 @@ function comecarVez(estado, i) {
 function usarHabilidade(estado, i, hab, sorte = Math.random) {
   const eu = estado.lutadores[i];
   const outro = estado.lutadores[1 - i];
+  const tx = estado.tx || DUELO_TEXTOS;
   const log = [];
   eu.en -= ESPACOS[hab.espaco].energia;
   let linha = `${hab.emoji} ${eu.p.curto}: **${hab.nome}**`;
   if (hab.dano > 0) {
     if (eu.confuso) {
       eu.confuso = false;
-      if (sorte() < EFEITOS.confundir.chance) { log.push(`${linha} errou! 🌀`); return log; }
+      if (sorte() < EFEITOS.confundir.chance) { log.push(`${linha} ${tx.errou} 🌀`); return log; }
     }
     let dano = Math.round(hab.dano * (eu.preparado ? EFEITOS.preparar.multiplicador : 1));
     eu.preparado = false;
@@ -10769,7 +10803,7 @@ function usarHabilidade(estado, i, hab, sorte = Math.random) {
     if (perfura && !outro.escudo && !outro.esquiva) dano = Math.round(dano * DUELO_PERFURAR);
     if (outro.esquiva && !perfura) {
       outro.esquiva = false;
-      log.push(`${linha} · ${outro.p.curto} desviou 💨`);
+      log.push(`${linha} · ${outro.p.curto} ${tx.desviou} 💨`);
     } else {
       if (perfura && outro.esquiva) { outro.esquiva = false; linha += " (💨✕)"; }
       if (!perfura && outro.escudo > 0) {
@@ -10810,7 +10844,7 @@ function passarVez(estado) {
     if (estado.lutadores[proximo].hp <= 0) break;
     if (estado.lutadores[proximo].atordoado) {
       estado.lutadores[proximo].atordoado = false;
-      log.push(`😵 ${estado.lutadores[proximo].p.curto} perdeu a vez`);
+      log.push(`😵 ${estado.lutadores[proximo].p.curto} ${(estado.tx || DUELO_TEXTOS).perdeuVez}`);
       continue;
     }
     break;
@@ -10853,10 +10887,10 @@ function barra(valor, max = 100) {
 }
 
 /* Duas linhas por lutador: quem e', e a vida/energia. */
-function estadoDoLutador(l) {
+function estadoDoLutador(l, tx = DUELO_TEXTOS) {
   const marcas = [l.escudo ? `🛡️${l.escudo}` : "", l.esquiva ? "💨" : "", l.preparado ? "📈" : "",
     l.confuso ? "🌀" : "", l.atordoado ? "😵" : "", l.queimando ? "🔥" : ""].filter(Boolean).join(" ");
-  return `${l.p.bandeira} **${l.p.curto}** · Nv ${l.nivel} · ${l.bot ? "🤖 CYRON" : `<@${l.userId}>`}\n` +
+  return `${l.p.bandeira} **${l.p.curto}** · ${(tx || DUELO_TEXTOS).nv} ${l.nivel} · ${l.bot ? "🤖 CYRON" : `<@${l.userId}>`}\n` +
     `❤️ ${barra(l.hp)} **${l.hp}**  🔷 ${l.en}${marcas ? `  ${marcas}` : ""}`;
 }
 
@@ -10865,6 +10899,7 @@ function estadoDoLutador(l) {
    cartaz embaixo. No fim, o historico some e entra o resultado. Pura. */
 function telaDoDuelo(estado, agora = Date.now()) {
   const [a, b] = estado.lutadores;
+  const tx = estado.tx || DUELO_TEXTOS;
   const fim = estado.vencedor !== undefined && estado.vencedor !== null;
   const vez = estado.lutadores[estado.vez];
   /* Com o quadro, vida e energia estao na imagem: o texto so' diz quem e'
@@ -10874,14 +10909,14 @@ function telaDoDuelo(estado, agora = Date.now()) {
     l.confuso ? "🌀" : "", l.atordoado ? "😵" : "", l.queimando ? "🔥" : ""].filter(Boolean).join("");
   const linhas = estado.imagem
     ? [`🔴 ${quem(a)}${marcas(a) ? ` ${marcas(a)}` : ""}  ×  🔵 ${quem(b)}${marcas(b) ? ` ${marcas(b)}` : ""}`]
-    : [estadoDoLutador(a), estadoDoLutador(b), ""];
+    : [estadoDoLutador(a, tx), estadoDoLutador(b, tx), ""];
   if (fim) {
     const v = estado.lutadores[estado.vencedor];
-    linhas.push(`🏆 **${v.p.curto}** venceu!${v.bot ? "" : ` · <@${v.userId}>`}${estado.motivo ? ` (${estado.motivo})` : ""}`,
+    linhas.push(`🏆 **${v.p.curto}** ${tx.venceu}${v.bot ? "" : ` · <@${v.userId}>`}${estado.motivo ? ` (${estado.motivo})` : ""}`,
       ...(estado.extra || []));
   } else {
     linhas.push(...estado.historico.slice(-2).map((t) => `-# ${t}`),
-      `⏳ ${vez.bot ? "🤖 CYRON está pensando…" : `Vez de <@${vez.userId}> · <t:${Math.floor((estado.limite || agora) / 1000)}:R>`}`);
+      `⏳ ${vez.bot ? `🤖 ${tx.pensando}` : `${tx.vezDe} <@${vez.userId}> · <t:${Math.floor((estado.limite || agora) / 1000)}:R>`}`);
   }
   const embed = {
     color: fim ? 0xF5C542 : 0xE74C3C,
@@ -10898,9 +10933,9 @@ function telaDoDuelo(estado, agora = Date.now()) {
 }
 
 /* A lista de personagens para escolher (todos liberados). */
-function escolhaDePersonagem(id, quem) {
+function escolhaDePersonagem(id, quem, tx = DUELO_TEXTOS) {
   return [{ type: 1, components: [{ type: 3, custom_id: `duelo:escolher:${id}`,
-    placeholder: `⚔️ ${quem}: escolha seu personagem`.slice(0, 150),
+    placeholder: `⚔️ ${quem}: ${tx.escolhaSeu}`.slice(0, 150),
     options: PERSONAGENS.map((p) => ({ label: `${p.nome} · ${p.titulo}`.slice(0, 100), value: p.id, emoji: { name: p.bandeira } })) }] }];
 }
 
@@ -10969,13 +11004,7 @@ const TEXTOS_DO_PAINEL = {
 };
 const PAINEL_NA_LINGUA = new Map();
 async function textosDoPainel(idioma, guildId) {
-  if (!idioma || idioma === "pt") return TEXTOS_DO_PAINEL;
-  if (PAINEL_NA_LINGUA.has(idioma)) return PAINEL_NA_LINGUA.get(idioma);
-  const chaves = Object.keys(TEXTOS_DO_PAINEL);
-  const t = await traduzirTextos(chaves.map((k) => TEXTOS_DO_PAINEL[k]), idioma, guildId);
-  const pronto = Object.fromEntries(chaves.map((k, i) => [k, t[i]]));
-  PAINEL_NA_LINGUA.set(idioma, pronto);
-  return pronto;
+  return textosNaLingua(TEXTOS_DO_PAINEL, idioma, guildId, PAINEL_NA_LINGUA);
 }
 
 function abasDoPainel(aba, idx, tx = TEXTOS_DO_PAINEL) {
@@ -11089,12 +11118,14 @@ async function cliqueDoPainel(inter) {
   if (duelistaEm.has(eu)) return inter.editReply(await telaDoPainel(eu, "herois", idx, `⚠️ ${await fala("Você já está num duelo. Termine ele primeiro.")}`, ctx));
   const heroi = personagemPorId(await heroiAtivo(eu));
   const estado = novoDuelo(inter, [{ userId: eu, nome }, null], { 0: heroi.id }, { fixo: { 0: true } });
+  const tx = await prepararLingua(estado, ctx.idioma);
+  const heroiNome = (await heroiNaLingua(heroi, ctx.idioma, inter.guildId).catch(() => null))?.p.curto || heroi.curto;
   /* No canal, a' vista de todos. Sem permissao de mandar ali (app
      instalado so' pela pessoa), vai como resposta publica da interacao. */
-  const conteudo = { content: `⚔️ <@${eu}> quer duelar com ${heroi.bandeira} **${heroi.curto}**! Quem aceita?\n-# O desafio fica aberto por 2 minutos.`,
+  const conteudo = { content: `⚔️ <@${eu}> ${tx.querDuelar} ${heroi.bandeira} **${heroiNome}**! ${tx.quemAceita}\n-# ${tx.abertoPor}`,
     components: [{ type: 1, components: [
-      { type: 2, custom_id: `duelo:aceitar:${estado.id}`, style: 3, emoji: { name: "⚔️" }, label: "Aceitar" },
-      { type: 2, custom_id: `duelo:treino:${estado.id}`, style: 2, emoji: { name: "🤖" }, label: "Treinar com a CYRON" },
+      { type: 2, custom_id: `duelo:aceitar:${estado.id}`, style: 3, emoji: { name: "⚔️" }, label: String(tx.aceitar).slice(0, 80) },
+      { type: 2, custom_id: `duelo:treino:${estado.id}`, style: 2, emoji: { name: "🤖" }, label: String(tx.treinar).slice(0, 80) },
     ] }], allowedMentions: { parse: [] } };
   estado.msg = await inter.channel?.send(conteudo).catch(() => null) ||
     await inter.followUp({ ...conteudo, flags: 0 }).catch((e) => { console.error("duelo: nao publiquei:", e?.message || e); return null; });
@@ -11137,9 +11168,15 @@ async function comandoDuelo(inter) {
   duelistaEm.set(inter.user.id, id);
   if (contraHumano) duelistaEm.set(alvo.id, id);
   estado.expira = setTimeout(() => cancelarDuelo(id, "⌛"), DUELO_ESCOLHA);
-  const titulo = contraHumano ? `⚔️ <@${inter.user.id}> desafiou <@${alvo.id}> para um duelo!` : `⚔️ <@${inter.user.id}> vai treinar contra 🤖 CYRON`;
-  await inter.reply({ content: `${titulo}\n-# Cada um escolhe o seu personagem abaixo.`,
-    components: escolhaDePersonagem(id, contraHumano ? "Os dois" : (inter.member?.displayName || "Você")),
+  /* O Discord da' 3 s para responder: se a lingua ainda nao esta' na
+     memoria, o convite sai em portugues e a traducao chega a tempo da luta. */
+  estado.idioma = idioma || "pt";
+  const tx = (estado.idioma === "pt" ? DUELO_TEXTOS : DUELO_NA_LINGUA.get(estado.idioma)) || DUELO_TEXTOS;
+  estado.tx = tx;
+  if (tx === DUELO_TEXTOS && estado.idioma !== "pt") prepararLingua(estado, estado.idioma).catch(() => {});
+  const titulo = contraHumano ? `⚔️ <@${inter.user.id}> ${tx.desafiou} <@${alvo.id}> ${tx.paraDuelo}` : `⚔️ <@${inter.user.id}> ${tx.vaiTreinar} 🤖 CYRON`;
+  await inter.reply({ content: `${titulo}\n-# ${tx.cadaUm}`,
+    components: escolhaDePersonagem(id, contraHumano ? "1 · 2" : (inter.member?.displayName || "🤖"), tx),
     allowedMentions: { users: contraHumano ? [alvo.id] : [] } });
   estado.msg = await inter.fetchReply().catch(() => null);
 }
@@ -11150,7 +11187,7 @@ function cancelarDuelo(id, motivo = "") {
   clearTimeout(estado.expira); clearTimeout(estado.relogio);
   for (const p of estado.pessoas) if (p?.userId && duelistaEm.get(p.userId) === id) duelistaEm.delete(p.userId);
   duelos.delete(id);
-  if (motivo && estado.msg && estado.vencedor === null) estado.msg.edit({ content: `${motivo} Duelo cancelado.`, components: [], embeds: [] }).catch(() => {});
+  if (motivo && estado.msg && estado.vencedor === null) estado.msg.edit({ content: `${motivo} ${(estado.tx || DUELO_TEXTOS).cancelado}`, components: [], embeds: [] }).catch(() => {});
 }
 
 async function cliqueDuelo(inter) {
@@ -11172,8 +11209,9 @@ async function cliqueDuelo(inter) {
     clearTimeout(estado.expira);
     estado.expira = setTimeout(() => cancelarDuelo(id, "⌛"), DUELO_ESCOLHA);
     const h = personagemPorId(estado.escolhas[0]);
-    return inter.update({ content: `⚔️ <@${inter.user.id}> aceitou o desafio de <@${estado.pessoas[0].userId}> (${h.bandeira} **${h.curto}**)!\n-# <@${inter.user.id}>, escolha o seu herói abaixo.`,
-      components: escolhaDePersonagem(id, estado.pessoas[1].nome), allowedMentions: { parse: [] } });
+    const tx = estado.tx || DUELO_TEXTOS;
+    return inter.update({ content: `⚔️ <@${inter.user.id}> ${tx.aceitou} <@${estado.pessoas[0].userId}> (${h.bandeira} **${h.curto}**)!\n-# <@${inter.user.id}>, ${tx.escolhaAbaixo}`,
+      components: escolhaDePersonagem(id, estado.pessoas[1].nome, tx), allowedMentions: { parse: [] } });
   }
   /* 🤖 no desafio: so' quem desafiou, e so' enquanto ninguem aceitou. */
   if (acao === "treino") {
@@ -11234,7 +11272,9 @@ async function comecarDuelo(estado) {
   const lutadores = [];
   for (let i = 0; i < 2; i++) {
     const pessoa = estado.pessoas[i];
-    const personagem = personagemPorId(estado.escolhas[i]);
+    /* O heroi na lingua da luta: nome, habilidades e curiosidades. */
+    const original = personagemPorId(estado.escolhas[i]);
+    const personagem = (await heroiNaLingua(original, estado.idioma, estado.guildId).catch(() => null))?.p || original;
     if (pessoa.bot) { lutadores.push(novoLutador({ userId: null, nome: "CYRON", personagem, nivel: 1, bot: true })); continue; }
     const prog = await progressoDoDuelista(pessoa.userId, personagem.id);
     const nivel = nivelDoPersonagem(prog.xp);
@@ -11246,7 +11286,7 @@ async function comecarDuelo(estado) {
   estado.lutadores = lutadores;
   const primeiro = Math.random() < 0.5 ? 0 : 1;
   estado.vez = 1 - primeiro;
-  estado.historico.push(`🎲 ${lutadores[primeiro].p.curto} começa`);
+  estado.historico.push(`🎲 ${lutadores[primeiro].p.curto} ${(estado.tx || DUELO_TEXTOS).comeca}`);
   estado.historico.push(...passarVez(estado));
   await mostrarDuelo(estado);
 }
@@ -11306,7 +11346,7 @@ function xDoLado(k) {
 }
 
 /* A parte fixa: fundo, retratos, molduras, "VS" e os nomes. */
-async function desenharDuelo(sharp, a, b, pasta = RETRATOS_DO_DUELO, fontfile = FONTE_DA_IMAGEM, niveis = []) {
+async function desenharDuelo(sharp, a, b, pasta = RETRATOS_DO_DUELO, fontfile = FONTE_DA_IMAGEM, niveis = [], nv = "Nv") {
   const fonte = await fonteDoDesenho(fontfile);
   const W = DU_LARGURA, H = DU_ALTURA, topo = DU_TOPO;
   const lados = [{ p: a, x: xDoLado(0), cor: "#E74C3C" }, { p: b, x: xDoLado(1), cor: "#3498DB" }];
@@ -11322,7 +11362,7 @@ async function desenharDuelo(sharp, a, b, pasta = RETRATOS_DO_DUELO, fontfile = 
   }
   const nomes = lados.map((l, k) => {
     const nome = soLetrasDaFonte(fonte, l.p.curto || l.p.nome) || l.p.id;
-    return textoCentradoEm(fonte, niveis[k] ? `${nome} · Nv ${niveis[k]}` : nome, l.x + DU_FOTO_L / 2, topo + DU_FOTO_A + 40, 28, DU_FOTO_L + 80, "#FFFFFF");
+    return textoCentradoEm(fonte, niveis[k] ? `${nome} · ${soLetrasDaFonte(fonte, nv) || "Nv"} ${niveis[k]}` : nome, l.x + DU_FOTO_L / 2, topo + DU_FOTO_A + 40, 28, DU_FOTO_L + 80, "#FFFFFF");
   }).join("");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
     `<filter id="s"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000" flood-opacity="0.7"/></filter>` +
@@ -11342,7 +11382,7 @@ function corDaVida(hp) {
 
 /* A parte que muda: vida, energia e quem esta' na vez. Por cima da base.
    `lutadores`: [{hp, en}, ...]; `vez`: 0/1; `vencedor`: 0/1 ou null. */
-async function desenharQuadroDoDuelo(sharp, base, lutadores, vez, vencedor = null, fontfile = FONTE_DA_IMAGEM) {
+async function desenharQuadroDoDuelo(sharp, base, lutadores, vez, vencedor = null, fontfile = FONTE_DA_IMAGEM, venceu = "VENCEU") {
   const fonte = await fonteDoDesenho(fontfile);
   const W = DU_LARGURA, H = DU_ALTURA, topo = DU_TOPO, larg = DU_FOTO_L + 40;
   const fim = vencedor !== null && vencedor !== undefined;
@@ -11363,7 +11403,7 @@ async function desenharQuadroDoDuelo(sharp, base, lutadores, vez, vencedor = nul
       /* Quem joga ganha a moldura dourada acesa; o outro fica na sombra. */
       (destaque ? `<rect x="${xDoLado(k) - 4}" y="${topo - 4}" width="${DU_FOTO_L + 8}" height="${DU_FOTO_A + 8}" rx="8" fill="none" stroke="#FFD95A" stroke-width="7"/>` : "") +
       (apagado ? `<rect x="${xDoLado(k)}" y="${topo}" width="${DU_FOTO_L}" height="${DU_FOTO_A}" fill="#000" opacity="${fim ? 0.6 : 0.35}"/>` : "") +
-      (fim && k === vencedor ? textoCentradoEm(fonte, "VENCEU", xDoLado(k) + DU_FOTO_L / 2, topo + DU_FOTO_A - 16, 40, DU_FOTO_L - 20, "#FFD95A") : "");
+      (fim && k === vencedor ? textoCentradoEm(fonte, soLetrasDaFonte(fonte, venceu) || "VENCEU", xDoLado(k) + DU_FOTO_L / 2, topo + DU_FOTO_A - 16, 40, DU_FOTO_L - 20, "#FFD95A") : "");
   }).join("");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs>` +
     `<filter id="s"><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.8"/></filter></defs>${partes}</svg>`;
@@ -11377,8 +11417,10 @@ async function cartazDoDuelo(estado) {
   if (!sharp) return null;
   const [a, b] = estado.lutadores;
   return await naFilaDeDesenho(async () => {
-    estado.base ??= await desenharDuelo(sharp, a.p, b.p, RETRATOS_DO_DUELO, FONTE_DA_IMAGEM, [a.nivel, b.nivel]);
-    return await desenharQuadroDoDuelo(sharp, estado.base, estado.lutadores, estado.vez, estado.vencedor);
+    const tx = estado.tx || DUELO_TEXTOS;
+    estado.base ??= await desenharDuelo(sharp, a.p, b.p, RETRATOS_DO_DUELO, FONTE_DA_IMAGEM, [a.nivel, b.nivel], tx.nv);
+    return await desenharQuadroDoDuelo(sharp, estado.base, estado.lutadores, estado.vez, estado.vencedor, FONTE_DA_IMAGEM,
+      String(tx.cartazVenceu).toLocaleUpperCase());
   }).catch((e) => {
     console.error("duelo: nao desenhei o cartaz:", e?.message || e);
     return null;
@@ -11786,6 +11828,7 @@ async function terminarDuelo(estado) {
   const dia = new Date().toISOString().slice(0, 10);
   for (const chave of treinosHoje.keys()) if (!chave.endsWith(dia)) treinosHoje.delete(chave);
   const extra = [];
+  const tx = estado.tx || DUELO_TEXTOS;
   for (let i = 0; i < 2; i++) {
     const l = estado.lutadores[i];
     if (l.bot) continue;
@@ -11801,15 +11844,15 @@ async function terminarDuelo(estado) {
       vitorias: l.vitorias + (venceu ? 1 : 0), derrotas: l.derrotas + (venceu ? 0 : 1), atualizado_em: new Date().toISOString() },
     "resolution=merge-duplicates").catch((e) => console.error("duelo: nao gravei o XP:", e?.message || e));
     const proximo = NIVEIS_DO_PERSONAGEM[nivelNovo];
-    extra.push(`✨ ${estado.treino ? "" : `<@${l.userId}> `}+${ganho} XP · ${l.p.curto} Nv ${nivelNovo}` +
-      (proximo !== undefined ? ` (${xpNovo}/${proximo})` : "") + (ganho === 0 && estado.motivo !== "W.O." ? " · limite de hoje" : ""));
+    extra.push(`✨ ${estado.treino ? "" : `<@${l.userId}> `}+${ganho} XP · ${l.p.curto} ${tx.nv} ${nivelNovo}` +
+      (proximo !== undefined ? ` (${xpNovo}/${proximo})` : "") + (ganho === 0 && estado.motivo !== "W.O." ? ` · ${tx.limite}` : ""));
     if (nivelNovo > l.nivel) {
-      extra.push(`⬆️ **${l.p.curto} subiu para o nível ${nivelNovo}!**`);
-      extra.push(`📜 *Códex ${nivelNovo}/10:* ${l.p.fatos[nivelNovo - 1]}`);
+      extra.push(`⬆️ **${l.p.curto} ${tx.subiu} ${nivelNovo}!**`);
+      extra.push(`📜 *${tx.codex} ${nivelNovo}/10:* ${l.p.fatos[nivelNovo - 1]}`);
       for (const espaco of ESPACOS_ORDEM) {
         if (ESPACOS[espaco].nivelAlternativa === nivelNovo) {
           const hab = l.p.kit[espaco][1];
-          extra.push(`🔓 ${hab.emoji} **${hab.nome}** liberada · /equipar`);
+          extra.push(`🔓 ${hab.emoji} **${hab.nome}** ${tx.liberada} · /duelo`);
         }
       }
     }
@@ -11817,7 +11860,7 @@ async function terminarDuelo(estado) {
   if (!extra.some((t) => t.startsWith("📜"))) {
     /* Na primeira vez com um personagem, a pagina 1 do Codex. */
     const novato = estado.lutadores.find((l) => !l.bot && l.xpAntes === 0);
-    if (novato) extra.push(`📜 *Códex 1/10:* ${novato.p.fatos[0]}`);
+    if (novato) extra.push(`📜 *${tx.codex} 1/10:* ${novato.p.fatos[0]}`);
   }
   estado.extra = extra;
   await editarDuelo(estado);
