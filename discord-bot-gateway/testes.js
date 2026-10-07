@@ -2929,7 +2929,7 @@ function conferirCartao(onde, embed, componentes = []) {
 
   const idx = semComentarios(readFileSync(`${aqui}/index.js`, "utf8"));
   const painel = idx.slice(idx.indexOf("async function cliquePainel"));
-  const checagem = painel.indexOf("PermissionFlagsBits.ManageGuild");
+  const checagem = painel.indexOf("podeAdministrar(inter)");
   verdade("o clique chega (depois da checagem de Gerenciar Servidor)",
     checagem > 0 && painel.indexOf('if (acao === "pix")') > checagem &&
     /if \(acao\.startsWith\("pix:"\)\) \{[^}]*return await cobrarPix\(inter, servidor, acao\.slice\("pix:"\.length\)\)/.test(idx));
@@ -4822,7 +4822,7 @@ function conferirCartao(onde, embed, componentes = []) {
       /if \(guardado\.msg && guardado\.canal !== canal\.id\) \{\s*await apagarDeOutraSala/.test(idx));
     verdade("o suporte e o painel ficam de fora", /ehOPainel\(guild\.id\) \|\| await ehServidorDoSuporte\(guild\.id\)/.test(idx));
     verdade("o botão de desligar passa pela checagem de Gerenciar Servidor",
-      idx.indexOf('if (acao === "lembrete")') > idx.indexOf("PermissionFlagsBits.ManageGuild", idx.indexOf("async function cliquePainel")));
+      idx.indexOf('if (acao === "lembrete")') > idx.indexOf("podeAdministrar(inter)", idx.indexOf("async function cliquePainel")));
     verdade("o quadro roda na varredura", /await quadrosDeIdioma\(\)\.catch/.test(idx));
   }
 
@@ -5643,7 +5643,7 @@ function conferirCartao(onde, embed, componentes = []) {
 
   /* Ligar votação e apagar são do líder, e a checagem é no clique. */
   verdade("mexer no evento exige o cargo",
-    /acao === "votacao" \|\| acao === "apagar"[^]{0,220}ManageGuild/.test(clique));
+    /acao === "votacao" \|\| acao === "apagar"[^]{0,220}podeAdministrar\(inter\)/.test(clique));
 
   /* Presença é upsert por pessoa: dois cliques no mesmo instante não podem
      disputar a mesma linha, que era o defeito que o `for update` da arena
@@ -8417,7 +8417,7 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("a janela explica os marcadores lá dentro (texto do Discord, tipo 10)",
     /custom_id: "bv:janela"[^]{0,200}type: 10, content:[^]{0,200}\{usuario\}[^]{0,300}type: 18, label:/.test(f));
   verdade("o ✏️ é só de quem administra (checado no clique)",
-    /async function cliqueBoasVindas[^]{0,400}memberPermissions\?\.has\(PermissionFlagsBits\.ManageGuild\)/.test(f));
+    /async function cliqueBoasVindas[^]{0,400}podeAdministrar\(inter\)/.test(f));
   verdade("a mensagem do administrador só marca quem chegou, mesmo com @everyone no texto",
     /content: textoDeBoasVindas\([^]{0,300}allowedMentions: \{ users: \[member\.id\] \}/.test(f));
   verdade("só liga pelo /boas-vindas: sem canal guardado, ninguém ganha cartão",
@@ -8598,7 +8598,7 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o sorteio encerra na ronda de um minuto", /rodarSorteios\(\)\.catch/.test(f));
   verdade("o anúncio só marca quem ganhou", /allowedMentions: \{ users: vencedores \}/.test(f));
   verdade("o /sorteio é só de quem administra", /name: "sorteio",[^]{0,500}defaultMemberPermissions: PermissionFlagsBits\.ManageGuild/.test(f));
-  verdade("o 🔁 é conferido no clique", /acao === "refazer"[^]{0,200}memberPermissions\?\.has\(PermissionFlagsBits\.ManageGuild\)/.test(f));
+  verdade("o 🔁 é conferido no clique", /acao === "refazer"[^]{0,200}podeAdministrar\(inter\)/.test(f));
   verdade("os comandos novos são de todos", /COMANDOS_DE_TODOS = new Set\([^)]*"sorteio", "abraco", "beijo", "tapa", "cafune"/.test(f));
 }
 
@@ -8918,6 +8918,20 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("o Duelar publica o desafio com Aceitar e Treinar", /acao !== "duelar"[^]{0,2500}duelo:aceitar:\$\{estado\.id\}[^]{0,300}duelo:treino:\$\{estado\.id\}/.test(idx));
   verdade("na revanche entre duas pessoas, as duas precisam tocar", /humanos\.some\(\(p\) => !r\.querem\.has\(p\.userId\)\)/.test(idx));
   verdade("a revanche é tratada antes de procurar o duelo (que já acabou)", /if \(acao === "revanche"\) return cliqueRevanche\(inter, id\);[^]{0,100}const estado = duelos\.get\(id\)/.test(idx));
+  /* O acesso de suporte: so' com liberacao do ADM, so' para o dono, com prazo. */
+  {
+    const sp = carregar(["SUPORTE_HORAS", "suportes", "donosConfirmados", "suporteValido"]);
+    sp.suportes.set("g1", { ate: Date.now() + 60000, por: "adm", registro: [] });
+    verdade("sem ser dono confirmado, nada", !sp.suporteValido("g1", "dono"));
+    sp.donosConfirmados.add("dono");
+    verdade("dono com liberação valendo: pode", sp.suporteValido("g1", "dono"));
+    verdade("em outro servidor (sem liberação): não pode", !sp.suporteValido("g2", "dono"));
+    sp.suportes.set("g1", { ate: Date.now() - 1, por: "adm", registro: [] });
+    verdade("liberação vencida: não pode", !sp.suporteValido("g1", "dono"));
+    verdade("só o ADM libera", /sub === "liberar"[^]{0,120}if \(!admin\)/.test(idx));
+    verdade("abrir exige ser o dono da CYRON", /abrir: so' o dono[^]{0,200}if \(!await ehDono\(inter\.user\.id\)\)/.test(readFileSync(`${aqui}/index.js`, "utf8")));
+    verdade("os botões do suporte não colidem com o 🌐 do servidor de suporte (sup:ler:)", idx.includes('startsWith("sa:")') && !idx.includes('custom_id: "sup:'));
+  }
   verdade("só quem desafiou treina com a CYRON", /acao === "treino"[^]{0,200}estado\.pessoas\[0\]\.userId !== inter\.user\.id/.test(idx));
   verdade("os botões do duelo têm rota", idx.includes('inter.customId.startsWith("duelo:")') && idx.includes('inter.customId.startsWith("equipar:")'));
   const sql = readFileSync(`${aqui}/../supabase/migracoes/019-duelo.sql`, "utf8");
@@ -11455,7 +11469,7 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("a agenda nasce no primeiro /evento", /async function criarEvento[^]*?if \(!canalDaAgenda\(inter\.guild\)\)[^]*?canalPorNomeOuCria\(inter\.guild, CANAL_EVENTOS/.test(idx));
   verdade("ao entrar, pergunta o modo", /if \(modoDe\(servidor\) === "escolher"\) await perguntarModo\(guild, servidor\)/.test(idx));
   verdade("os botões do modo têm rota (depois da checagem de Gerenciar Servidor)",
-    idx.indexOf('acao.startsWith("modo:")') > idx.indexOf("PermissionFlagsBits.ManageGuild", idx.indexOf("async function cliquePainel")));
+    idx.indexOf('acao.startsWith("modo:")') > idx.indexOf("podeAdministrar(inter)", idx.indexOf("async function cliquePainel")));
   const sql = readFileSync(`${aqui}/../supabase/migracoes/010-modo.sql`, "utf8");
   verdade("no banco, o modo só aceita os três valores", /check \(modo in \('traducao', 'ferramentas', 'escolher'\)\)/.test(sql));
 }
