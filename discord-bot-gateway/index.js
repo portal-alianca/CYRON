@@ -10736,6 +10736,7 @@ const DUELO_TEXTOS = {
   aceitar: "Aceitar", treinar: "Treinar com a CYRON", aceitou: "aceitou o desafio de", escolhaAbaixo: "escolha o seu herói abaixo.",
   escolhaSeu: "escolha seu personagem", vaiTreinar: "vai treinar contra", desafiou: "desafiou", paraDuelo: "para um duelo!",
   cadaUm: "Cada um escolhe o seu personagem abaixo.", cancelado: "Duelo cancelado.",
+  revanche: "Revanche", treinarDeNovo: "Treinar de novo", querRevanche: "quer revanche!", toqueAceitar: "toque em Revanche para aceitar.",
 };
 
 /* Um dicionario de textos fixos na lingua pedida, guardado na memoria. */
@@ -10924,7 +10925,13 @@ function telaDoDuelo(estado, agora = Date.now()) {
     description: linhas.join("\n").slice(0, 4000),
     ...(estado.imagem ? { image: { url: "attachment://duelo.jpg" } } : {}),
   };
-  const botoes = fim || vez.bot ? [] : [{ type: 1, components: vez.kit.map((hab, k) => ({
+  /* No fim, o botao de revanche (enquanto ela vale). */
+  if (fim) {
+    return { embeds: [embed], allowedMentions: { parse: [] }, components: estado.revancheAte ? [{ type: 1, components: [{
+      type: 2, custom_id: `duelo:revanche:${estado.id}`, style: 1, emoji: { name: "🔁" },
+      label: String(estado.treino ? tx.treinarDeNovo : tx.revanche).slice(0, 80) }] }] : [] };
+  }
+  const botoes = vez.bot ? [] : [{ type: 1, components: vez.kit.map((hab, k) => ({
     type: 2, custom_id: `duelo:hab:${estado.id}:${k}`, style: k === 3 ? 4 : k === 2 ? 1 : 2,
     emoji: { name: hab.emoji }, label: `${hab.nome}${ESPACOS[hab.espaco].energia ? ` ${ESPACOS[hab.espaco].energia}🔷` : ""}`.slice(0, 80),
     disabled: !podeUsar(vez, hab),
@@ -10999,7 +11006,8 @@ async function progressoDeTodos(userId) {
 /* Os textos do painel que o Discord desenha (botoes e linhas). */
 const TEXTOS_DO_PAINEL = {
   herois: "Heróis", habilidades: "Habilidades", duelar: "Duelar", usar: "Usar este herói", ativo: "Herói ativo",
-  trocar: "Toque num espaço para trocar entre a inicial e a alternativa.", nivel: "Nível",
+  trocar: "Toque num espaço para trocar entre a inicial e a alternativa.", nivel: "Nível", ranking: "Ranking",
+  rankingDica: "Quem mais venceu duelos neste servidor.",
   basica: "Básica", defesa: "Defesa", especial: "Especial", suprema: "Suprema",
 };
 const PAINEL_NA_LINGUA = new Map();
@@ -11010,7 +11018,7 @@ async function textosDoPainel(idioma, guildId) {
 function abasDoPainel(aba, idx, tx = TEXTOS_DO_PAINEL) {
   const aba1 = (id, emoji, label) => ({ type: 2, custom_id: `dp:aba:${id}:${idx}`, style: aba === id ? 1 : 2,
     emoji: { name: emoji }, label: String(label).slice(0, 80), disabled: aba === id });
-  return { type: 1, components: [aba1("herois", "🦸", tx.herois), aba1("hab", "✨", tx.habilidades),
+  return { type: 1, components: [aba1("herois", "🦸", tx.herois), aba1("hab", "✨", tx.habilidades), aba1("ranking", "🏆", tx.ranking),
     { type: 2, custom_id: `dp:duelar:${idx}`, style: 3, emoji: { name: "⚔️" }, label: String(tx.duelar).slice(0, 80) }] };
 }
 
@@ -11037,7 +11045,14 @@ async function telaDoPainel(userId, aba, idx, aviso = "", { idioma = "pt", guild
   ];
   const linhasDeBotoes = [];
 
-  if (aba !== "hab") {
+  if (aba === "ranking") {
+    const linhasRk = guildId ? await rankingDoServidor(guildId) : [];
+    const guild = typeof client !== "undefined" && guildId ? client.guilds.cache.get(guildId) : null;
+    card = await cardDoPainel(`rank:${guildId}:${lingua.lingua}:${JSON.stringify(linhasRk.map((x) => [x.userId, x.vitorias, x.derrotas, x.favorito]))}`,
+      (sharp) => desenharRanking(sharp, linhasRk, guild?.name || "", { rot }));
+    linhas.push(`🏆 **${tx.ranking}** · ${tx.rankingDica}`);
+    if (!card) linhasRk.forEach((x, i) => linhas.push(`${i + 1}. <@${x.userId}> · ${x.vitorias} 🏆`));
+  } else if (aba !== "hab") {
     aba = "herois";
     card = await cardDoPainel(`ficha:${lingua.lingua}:${p.id}:${xp}:${r?.vitorias || 0}:${r?.derrotas || 0}:${JSON.stringify(escolha)}`,
       (sharp) => desenharFicha(sharp, { p, nivel, xp, vitorias: Number(r?.vitorias) || 0, derrotas: Number(r?.derrotas) || 0,
@@ -11048,7 +11063,8 @@ async function telaDoPainel(userId, aba, idx, aviso = "", { idioma = "pt", guild
       { type: 2, custom_id: `dp:usar:${idx}`, style: ativo === p.id ? 3 : 1, emoji: { name: "⭐" },
         label: String(ativo === p.id ? tx.ativo : tx.usar).slice(0, 80), disabled: ativo === p.id },
       navegar("herois")[2]] });
-  } else if (aba === "hab") {
+  }
+  if (aba === "hab") {
     card = await cardDoPainel(`hab:${lingua.lingua}:${p.id}:${nivel}:${JSON.stringify(escolha)}`,
       (sharp) => desenharHabilidades(sharp, { p, nivel, escolha, rot }));
     linhas.push(`${p.bandeira} **${p.curto}** · ${tx.nivel} ${nivel}`, `-# ${tx.trocar}`);
@@ -11069,6 +11085,93 @@ async function telaDoPainel(userId, aba, idx, aviso = "", { idioma = "pt", guild
   const embed = { color: 0xC9A227, title: "⚔️ Duelo CYRON", description: linhas.join("\\n").slice(0, 4000),
     ...(card ? { image: { url: `attachment://${nomeDoCard}` } } : {}) };
   return { embeds: [embed], components: linhasDeBotoes, files: card ? [{ attachment: card, name: nomeDoCard }] : [], attachments: [] };
+}
+
+/* O RANKING DO SERVIDOR: quem mais venceu, entre os membros deste
+   servidor. A tabela do duelo nao sabe de servidor (o progresso e' da
+   pessoa), entao o filtro e' por quem esta' aqui. Guardado 5 minutos. */
+const RANKING_GUARDADO = 5 * 60 * 1000;
+const rankingsDoServidor = new Map();   // guildId -> { ate, linhas }
+
+/* Junta as linhas do banco por pessoa: vitorias, derrotas e o heroi mais
+   usado. Pura. */
+function placarDosDuelistas(linhas) {
+  const porPessoa = new Map();
+  for (const r of linhas || []) {
+    const v = Number(r.vitorias) || 0, d = Number(r.derrotas) || 0;
+    if (!v && !d) continue;
+    const p = porPessoa.get(r.user_id) || { userId: r.user_id, vitorias: 0, derrotas: 0, favorito: null, usos: -1 };
+    p.vitorias += v; p.derrotas += d;
+    if (v + d > p.usos) { p.usos = v + d; p.favorito = r.personagem; }
+    porPessoa.set(r.user_id, p);
+  }
+  return [...porPessoa.values()].filter((p) => p.vitorias > 0)
+    .sort((a, b) => b.vitorias - a.vitorias || a.derrotas - b.derrotas);
+}
+
+async function rankingDoServidor(guildId) {
+  const guardado = rankingsDoServidor.get(guildId);
+  if (guardado && guardado.ate > Date.now()) return guardado.linhas;
+  const linhas = await sb("cyron_duelo_personagem?vitorias=gt.0&select=user_id,personagem,vitorias,derrotas&limit=5000").catch(() => null);
+  const todos = placarDosDuelistas(linhas).slice(0, 60);
+  const guild = typeof client !== "undefined" ? client.guilds.cache.get(guildId) : null;
+  let aqui = [];
+  if (guild && todos.length) {
+    const membros = await guild.members.fetch({ user: todos.map((p) => p.userId) }).catch(() => null);
+    aqui = todos.filter((p) => membros?.has(p.userId)).slice(0, 10)
+      .map((p) => ({ ...p, nome: membros.get(p.userId)?.displayName || membros.get(p.userId)?.user?.username || "?" }));
+  }
+  rankingsDoServidor.set(guildId, { ate: Date.now() + RANKING_GUARDADO, linhas: aqui });
+  return aqui;
+}
+
+/* O card do ranking, no mesmo pergaminho. */
+const RK_LARGURA = 900;
+async function desenharRanking(sharp, linhas, nomeServidor, { rot = ROTULOS_DA_FICHA } = {}, pasta = RETRATOS_DO_DUELO,
+  fontes = { titulo: FONTE_TITULO, livro: FONTE_LIVRO, italico: FONTE_LIVRO_ITALICO, negrito: FONTE_LIVRO_NEGRITO }) {
+  const [titulo, livro, italico, negrito] = await Promise.all([fontes.titulo, fontes.livro, fontes.italico, fontes.negrito].map(fonteDoDesenho));
+  const W = RK_LARGURA, m = 34, linha = 96, topo = 250;
+  const H = Math.max(720, topo + Math.max(1, linhas.length) * linha + 130);
+  const up = (t) => String(t).toLocaleUpperCase();
+  const T = (texto) => fonteQueEscreve(titulo, negrito, texto);
+  const tit = (texto, ...resto) => escreverEm(T(texto), soLetrasDaFonte(T(texto), texto), ...resto);
+  let svg = folhaDePergaminho(W, H, m) + faixaDoTitulo(T(up(rot.ranking)), soLetrasDaFonte(T(up(rot.ranking)), up(rot.ranking)), W, 108);
+  svg += escreverEm(italico, soLetrasDaFonte(italico, nomeServidor) || " ", W / 2, 180, 28, FI_SEPIA, { alinhar: "meio", max: W - 200 });
+  svg += enfeite(W / 2, 208, W - 200);
+  const camadas = [];
+  const medalhas = ["#D4AF37", "#A8A9AD", "#B87333"];
+  if (!linhas.length) {
+    linhasDoTexto(italico, soLetrasDaFonte(italico, rot.ninguem), 26, W - 220).forEach((l, i) => {
+      svg += escreverEm(italico, l, W / 2, topo + 60 + i * 34, 26, FI_TINTA, { alinhar: "meio" });
+    });
+  }
+  const r = 34;
+  const mascara = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${2 * r}" height="${2 * r}"><circle cx="${r}" cy="${r}" r="${r}"/></svg>`);
+  for (const [i, p] of linhas.entries()) {
+    const y = topo + i * linha;
+    if (i % 2 === 0) svg += `<rect x="${m + 40}" y="${y}" width="${W - 2 * m - 80}" height="${linha - 8}" rx="10" fill="#E9DCBC" opacity="0.6"/>`;
+    const cy = y + (linha - 8) / 2;
+    if (i < 3) svg += `<circle cx="${m + 88}" cy="${cy}" r="24" fill="${medalhas[i]}" stroke="${FI_SEPIA}" stroke-width="2"/>`;
+    svg += escreverEm(titulo, String(i + 1), m + 88, cy + 11, 30, i < 3 ? "#FFF8E6" : FI_TINTA, { alinhar: "meio" });
+    const heroi = personagemPorId(p.favorito);
+    if (heroi) {
+      const rosto = await sharp(`${pasta}${heroi.id}.jpg`).resize(2 * r, 2 * r, { fit: "cover", position: "north" })
+        .composite([{ input: mascara, blend: "dest-in" }]).png().toBuffer();
+      svg += `<circle cx="${m + 168}" cy="${cy}" r="${r + 4}" fill="#B8862F"/>`;
+      camadas.push({ input: rosto, left: m + 168 - r, top: Math.round(cy - r) });
+    }
+    const nome = soLetrasDaFonte(negrito, p.nome) || soLetrasDaFonte(negrito, `#${i + 1}`);
+    svg += escreverEm(negrito, nome, m + 222, cy - 4, 30, FI_TINTA, { max: 380 });
+    if (heroi) svg += escreverEm(italico, soLetrasDaFonte(italico, `${rot.heroiFavorito}: ${heroi.curto}`), m + 222, cy + 26, 20, FI_SEPIA, { max: 380 });
+    const total = p.vitorias + p.derrotas;
+    /* A coluna da direita termina antes da moldura (W - m - 60). */
+    svg += tit(`${p.vitorias}`, W - m - 170, cy + 6, 36, "#9E2B25", { alinhar: "fim" });
+    svg += escreverEm(italico, soLetrasDaFonte(italico, rot.vitorias), W - m - 162, cy + 4, 20, FI_SEPIA, { max: 100 });
+    svg += escreverEm(italico, soLetrasDaFonte(italico, `${Math.round((100 * p.vitorias) / Math.max(1, total))}% ${rot.aproveitamento}`),
+      W - m - 62, cy + 30, 17, "#6B5338", { alinhar: "fim", max: 190 });
+  }
+  svg += escreverEm(titulo, "CYRON · DUELO", W / 2, H - m - 34, 14, "#A88C5E", { alinhar: "meio", espaco: 3 });
+  return await montarPergaminho(sharp, W, H, svgDoPergaminho(W, H, svg), camadas);
 }
 
 /* Cria o duelo e registra quem esta' nele. */
@@ -11094,7 +11197,7 @@ async function cliqueDoPainel(inter) {
   const ctx = { idioma: await linguaDe(inter), guildId: inter.guildId };
 
   /* dp:aba:<aba>:<heroi> */
-  if (acao === "aba") return inter.editReply(await telaDoPainel(eu, idxTxt === "hab" ? "hab" : "herois", extra, "", ctx));
+  if (acao === "aba") return inter.editReply(await telaDoPainel(eu, ["hab", "ranking"].includes(idxTxt) ? idxTxt : "herois", extra, "", ctx));
   if (acao === "usar") {
     await usarHeroi(eu, p.id);
     return inter.editReply(await telaDoPainel(eu, "herois", idx, `⭐ ${p.curto} ${await fala("agora é o seu herói.")}`, ctx));
@@ -11192,6 +11295,7 @@ function cancelarDuelo(id, motivo = "") {
 
 async function cliqueDuelo(inter) {
   const [, acao, id, extra] = inter.customId.split(":");
+  if (acao === "revanche") return cliqueRevanche(inter, id);
   const estado = duelos.get(id);
   /* Clique de duelo tem pressa (3 s): a lingua so' e' buscada quando ha'
      aviso para dar. */
@@ -11463,6 +11567,8 @@ const ROTULOS_DA_FICHA = {
   equipada: "Equipada", libera: "Libera no nível", trancada: "página trancada", trancadas: "páginas trancadas",
   subaNivel: "suba de nível para ler", nenhuma: "Nenhuma página liberada ainda. Duele com este personagem para abrir a primeira.",
   estilo: "A alternativa é diferente, nunca mais forte: escolha o seu estilo.",
+  ranking: "Ranking", ninguem: "Ninguém venceu um duelo neste servidor ainda. Use /duelo e seja o primeiro!",
+  heroiFavorito: "herói favorito", aproveitamento: "de aproveitamento",
 };
 
 /* Linguas cujas letras as fontes dos cards nao tem (arabe, japones,
@@ -11863,9 +11969,56 @@ async function terminarDuelo(estado) {
     if (novato) extra.push(`📜 *${tx.codex} 1/10:* ${novato.p.fatos[0]}`);
   }
   estado.extra = extra;
+  /* A revanche vale por 5 minutos: os mesmos dois, os mesmos herois. */
+  estado.revancheAte = Date.now() + DUELO_REVANCHE;
+  revanches.set(estado.id, { pessoas: estado.pessoas, escolhas: { ...estado.escolhas }, treino: estado.treino,
+    idioma: estado.idioma, tx: estado.tx, guildId: estado.guildId, ate: estado.revancheAte, querem: new Set(), msg: estado.msg });
+  for (const [id, r] of revanches) if (r.ate < Date.now()) revanches.delete(id);
   await editarDuelo(estado);
   estado.base = null;
   cancelarDuelo(estado.id);
+}
+
+/* 🔁 Revanche. Treino: quem treinou toca e comeca outro na hora (heroi da
+   CYRON novo). Entre duas pessoas: as DUAS tocam; a primeira fica
+   esperando a outra. */
+const DUELO_REVANCHE = 5 * 60 * 1000;
+const revanches = new Map();   // id do duelo que acabou -> como recomecar
+
+async function cliqueRevanche(inter, id) {
+  const r = revanches.get(id);
+  const fala = async (t) => (await nalingua(await linguaDe(inter), inter.guildId, t))[0];
+  if (!r || r.ate < Date.now()) {
+    revanches.delete(id);
+    return inter.reply({ flags: 64, content: `🔁 ${await fala("A revanche expirou. Use /duelo para um novo duelo.")}` });
+  }
+  const eu = inter.user.id;
+  if (!r.pessoas.some((p) => p?.userId === eu)) return inter.reply({ flags: 64, content: `👀 ${await fala("Só quem duelou pode pedir revanche.")}` });
+  if (duelistaEm.has(eu)) return inter.reply({ flags: 64, content: `⚔️ ${await fala("Você já está num duelo. Termine ele primeiro.")}` });
+  const humanos = r.pessoas.filter((p) => p?.userId);
+  r.querem.add(eu);
+  if (humanos.some((p) => !r.querem.has(p.userId))) {
+    const outro = humanos.find((p) => !r.querem.has(p.userId));
+    return inter.reply({ content: `🔁 <@${eu}> ${r.tx?.querRevanche || DUELO_TEXTOS.querRevanche} <@${outro.userId}>, ${r.tx?.toqueAceitar || DUELO_TEXTOS.toqueAceitar}`,
+      allowedMentions: { users: [outro.userId] } });
+  }
+  if (humanos.some((p) => duelistaEm.has(p.userId))) return inter.reply({ flags: 64, content: `⚔️ ${await fala("A outra pessoa já está em outro duelo.")}` });
+  revanches.delete(id);
+  await inter.update({ components: [] }).catch(() => inter.deferUpdate().catch(() => {}));
+  const escolhas = { ...r.escolhas };
+  if (r.treino) {
+    const outros = PERSONAGENS.filter((x) => x.id !== escolhas[0]);
+    escolhas[1] = outros[Math.floor(Math.random() * outros.length)].id;
+  }
+  const estado = novoDuelo(inter, r.pessoas.map((p) => (p?.bot ? { bot: true } : { ...p })), escolhas, { treino: r.treino, fixo: { 0: true, 1: true } });
+  estado.idioma = r.idioma || "pt";
+  estado.tx = r.tx || DUELO_TEXTOS;
+  estado.msg = await inter.channel?.send({ content: `🔁 ${humanos.map((p) => `<@${p.userId}>`).join(" × ")}${r.treino ? " × 🤖 CYRON" : ""}`,
+    allowedMentions: { parse: [] } }).catch(() => null) ||
+    await inter.followUp({ content: "🔁", flags: 0 }).catch(() => null);
+  if (!estado.msg) return cancelarDuelo(estado.id);
+  estado.comecando = true;
+  await comecarDuelo(estado);
 }
 
 /* /equipar: as quatro listas do kit, com a alternativa so' quando liberada. */

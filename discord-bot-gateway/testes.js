@@ -8763,6 +8763,10 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("só as duas últimas jogadas aparecem", !meio.embeds[0].description.includes("-# c") && meio.embeds[0].description.includes("Sabre"));
   verdade("sem bloco de código nas barras (vira caixa enorme no celular)", !meio.embeds[0].description.includes("`"));
   ok("o título usa os nomes curtos", meio.embeds[0].title, "⚔️ Alexandre × Napoleão");
+  const comRevanche = m.telaDoDuelo(Object.assign(duelo(), { vencedor: 1, limite: 0, revancheAte: Date.now() + 1000 }));
+  ok("no fim, o botão de revanche", comRevanche.components[0].components[0].custom_id, "duelo:revanche:t");
+  const treinoAcabou = m.telaDoDuelo(Object.assign(duelo(), { vencedor: 0, limite: 0, revancheAte: 1, treino: true }));
+  ok("no treino ele vira Treinar de novo", treinoAcabou.components[0].components[0].label, "Treinar de novo");
   const acabou = m.telaDoDuelo(Object.assign(duelo(), { vencedor: 1, limite: 0 }));
   ok("no fim, sem botões", acabou.components, []);
   verdade("o fim mostra quem venceu", acabou.embeds[0].description.includes("🏆"));
@@ -8821,6 +8825,12 @@ function conferirCartao(onde, embed, componentes = []) {
     const fichaRu = await fi.desenharFicha(sharp, { p: { ...P("tesla"), curto: "Тесла", titulo: "Волшебник" }, nivel: 2, xp: 70, vitorias: 1, derrotas: 0,
       kit: fi.kitEquipado(P("tesla"), 2, {}), liberadas: 2, rot: rotRu }, pasta, fontesDaFicha);
     verdade("a ficha em russo sai", fichaRu.length > 10000);
+    const rkd = carregar(["RK_LARGURA", "personagemPorId", "desenharRanking"]);
+    const cardRk = await rkd.desenharRanking(sharp, [{ userId: "1", nome: "Tiago †", vitorias: 12, derrotas: 3, favorito: "zumbi" },
+      { userId: "2", nome: "さくら", vitorias: 4, derrotas: 4, favorito: "tesla" }], "[TOP] Best", {}, pasta, fontesDaFicha);
+    verdade("o card do ranking sai (nome sem letra da fonte não quebra)", (await sharp(cardRk).metadata()).width === 900);
+    const vazio = await rkd.desenharRanking(sharp, [], "X", {}, pasta, fontesDaFicha);
+    verdade("o ranking vazio também sai", vazio.length > 10000);
     ok("a habilidade se explica numa linha", fi.descricaoDaHabilidade({ dano: 18, efeito: "queimar" }), "18 de dano · queima 5 por 2 turnos");
     ok("defesa sem dano", fi.descricaoDaHabilidade({ dano: 0, efeito: "escudo" }), "escudo de 25 até a próxima vez");
     const fonteLivro = await c.fonteDoDesenho(fontesDaFicha.livro);
@@ -8845,6 +8855,7 @@ function conferirCartao(onde, embed, componentes = []) {
     const pn = carregar(["ESPACOS_ORDEM", "personagemPorId", "nivelDoPersonagem", "kitEquipado", "descricaoDaHabilidade",
       "ROTULOS_DA_FICHA", "LINGUAS_SEM_FONTE_NO_CARD", "linguaDoCard", "traduzirTextos", "HEROIS_NA_LINGUA", "heroiNaLingua",
       "TEXTOS_DO_PAINEL", "PAINEL_NA_LINGUA", "textosNaLingua", "textosDoPainel", "DUELO_TEXTOS", "DUELO_NA_LINGUA", "prepararLingua",
+      "RANKING_GUARDADO", "rankingsDoServidor", "placarDosDuelistas", "rankingDoServidor",
       "heroisAtivos", "cardsDoPainel", "CARDS_GUARDADOS", "heroiAtivo", "cardDoPainel", "progressoDeTodos", "abasDoPainel", "telaDoPainel"]);
     const zumbi = elenco.PERSONAGENS.findIndex((p) => p.id === "zumbi");
     ok("o herói ativo é o último mexido", await pn.heroiAtivo("111111"), "zumbi");
@@ -8871,12 +8882,19 @@ function conferirCartao(onde, embed, componentes = []) {
     const ids = (t) => t.components.flatMap((r) => r.components.map((c) => c.custom_id));
     verdade("heróis: ◀ ▶ e usar", ids(herois).includes(`dp:aba:herois:${zumbi - 1}`) && ids(herois).includes(`dp:aba:herois:${zumbi + 1}`));
     verdade("o herói ativo não se escolhe de novo", herois.components[0].components.find((c) => c.custom_id === `dp:usar:${zumbi}`).disabled);
-    verdade("no fim: Heróis, Habilidades e o botão Duelar", ids(herois).slice(-3).join() === `dp:aba:herois:${zumbi},dp:aba:hab:${zumbi},dp:duelar:${zumbi}`);
+    verdade("no fim: Heróis, Habilidades, Ranking e o botão Duelar", ids(herois).slice(-4).join() === `dp:aba:herois:${zumbi},dp:aba:hab:${zumbi},dp:aba:ranking:${zumbi},dp:duelar:${zumbi}`);
     const hab = await pn.telaDoPainel("111111", "hab", zumbi);
     const trocas = hab.components[0].components;
     ok("nível 3 (160 XP): defesa liberada, o resto trancado", trocas.map((c) => c.disabled), [true, false, true, true]);
     verdade("o trancado diz o nível", trocas[0].label.endsWith("4"));
     verdade("sem desenho, o painel vira texto", !herois.embeds[0].image && herois.files.length === 0);
+    const rk = await pn.telaDoPainel("111111", "ranking", 0);
+    verdade("a aba Ranking existe e fica marcada", rk.components.at(-1).components[2].disabled);
+    const placar = pn.placarDosDuelistas([
+      { user_id: "a", personagem: "zumbi", vitorias: 5, derrotas: 1 }, { user_id: "a", personagem: "tesla", vitorias: 1, derrotas: 0 },
+      { user_id: "b", personagem: "musashi", vitorias: 5, derrotas: 4 }, { user_id: "c", personagem: "joana", vitorias: 0, derrotas: 3 }]);
+    ok("o ranking soma por pessoa e desempata por menos derrotas", placar.map((p) => `${p.userId}:${p.vitorias}`), ["a:6", "b:5"]);
+    ok("o herói favorito é o mais usado", placar[0].favorito, "zumbi");
     ok("aba desconhecida cai em Heróis", ids(await pn.telaDoPainel("111111", "xyz", 0))[2], "dp:usar:0");
     verdade("o ◀ do primeiro volta para o último", ids(await pn.telaDoPainel("111111", "herois", -1)).includes(`dp:usar:${elenco.PERSONAGENS.length - 1}`));
     Object.assign(globalThis, antes);
@@ -8887,6 +8905,8 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("clique duplo não joga duas vezes", /if \(estado\.ocupado\) return inter\.deferUpdate\(\)/.test(idx));
   verdade("os comandos do duelo são de todos", /COMANDOS_DE_TODOS = new Set\([^)]*"duelo", "equipar", "codex"/.test(idx));
   verdade("o Duelar publica o desafio com Aceitar e Treinar", /acao !== "duelar"[^]{0,2500}duelo:aceitar:\$\{estado\.id\}[^]{0,300}duelo:treino:\$\{estado\.id\}/.test(idx));
+  verdade("na revanche entre duas pessoas, as duas precisam tocar", /humanos\.some\(\(p\) => !r\.querem\.has\(p\.userId\)\)/.test(idx));
+  verdade("a revanche é tratada antes de procurar o duelo (que já acabou)", /if \(acao === "revanche"\) return cliqueRevanche\(inter, id\);[^]{0,100}const estado = duelos\.get\(id\)/.test(idx));
   verdade("só quem desafiou treina com a CYRON", /acao === "treino"[^]{0,200}estado\.pessoas\[0\]\.userId !== inter\.user\.id/.test(idx));
   verdade("os botões do duelo têm rota", idx.includes('inter.customId.startsWith("duelo:")') && idx.includes('inter.customId.startsWith("equipar:")'));
   const sql = readFileSync(`${aqui}/../supabase/migracoes/019-duelo.sql`, "utf8");
