@@ -8781,9 +8781,15 @@ function conferirCartao(onde, embed, componentes = []) {
     const FONTE = new URL("./fontes/DejaVuSans-Bold.ttf", import.meta.url).pathname;
     const pasta = new URL("./img/duelo/", import.meta.url).pathname;
     const c = carregar(["soLetrasDaFonte", "temLetra", "FONTES_LIDAS", "fonteDoDesenho", "DU_LARGURA", "DU_ALTURA", "DU_FOTO_L",
-      "DU_FOTO_A", "DU_TOPO", "DU_MARGEM", "xDoLado", "textoCentradoEm", "desenharDuelo", "corDaVida", "desenharQuadroDoDuelo",
+      "DU_FOTO_A", "DU_TOPO", "DU_MARGEM", "xDoLado", "textoCentradoEm", "desenharDuelo", "selosDosJogadores", "corDaVida", "desenharQuadroDoDuelo",
       "DUELO_VIDA", "DUELO_ENERGIA_MAX"]);
+    const fotoAzul = await sharp({ create: { width: 128, height: 128, channels: 3, background: "#2255FF" } }).png().toBuffer();
     const base = await c.desenharDuelo(sharp, P("cleopatra"), P("napoleao"), pasta, FONTE, [3, 1]);
+    const selos = await c.selosDosJogadores(sharp, [fotoAzul, null]);
+    ok("um selo (anel e foto) só para quem tem foto", selos.length, 2);
+    const comSelo = await c.desenharQuadroDoDuelo(sharp, base, [{ hp: 50, en: 50 }, { hp: 50, en: 50 }], 0, null, FONTE, "VENCEU", selos);
+    const [rb, gb, bb] = [...(await sharp(comSelo).extract({ left: c.xDoLado(0) - 2, top: c.DU_TOPO + 34, width: 1, height: 1 }).raw().toBuffer())];
+    verdade(`a foto de quem joga aparece por cima, no canto do retrato (${rb},${gb},${bb})`, bb > 180 && rb < 120);
     const jpg = await c.desenharQuadroDoDuelo(sharp, base, [{ hp: 64, en: 50 }, { hp: 12, en: 100 }], 0, null, FONTE);
     const meta = await sharp(jpg).metadata();
     ok("o cartaz sai em 1024x540", [meta.width, meta.height], [1024, 540]);
