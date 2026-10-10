@@ -167,8 +167,8 @@ html[lang="en"] [data-en]{display:revert}
       <span data-en>Inside a server, I receive messages from the channels that server's administrator pointed me at, and nothing else. A channel they did not point at is one I neither translate nor store.</span>
     </p>
     <p>
-      <span data-pt>Num privado comigo, eu leio o que você me manda — é como o tradutor pessoal funciona.</span>
-      <span data-en>In a direct message with me, I read what you send me — that is how the personal translator works.</span>
+      <span data-pt>Num privado comigo, eu leio o que você me manda — é como o tradutor pessoal funciona, e como eu respondo as suas perguntas.</span>
+      <span data-en>In a direct message with me, I read what you send me — that is how the personal translator works, and how I answer your questions.</span>
     </p>
     <p>
       <span data-pt><strong>Eu não leio mensagens privadas entre outras pessoas.</strong> O Discord não me dá acesso a elas, e eu não peço.</span>
@@ -334,6 +334,10 @@ html[lang="en"] [data-en]{display:revert}
     <p>
       <span data-pt><strong>Áudios também só vão para fora quando alguém pede.</strong> Se uma pessoa toca em <strong>🎧 Ouvir traduzido</strong> (ou usa o menu Translate numa mensagem de voz), aquele áudio é enviado ao <strong>Microsoft Azure Speech</strong> para virar texto, e o texto segue para o tradutor acima. Nenhum áudio é enviado sem esse clique, e áudios com mais de 2 minutos não são enviados. O texto ouvido fica só na memória do bot, para não transcrever o mesmo áudio de novo, e some quando ele reinicia.</span>
       <span data-en><strong>Audio also only leaves when someone asks.</strong> If a person taps <strong>🎧 Translate audio</strong> (or uses the Translate menu on a voice message), that audio is sent to <strong>Microsoft Azure Speech</strong> to become text, and the text goes on to the translator above. No audio is sent without that tap, and audio longer than 2 minutes is not sent. The transcribed text stays only in the bot's memory, so the same audio is not transcribed twice, and it disappears when the bot restarts.</span>
+    </p>
+    <p>
+      <span data-pt><strong>Perguntas para a IA, só no privado.</strong> Quando você me faz uma pergunta no privado, ela é enviada à <strong>Groq</strong> (um serviço de IA), junto com as suas últimas mensagens da conversa, só para gerar a resposta. A conversa fica só na memória do bot por 30 minutos, para eu entender a continuação, e não é gravada no banco. Pela política da Groq, ela não guarda o que recebe, a não ser por até 30 dias para investigar abuso ou falha. Texto que não é pergunta não vai para a IA: segue para o tradutor, como sempre.</span>
+      <span data-en><strong>Questions to the AI, only in DMs.</strong> When you ask me a question in a DM, it is sent to <strong>Groq</strong> (an AI service), together with your last messages in the conversation, only to generate the answer. The conversation stays only in the bot's memory for 30 minutes, so I can follow up, and it is not written to the database. Under Groq's policy, it does not keep what it receives, except for up to 30 days to investigate abuse or failures. Text that is not a question does not go to the AI: it goes to the translator, as always.</span>
     </p>
     <p>
       <span data-pt>Fora isso, eu me apoio em três lugares: <strong>Fly.io</strong> roda o bot, <strong>Supabase</strong> guarda o banco de dados, e <strong>GitHub Pages</strong> serve este site. Quando houver pagamento, ele passa pela <strong>Stripe</strong> — eu não vejo nem guardo número de cartão em momento nenhum.</span>

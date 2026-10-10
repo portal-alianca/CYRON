@@ -18,13 +18,14 @@ import { AsyncLocalStorage } from "node:async_hooks";
 /* O catalogo do que eu faco. Mora fora daqui porque a pagina cyron/recursos.html
    nasce dele tambem -- uma lista so', e nao uma no bot e outra no site. */
 import { CATEGORIAS, doCliente } from "./catalogo.js";
+import { QUEM_SOU, REGRAS, DUVIDAS } from "./roteiro.js";
 import { PERSONAGENS, ESPACOS, EFEITOS, NIVEIS_DO_PERSONAGEM } from "./duelo-elenco.js";
 /* O que e' so' da alianca [TOP]: fica fora daqui para nao se misturar com o
    produto. Ver o comentario no topo do alianca.js. */
 import { ligarAlianca, COMANDOS_DA_ALIANCA, comandoDaAlianca, boasVindasDaAlianca, reHospedar, MAX_MIDIA,
   seletorNasBoasVindas, rosasDaAlianca } from "./alianca.js";
 import { ligarSuporte, exigirSuporte, montarSuporte, guildDoSuporte, cliqueSuporte, PREFIXO_LER,
-  nomeNoIdioma, ordemNoSuporte, garantirConvite } from "./suporte.js";
+  nomeNoIdioma, ordemNoSuporte, garantirConvite, LINK_DO_CONTATO } from "./suporte.js";
 import { fileURLToPath } from "node:url";
 
 /* A fonte da imagem traduzida vai JUNTO com o bot, e nao e' a da maquina: a
@@ -16404,6 +16405,7 @@ function linhasDoAdmin(aba = "resumo", servidores = []) {
         botao("fala", "🎧", "Áudio", 1), botao("ajustes", "⚙️", "Ajustes", 1), botao("codigos", "🎟️", "Gerar códigos")],
       [botao("comandos", "🧪", "Meus comandos"), botao("novocomando", "➕", "Novo comando", 4),
         botao("suporte", "🏗️", "Montar suporte"), botao("remontar", "🔄", "Remontar painel"), convite],
+      [botao("ia", "🧠", "IA do privado", 1)],
     ],
   }[aba] || [];
   /* A lista de servidores e' um menu, e nao texto: escolher abre a ficha com
@@ -16655,6 +16657,7 @@ async function embedDasFerramentas() {
     fields: [
       { name: "🔑 Chaves de tradução", value: `${tem("deepl")} DeepL · ${tem("azure")} Azure`, inline: true },
       { name: "🧪 Beta", value: BETA ? "ligado" : venceEm(BETA_ATE) ? `até ${quandoFoi(venceEm(BETA_ATE), "d")}` : "desligado", inline: true },
+      { name: "🧠 IA do privado", value: await resumoDaIA() },
       { name: "O que cada botão faz", value: [
         "🔑 **Chaves** — DeepL e Azure da casa",
         "👁️ **Leitura de imagem** e 🎧 **Áudio** — chaves da Azure para o 📝 e o 🎧",
@@ -16663,6 +16666,7 @@ async function embedDasFerramentas() {
         "🧪 **Meus comandos** / ➕ **Novo comando** — comandos deste servidor",
         "🏗️ **Montar suporte** — arruma o servidor de suporte",
         "🔄 **Remontar painel** — refaz os canais deste painel",
+        "🧠 **IA do privado** — chave da Groq, ligar e desligar, perguntas por dia",
       ].join("\n") },
     ],
   };
@@ -16755,6 +16759,7 @@ async function cliqueAdmin(inter) {
   if (acao === "chaves" && inter.isButton()) return inter.showModal(janelaValida(await janelaDasChaves()));
   if (acao === "visao" && inter.isButton()) return inter.showModal(janelaValida(await janelaDaVisao()));
   if (acao === "fala" && inter.isButton()) return inter.showModal(janelaValida(await janelaDaFala()));
+  if (acao === "ia" && inter.isButton()) return inter.showModal(janelaValida(await janelaDaIA()));
   /* Cria ou arruma o servidor de suporte. Rodar de novo nao duplica nada:
      sala que existe fica, texto que eu postei e' editado. */
   if (acao === "suporte" && inter.isButton()) {
@@ -19172,7 +19177,9 @@ function telaDoIdioma() {
 
 /* ---- passo 1: quem eu sou, e a pergunta ---- */
 
-function paginaDeApresentacao() {
+/* Com a IA ligada, a apresentacao conta que da' para perguntar. Sem ela,
+   nao promete: a pergunta cairia no seletor de traducao. */
+function paginaDeApresentacao(comIA = false) {
   return {
     title: "🌐 CYRON",
     description: [
@@ -19183,6 +19190,7 @@ function paginaDeApresentacao() {
       "",
       "**Você pode me testar agora:** me mande qualquer texto nesta conversa e eu " +
       "traduzo para você, em 20 idiomas.",
+      ...(comIA ? ["", "**Ficou com alguma dúvida?** Me pergunte aqui mesmo, do seu jeito, e eu respondo."] : []),
       "",
       "— — —",
       "",
@@ -19216,7 +19224,7 @@ function botoesDaPergunta() {
 
 async function telaDeApresentacao(idioma) {
   return {
-    embeds: [{ color: COR, ...(await traduzirEmbed(paginaDeApresentacao(), idioma, MOTOR_AUTO)) }],
+    embeds: [{ color: COR, ...(await traduzirEmbed(paginaDeApresentacao(await iaPronta()), idioma, MOTOR_AUTO)) }],
     components: [await traduzirLinha(botoesDaPergunta(), idioma)],
   };
 }
@@ -19462,7 +19470,11 @@ async function telaDosPlanos(idioma) {
    "Em que posso ajudar?" com campo livre promete um atendente que nao existe:
    quem escrevesse uma pergunta de verdade receberia o seletor de traducao, que
    nao e' resposta nenhuma. Cinco temas cobrem o que de fato perguntam, e cada
-   um tem uma resposta escrita -- honesto sobre o que eu sei fazer. */
+   um tem uma resposta escrita -- honesto sobre o que eu sei fazer.
+
+   Com a IA do privado ligada, a pergunta livre ganhou quem responda (ver
+   responderComIA). O menu continua: e' para onde ela manda quando fica sem
+   folego, e e' o caminho de quem prefere tocar a escrever. */
 const TEMAS = {
   /* O catalogo em cinco linhas, montado da MESMA lista que gera a pagina do
      site -- se um recurso sair do catalogo.js, sai daqui junto.
@@ -19545,8 +19557,11 @@ async function telaDeAjuda(idioma, tema = null) {
     ? { title: escolhido.titulo, description: escolhido.texto }
     : {
       title: "💬 Tudo bem",
-      description: "Estou aqui de qualquer jeito. Escolha um assunto abaixo, ou " +
-        "simplesmente me mande um texto que eu traduzo para você.",
+      description: (await iaPronta())
+        ? "Estou aqui de qualquer jeito. Escolha um assunto abaixo, me faça uma pergunta, " +
+          "ou me mande um texto que eu traduzo para você."
+        : "Estou aqui de qualquer jeito. Escolha um assunto abaixo, ou " +
+          "simplesmente me mande um texto que eu traduzo para você.",
     };
   return {
     embeds: [{ color: COR, ...(await traduzirEmbed(embed, idioma, MOTOR_AUTO)) }],
@@ -19577,6 +19592,9 @@ async function telaDeAjuda(idioma, tema = null) {
 const TEMA_INSTALAR = "instalar";
 
 async function cliqueNoPrivado(inter) {
+  /* Este responde com uma mensagem nova (o menu de traducao), e nao troca o
+     cartao: a resposta da IA fica onde esta'. */
+  if (inter.customId === TRADUZIR_A_PERGUNTA) return traduzirAPergunta(inter);
   /* Reconhece o clique antes de qualquer traducao, pelo mesmo motivo do
      seletor de idioma: montar uma tela nova pode passar dos 3 segundos que o
      Discord da', e a pessoa veria "Esta interação falhou" num botao que
@@ -19660,6 +19678,479 @@ async function falarNoPrivado(msg, carga) {
     });
 }
 
+/* ---------------- a IA do privado ----------------
+
+   Quem manda uma PERGUNTA para a CYRON no privado recebe resposta de
+   conversa, na lingua em que escreveu, sobre qualquer coisa da CYRON.
+
+   Nao ha' treino nenhum. Uma IA pronta (modelo aberto, na Groq, no plano
+   gratis) le o roteiro antes de cada pergunta: o roteiro.js, o catalogo, os
+   comandos, os planos e as regras do duelo. Mudou o bot, mudou o roteiro, e
+   ela ja' sabe na proxima pergunta.
+
+   So' no privado, e so' para pergunta: o resto segue para o tradutor pessoal,
+   como sempre. Depois de uma resposta, a conversa continua por 10 minutos sem
+   precisar de "?" ("e no celular?", "obrigado!").
+
+   O plano gratis e' apertado -- por minuto e por dia, somando todo mundo --,
+   entao: uma pergunta por vez na fila, um teto por pessoa por dia, e o
+   segundo modelo quando o primeiro esgota. Sem folego, a pessoa cai no menu
+   de assuntos de antes, que nunca falha. Sem chave (ou desligada no /admin),
+   o privado fica exatamente como era.
+
+   A conversa fica so' na memoria, por 30 minutos, e nunca vai ao banco. */
+const IA_URL = "https://api.groq.com/openai/v1";
+const IA_MODELOS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
+const IA_POR_DIA = 20;                // perguntas por pessoa por dia (o /admin muda)
+const IA_MEMORIA = 30 * 60 * 1000;    // quanto a conversa fica lembrada
+const IA_CONVERSA = 10 * 60 * 1000;   // quanto tempo a conversa segue sem "?"
+const IA_TURNOS = 6;                  // mensagens lembradas: 3 perguntas e 3 respostas
+const IA_PERGUNTA_MAX = 600;          // acima disso e' texto para traduzir, nao pergunta
+const IA_RESPOSTA_MAX = 1800;         // a mensagem do Discord cabe 2000
+const IA_FILA_MAX = 6;
+const IA_CONVERSAS_MAX = 500;
+/* A IA responde so' isto quando a mensagem e' um texto para traduzir. */
+const IA_TRADUZIR = "[TRADUZIR]";
+/* Os unicos enderecos que a IA pode mandar. Outro qualquer sai da resposta:
+   IA inventa link com a maior confianca do mundo. */
+const HOSTS_DA_IA = ["hicyron.github.io", "discord.gg", "discord.com"];
+
+const conversasDaIA = new Map();      // userId -> { msgs, ultima }
+const perguntasHoje = new Map();      // userId -> { dia, n }
+const usoDaIA = { dia: "", perguntas: 0, respostas: 0, semFolego: 0, falhas: 0, tokens: 0, entrada: 0, emCache: 0 };
+
+async function chaveDaIA() {
+  const doCofre = String(process.env.IA_CHAVE || "").trim();
+  if (doCofre) return doCofre;
+  const a = await ajustes().catch(() => ({}));
+  return a?.ia_chave ? decifrar(a.ia_chave) : "";
+}
+
+/* O teto por pessoa: o do /admin, ou o padrao. */
+function tetoDaIA(a) {
+  const n = Number(a?.ia_por_dia);
+  return Number.isInteger(n) && n > 0 ? n : IA_POR_DIA;
+}
+
+/* Parece pergunta para MIM? Um "?" em qualquer escrita, uma palavra de
+   pergunta logo no comeco, o meu nome ou um comando. Pura. */
+const COMECOS_DE_PERGUNTA = new Set([
+  "como", "qual", "quais", "quando", "onde", "porque", "pq", "quanto", "quantos", "quantas", "quem", "posso", "consigo",
+  "preciso", "ajuda", "explica", "explique",
+  "how", "what", "what's", "whats", "which", "when", "where", "why", "who", "can", "could", "does", "should", "explain", "help",
+  "cómo", "qué", "cuál", "cuándo", "dónde", "cuánto", "cuántos", "puedo", "ayuda", "ayúdame",
+  "comment", "pourquoi", "quel", "quelle", "où", "aide",
+  "wie", "warum", "wo", "wann", "kann", "hilfe",
+  "perché", "dove", "quale", "aiuto",
+  "как", "какой", "какая", "какие", "что", "зачем", "почему", "где", "когда", "можно", "сколько", "помогите",
+  "nasıl", "neden", "nerede",
+  "bagaimana", "kenapa", "dimana", "gimana",
+]);
+function parecePergunta(texto) {
+  const t = String(texto || "").trim();
+  if (!t || t.length > IA_PERGUNTA_MAX) return false;
+  if (/[?？؟]/u.test(t)) return true;
+  if (/^\/[a-z]/i.test(t)) return true;
+  if (/(^|[^a-z])cyron([^a-z]|$)/i.test(t)) return true;
+  if (/^por\s+qu[eê]/i.test(t)) return true;
+  return COMECOS_DE_PERGUNTA.has(t.toLowerCase().split(/[\s,.!:;]+/u)[0]);
+}
+
+/* Vai para a IA? Pergunta, sempre. Numa conversa ainda aberta, tambem o que
+   e' curto ("obrigado", "nao entendi"). Texto comprido que nao pergunta nada
+   e' quase sempre algo para traduzir. Pura. */
+function vaiParaAIA(texto, conversa, agora = Date.now()) {
+  const t = String(texto || "").trim();
+  if (!t || t.length > IA_PERGUNTA_MAX) return false;
+  if (parecePergunta(t)) return true;
+  return !!conversa && agora - conversa.ultima < IA_CONVERSA && t.length <= 200;
+}
+
+/* O ROTEIRO: tudo o que a IA sabe, montado do que o proprio bot ja' sabe de
+   si -- o catalogo que gera o site, os comandos que o Discord mostra, os
+   precos de verdade e os numeros do duelo. Nada aqui e' copia escrita a
+   mao: mudou o numero no codigo, mudou na resposta. Pura (os links vem de
+   fora). */
+const GOLPES_DO_MENU_DE_CONTEXTO = {
+  "Criar evento": "lê a mensagem (texto ou print do jogo) e monta um evento com a hora certa",
+};
+function roteiroDaIA({ convite = "", suporte = "", beta = "" } = {}) {
+  const pt = (t) => String(t || "").split(" / ")[0].trim();
+  const preco = (f) => `${PRECOS[f].pt.replace("/mês", "")} ou ${PRECOS[f].en.replace("/mês", "")} por mês`;
+  const trocar = (t) => String(t)
+    .replaceAll("{convite}", convite || "(o link está no servidor de suporte)")
+    .replaceAll("{suporte}", suporte || "(o link está no site)")
+    .replaceAll("{site}", SITE_DO_CYRON)
+    .replaceAll("{contato}", LINK_DO_CONTATO)
+    .replaceAll("{preco_pro}", preco("pro"))
+    .replaceAll("{preco_alianca}", preco("alianca"))
+    .replaceAll("{beta}", beta)
+    .trim();
+  const planos = { gratis: "grátis", pago: "Pro e Aliança", ambos: "grátis, e mais no pago" };
+  const comandos = GLOBAIS_DO_CYRON.filter((c) => c.name !== "admin").map((c) => {
+    const adm = c.defaultMemberPermissions ? " (só quem administra)" : "";
+    if (c.type === 3) {
+      return `- Apps → ${c.name} (toque e segure numa mensagem; no PC, botão direito)${adm}: ${GOLPES_DO_MENU_DE_CONTEXTO[c.name] || ""}`;
+    }
+    const en = c.nameLocalizations?.["en-US"];
+    return `- /${c.name}${en && en !== c.name ? ` (em inglês /${en})` : ""}${adm}: ${pt(c.description)}`;
+  });
+  const custo = (e) => (ESPACOS[e].energia ? `${ESPACOS[e].energia} de energia` : "sem custo");
+  const duelo = [
+    "O /duelo é uma luta em turnos entre heróis da história, numa mensagem do canal que se edita a cada jogada. " +
+      "/duelo sozinho abre o seu painel (Heróis, Habilidades, Ranking e o botão Duelar, que publica um desafio aberto no canal); " +
+      "/duelo com uma pessoa desafia ela; no desafio dá para treinar contra mim.",
+    `Cada um começa com ${DUELO_VIDA} de vida e ${DUELO_ENERGIA_INICIAL} de energia e ganha ${DUELO_ENERGIA_TURNO} de energia por vez (no máximo ${DUELO_ENERGIA_MAX}). ` +
+      `Quatro habilidades: básica (${custo("basica")}), defesa (${custo("defesa")}), especial (${custo("especial")}) e suprema (${custo("suprema")}, só a partir do turno ${ESPACOS.suprema.aPartirDoTurno}). ` +
+      `Cada vez dura ${DUELO_TEMPO / 1000} segundos: sem jogar, sai a básica, e ${DUELO_AUSENCIAS} vezes seguidas sem jogar é W.O. ` +
+      `A partir da jogada ${DUELO_MORTE_SUBITA}, a arena tira vida dos dois a cada vez, e cada vez mais.`,
+    `Efeitos: ${Object.entries(EFEITOS).map(([k, e]) => `${k} (${e.texto})`).join("; ")}.`,
+    `Cada herói sobe do nível 1 ao ${NIVEIS_DO_PERSONAGEM.length} com XP: vitória ${DUELO_XP.vitoria}, derrota ${DUELO_XP.derrota}; no treino ${DUELO_XP.treinoVitoria} e ${DUELO_XP.treinoDerrota}. ` +
+      `Contam XP, por dia, até ${DUELO_DUELOS_DIA} duelos e ${DUELO_TREINOS_DIA} treinos. ` +
+      `Cada habilidade tem uma alternativa, liberada no nível ${ESPACOS.defesa.nivelAlternativa} (defesa), ${ESPACOS.basica.nivelAlternativa} (básica), ` +
+      `${ESPACOS.especial.nivelAlternativa} (especial) e ${ESPACOS.suprema.nivelAlternativa} (suprema): diferente, nunca mais forte. ` +
+      "Troca no painel do /duelo (aba Habilidades) ou com /equipar. Cada nível abre uma página do /codex, com curiosidades reais do herói.",
+    `Patente, pelas vitórias somadas de todos os heróis, mostrada no /perfil: ${PATENTES.map((p) => `${p.nome} (${p.min})`).join(", ")}. Perder não rebaixa.`,
+    `Heróis: ${PERSONAGENS.map((p) => `${p.nome} (${p.titulo})`).join("; ")}.`,
+  ];
+  return [
+    QUEM_SOU,
+    "",
+    "REGRAS",
+    ...REGRAS.map((r, i) => `${i + 1}. ${r}`),
+    `${REGRAS.length + 1}. Se a mensagem for um texto para traduzir, e não algo dito a você, responda só ${IA_TRADUZIR} e mais nada.`,
+    "",
+    `LÍNGUAS QUE EU TRADUZO (${LINGUAS_MENU.length}): ${LINGUAS_MENU.map((l) => l[3] || l[1]).join(", ")}.`,
+    "",
+    "COMANDOS",
+    "- /mylanguage: escolher a sua língua (vale em todos os servidores)",
+    "- Apps → Translate (toque e segure numa mensagem; no PC, botão direito): traduz aquela mensagem só para você",
+    ...comandos,
+    "",
+    "O QUE EU FAÇO (resumo; o detalhe da função que a pessoa cita vem junto com a pergunta)",
+    ...doCliente().map((r) => `- ${r.nome.pt} [${planos[r.plano] || r.plano}] (${r.como.pt}): ${primeiraFrase(r.oque.pt)}`),
+    "",
+    "DÚVIDAS COMUNS",
+    ...DUVIDAS.map(([p, r]) => `- ${p}: ${trocar(r)}`),
+    "",
+    "DUELO",
+    ...duelo,
+    "",
+    `LINKS: site ${SITE_DO_CYRON} · funções ${SITE_DO_CYRON}recursos.html · passo a passo ${SITE_DO_CYRON}passos.html · ` +
+      `privacidade ${SITE_DO_CYRON}privacidade.html · instalar ${convite || "(no servidor de suporte)"} · suporte ${suporte || "(no site)"}`,
+  ].join("\n");
+}
+
+/* A primeira frase de um texto do catalogo: o resumo que vai no roteiro
+   fixo. Pura. */
+function primeiraFrase(texto) {
+  const t = String(texto || "").trim();
+  const m = t.match(/^.+?[.!?…](?=\s|$)/u);
+  return (m ? m[0] : t).trim();
+}
+
+/* O roteiro de agora, guardado: igual de uma pergunta para a outra, ele
+   entra no cache da Groq (mais barato e fora do limite por minuto). So'
+   muda quando muda um link ou o beta. */
+const roteiroGuardado = { chave: "", texto: "" };
+function roteiroAtual() {
+  const ate = venceEm(BETA_ATE);
+  const beta = BETA || ate ? "Agora a CYRON está em beta: todo servidor tem a Aliança liberada de graça" +
+    (ate ? ` até ${new Date(ate).toISOString().slice(0, 10).split("-").reverse().join("/")}.` : " enquanto o beta durar.") : "";
+  const links = { convite: client.user ? linkDeConvite() : "", suporte: SUPORTE.link || "", beta };
+  const chave = JSON.stringify(links);
+  if (roteiroGuardado.chave !== chave) Object.assign(roteiroGuardado, { chave, texto: roteiroDaIA(links) });
+  return roteiroGuardado.texto;
+}
+
+/* Os golpes dos herois que a conversa cita (pelo nome do heroi ou de uma
+   habilidade). Vao junto so' quando servem: os doze herois inteiros nao
+   cabem no limite por minuto do plano gratis. Pura. */
+const OUTROS_NOMES_DOS_HEROIS = {
+  alexandre: ["alexander", "alejandro", "alessandro"], napoleao: ["napoleon", "napoleone", "napoléon"],
+  joana: ["joan", "jeanne", "juana", "giovanna"], gengis: ["genghis", "gengis", "chinggis", "cengiz"],
+  anibal: ["hannibal", "annibale"], suntzu: ["sun tzu", "sunzi"], leonidas: ["leonida"], cleopatra: ["kleopatra"],
+};
+function golpesCitados(texto, max = 3) {
+  const norm = (s) => ` ${String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+  const t = norm(texto);
+  const cita = (nome) => { const n = norm(nome); return n.trim().length >= 4 && t.includes(n); };
+  const achados = PERSONAGENS.filter((p) => cita(p.curto) || cita(p.nome) ||
+    (OUTROS_NOMES_DOS_HEROIS[p.id] || []).some(cita) ||
+    ESPACOS_ORDEM.some((e) => p.kit[e].some((h) => cita(h.nome))));
+  return achados.slice(0, max).map((p) => `${p.nome}: ` + ESPACOS_ORDEM.map((e) => {
+    const [ini, alt] = p.kit[e];
+    return `${e} ${ini.emoji} ${ini.nome} (${descricaoDaHabilidade(ini)}), alternativa no nível ${ESPACOS[e].nivelAlternativa}: ` +
+      `${alt.emoji} ${alt.nome} (${descricaoDaHabilidade(alt)})`;
+  }).join("; ")).join("\n");
+}
+
+/* As funcoes do catalogo que a conversa cita, com o texto inteiro. O roteiro
+   fixo leva so' a primeira frase de cada uma; o detalhe vem aqui, quando
+   serve. Compara as palavras da pergunta com o nome e o "como" de cada
+   funcao, em portugues e em ingles (as que mais se parecem com as outras
+   linguas latinas). Pura. */
+const PALAVRAS_QUE_NAO_DIZEM_NADA = new Set(["para", "with", "your", "from", "como", "cada", "todo", "toda", "todas", "todos",
+  "sobre", "that", "this", "what", "have", "does", "quando", "onde", "qual", "quais", "porque", "mais", "pelo", "pela",
+  "isso", "esse", "essa", "cyron", "funciona", "work", "works"]);
+function funcoesCitadas(texto, max = 3) {
+  const palavras = (s) => new Set(String(s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !PALAVRAS_QUE_NAO_DIZEM_NADA.has(w)).map((w) => w.slice(0, 6)));
+  const pergunta = palavras(texto);
+  if (!pergunta.size) return "";
+  return doCliente()
+    .map((r) => {
+      const dela = palavras(`${r.nome.pt} ${r.nome.en} ${r.como.pt} ${r.como.en}`);
+      return { r, pontos: [...pergunta].filter((w) => dela.has(w)).length };
+    })
+    .filter((x) => x.pontos > 0)
+    .sort((a, b) => b.pontos - a.pontos)
+    .slice(0, max)
+    .map(({ r }) => `${r.nome.pt} (${r.como.pt}): ${r.oque.pt}`)
+    .join("\n");
+}
+
+/* A pergunta vai para a Groq. O primeiro modelo esgotou (429), caiu ou
+   demorou: tenta o segundo, que tem limite proprio. `buscar` vem de fora
+   para o teste nao encostar na rede. */
+async function perguntarAIA(mensagens, chave, buscar = fetch) {
+  let espera = 0;
+  for (const modelo of IA_MODELOS) {
+    let r;
+    try {
+      r = await buscar(`${IA_URL}/chat/completions`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${chave}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: modelo, messages: mensagens, temperature: 0.4, max_completion_tokens: 800,
+          reasoning_effort: "low" }),
+        signal: AbortSignal.timeout(30000),
+      });
+    } catch {
+      continue;
+    }
+    if (r.status === 401 || r.status === 403) return { erro: "chave" };
+    if (!r.ok) {
+      espera = Math.max(espera, Number(r.headers?.get?.("retry-after")) || 0);
+      continue;
+    }
+    const j = await r.json().catch(() => null);
+    const texto = String(j?.choices?.[0]?.message?.content || "").trim();
+    if (texto) return { texto, modelo, uso: j?.usage || null };
+  }
+  return { erro: "limite", espera };
+}
+
+/* O que a IA escreveu, pronto para o Discord: sem link de fora da lista, sem
+   @everyone, sem titulo gigante (# vira negrito) e cabendo numa mensagem.
+   Pura. */
+function limparRespostaDaIA(texto) {
+  let t = String(texto || "").trim();
+  t = t.replace(/https?:\/\/[^\s<>)\]]+/gi, (url) => {
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      return HOSTS_DA_IA.some((ok) => host === ok || host.endsWith(`.${ok}`)) ? url : "";
+    } catch {
+      return "";
+    }
+  });
+  t = t.replace(/\[([^\]]+)\]\(\s*\)/g, "$1");
+  t = t.replace(/@(everyone|here)/gi, "@​$1");
+  t = t.replace(/^#{1,6}\s+(.+)$/gm, "**$1**");
+  if (t.length > IA_RESPOSTA_MAX) {
+    const corte = t.slice(0, IA_RESPOSTA_MAX);
+    const fim = Math.max(corte.lastIndexOf("\n"), corte.lastIndexOf(". "));
+    t = `${(fim > IA_RESPOSTA_MAX / 2 ? corte.slice(0, fim + 1) : corte).trim()} …`;
+  }
+  return t;
+}
+
+/* Uma pergunta por vez: o limite da Groq e' por minuto, e duas juntas
+   esgotariam o minuto das duas. */
+const filaDaIA = { ultima: Promise.resolve(), esperando: 0 };
+function naFilaDaIA(fn) {
+  filaDaIA.esperando++;
+  const vez = filaDaIA.ultima.then(fn).finally(() => { filaDaIA.esperando--; });
+  filaDaIA.ultima = vez.catch(() => {});
+  return vez;
+}
+
+/* Responde no privado com a IA. Devolve "nao" (nao era para ela, ou ela nao
+   existe: o privado segue como sempre), "traduzir" (ela viu que era um texto
+   para traduzir) ou "respondeu". */
+async function responderComIA(msg, texto, agora = Date.now()) {
+  const eu = msg.author.id;
+  const velha = conversasDaIA.get(eu);
+  if (velha && agora - velha.ultima > IA_MEMORIA) conversasDaIA.delete(eu);
+  if (!vaiParaAIA(texto, conversasDaIA.get(eu), agora)) return "nao";
+  const a = await ajustes().catch(() => ({}));
+  if (a?.ia_ligada === "0") return "nao";
+  const chave = await chaveDaIA();
+  if (!chave) return "nao";
+
+  const dia = hojeISO();
+  if (usoDaIA.dia !== dia) {
+    Object.assign(usoDaIA, { dia, perguntas: 0, respostas: 0, semFolego: 0, falhas: 0, tokens: 0, entrada: 0, emCache: 0 });
+    perguntasHoje.clear();
+  }
+  /* Sem resposta da IA: o menu de assuntos, com uma frase honesta em cima. */
+  const semIA = async (frase) => {
+    const idioma = (await idiomaEscolhido(eu)) || "en";
+    const [t] = await nalingua(idioma, null, frase);
+    await falarNoPrivado(msg, { ...(await telaDeAjuda(idioma)), content: `🤖 ${t}` });
+    return "respondeu";
+  };
+  const feitas = perguntasHoje.get(eu)?.n || 0;
+  if (feitas >= tetoDaIA(a)) {
+    return semIA("Por hoje você já usou todas as suas perguntas. Amanhã eu respondo mais! Enquanto isso, escolha um assunto abaixo.");
+  }
+  if (filaDaIA.esperando >= IA_FILA_MAX) {
+    usoDaIA.semFolego++;
+    return semIA("Muita gente me perguntando agora. Tente de novo em um minuto, ou escolha um assunto abaixo.");
+  }
+
+  const historico = (conversasDaIA.get(eu)?.msgs || []).slice(-IA_TURNOS);
+  const anterior = historico.filter((m) => m.role === "user").slice(-1)[0]?.content || "";
+  const consulta = [funcoesCitadas(`${anterior}\n${texto}`), golpesCitados(`${anterior}\n${texto}`)].filter(Boolean).join("\n");
+  const mensagens = [
+    { role: "system", content: roteiroAtual() },
+    ...historico,
+    { role: "user", content: consulta ? `${texto}\n\n(Para consulta, do roteiro: ${consulta})` : texto },
+  ];
+  perguntasHoje.set(eu, { dia, n: feitas + 1 });
+  usoDaIA.perguntas++;
+  const digitar = () => msg.channel?.sendTyping?.()?.catch?.(() => {});
+  digitar();
+  const digitando = setInterval(digitar, 8000);
+  let r;
+  try {
+    r = await naFilaDaIA(() => perguntarAIA(mensagens, chave));
+  } finally {
+    clearInterval(digitando);
+  }
+  if (r.uso) {
+    usoDaIA.tokens += Number(r.uso.total_tokens) || 0;
+    usoDaIA.entrada += Number(r.uso.prompt_tokens) || 0;
+    usoDaIA.emCache += Number(r.uso.prompt_tokens_details?.cached_tokens) || 0;
+  }
+  if (r.erro) {
+    /* A pergunta que nao foi respondida nao conta no teto da pessoa. */
+    perguntasHoje.set(eu, { dia, n: feitas });
+    if (r.erro === "limite") usoDaIA.semFolego++;
+    else { usoDaIA.falhas++; console.error("ia: a Groq recusou a chave (401/403). Confira no /admin → 🧠 IA do privado."); }
+    return semIA(r.erro === "limite"
+      ? "Estou sem fôlego para pensar agora. Tente de novo daqui a pouco, ou escolha um assunto abaixo."
+      : "Não consegui pensar numa resposta agora. Escolha um assunto abaixo, ou fale com o suporte.");
+  }
+  if (r.texto.replace(/[`*_\s]/g, "").startsWith(IA_TRADUZIR)) {
+    perguntasHoje.set(eu, { dia, n: feitas });
+    return "traduzir";
+  }
+  const resposta = limparRespostaDaIA(r.texto);
+  usoDaIA.respostas++;
+  conversasDaIA.delete(eu);
+  conversasDaIA.set(eu, { ultima: Date.now(),
+    msgs: [...historico, { role: "user", content: texto }, { role: "assistant", content: resposta }].slice(-IA_TURNOS) });
+  while (conversasDaIA.size > IA_CONVERSAS_MAX) conversasDaIA.delete(conversasDaIA.keys().next().value);
+  /* O 🌐 e' a saida de quem so' queria traduzir uma frase com "?": a IA
+     respondeu, mas a pessoa ainda pode pedir a traducao do que mandou. */
+  await falarNoPrivado(msg, { content: `${resposta}\n-# 🤖 CYRON AI`,
+    components: [{ type: 1, components: [botaoDeSuporte(),
+      { type: 2, style: 5, emoji: { name: "🗂️" }, label: "CYRON", url: `${SITE_DO_CYRON}recursos.html` },
+      { type: 2, style: 2, custom_id: TRADUZIR_A_PERGUNTA, emoji: { name: "🌐" } }] }] });
+  return "respondeu";
+}
+
+/* O 🌐 da resposta da IA: oferece a traducao da ultima coisa que a pessoa
+   mandou para ela (lembrada por 30 minutos). */
+const TRADUZIR_A_PERGUNTA = "dm:ia-traduzir";
+async function traduzirAPergunta(inter) {
+  const ultima = (conversasDaIA.get(inter.user.id)?.msgs || []).filter((m) => m.role === "user").slice(-1)[0]?.content;
+  const id = ultima && podeTraduzirAgora(inter.user.id) ? await guardarPraTraduzir(ultima, null).catch(() => null) : null;
+  if (!id) return inter.reply({ flags: 64, content: "🌐 Mande o texto de novo e eu traduzo. / Send the text again and I'll translate it." });
+  return inter.reply({ content: "-# 🌐 Ler no seu idioma / Read in your language", components: menuTraduzir(id) });
+}
+
+/* A chave na hora de gravar: a Groq lista os modelos para quem tem chave
+   valida. Melhor descobrir agora que dias depois, pelo silencio. */
+async function conferirChaveDaIA(chave, buscar = fetch) {
+  try {
+    const r = await buscar(`${IA_URL}/models`, { headers: { Authorization: `Bearer ${chave}` }, signal: AbortSignal.timeout(15000) });
+    if (r.ok) return { ok: true, frase: "✅ A Groq aceitou a chave. A IA já responde perguntas no privado." };
+    if (r.status === 401 || r.status === 403) return { ok: false, frase: "❌ A Groq recusou essa chave. Confira em console.groq.com → API Keys." };
+    return { ok: false, frase: `❌ A Groq respondeu HTTP ${r.status}. Tente de novo em instantes.` };
+  } catch {
+    return { ok: false, frase: "❌ Não consegui falar com a Groq agora. Tente de novo em instantes." };
+  }
+}
+
+/* A janela da IA no /admin. Separada das outras porque o Discord aceita no
+   maximo cinco campos por janela, e a das chaves de traducao ja' esta' cheia. */
+async function janelaDaIA() {
+  const a = await ajustes();
+  const noCofre = !!process.env.IA_CHAVE;
+  return {
+    custom_id: "admin:ia",
+    title: "IA do privado (Groq)",
+    components: [
+      { type: 1, components: [{ type: 4, custom_id: "ia_chave", style: 1, required: false, max_length: 200,
+        label: (noCofre ? "Chave (no cofre da máquina)" : a.ia_chave ? "Chave (tenho uma; escreva pra trocar)" : "Chave da Groq (gsk_...)").slice(0, 45),
+        placeholder: "console.groq.com → API Keys · apagar = tira a chave" }] },
+      { type: 1, components: [{ type: 4, custom_id: "ia_ligada", style: 1, required: false, max_length: 1,
+        label: "Ligada? (1 ou 0)", placeholder: "1", ...(a.ia_ligada ? { value: a.ia_ligada } : {}) }] },
+      { type: 1, components: [{ type: 4, custom_id: "ia_por_dia", style: 1, required: false, max_length: 3,
+        label: "Perguntas por pessoa por dia", placeholder: String(IA_POR_DIA), ...(a.ia_por_dia ? { value: a.ia_por_dia } : {}) }] },
+    ],
+  };
+}
+
+async function salvarIA(inter) {
+  if (!await ehDono(inter.user.id)) {
+    return inter.reply({ flags: 64, content: "Não conheço esse comando." });
+  }
+  await inter.deferReply({ flags: 64 });
+  const campo = (n) => { try { return String(inter.fields.getTextInputValue(n) || "").trim(); } catch { return ""; } };
+  const chave = campo("ia_chave");
+  const ligada = campo("ia_ligada");
+  const porDia = campo("ia_por_dia");
+  if (ligada && !/^[01]$/.test(ligada)) return inter.editReply("“Ligada” é 1 ou 0. **Não gravei nada.**");
+  if (porDia && !(/^\d{1,3}$/.test(porDia) && Number(porDia) >= 1)) {
+    return inter.editReply("As perguntas por dia precisam ser um número de 1 a 999, como 20. **Não gravei nada.**");
+  }
+  const feito = [];
+  if (chave.toLowerCase() === "apagar") {
+    await porAjuste("ia_chave", null);
+    feito.push("🗑️ Chave apagada: o privado volta a ser só o tradutor e o menu de assuntos.");
+  } else if (chave) {
+    /* Testada ANTES de gravar: chave errada guardada seria uma IA muda. */
+    const teste = await conferirChaveDaIA(chave);
+    if (!teste.ok) return inter.editReply(`${teste.frase}\n**Não gravei nada.**`);
+    await porAjuste("ia_chave", cifrar(chave));
+    feito.push(teste.frase);
+  }
+  if (ligada) { await porAjuste("ia_ligada", ligada); feito.push(ligada === "1" ? "🟢 Ligada" : "⚪ Desligada"); }
+  if (porDia) { await porAjuste("ia_por_dia", porDia); feito.push(`🔢 ${porDia} perguntas por pessoa por dia`); }
+  await recarregarAjustes();
+  return inter.editReply(feito.length ? feito.join("\n") : "Nada mudou — todos os campos vieram vazios.");
+}
+
+/* A IA esta' pronta para responder? Ligada e com chave. */
+async function iaPronta() {
+  const a = await ajustes().catch(() => ({}));
+  return a?.ia_ligada !== "0" && !!(process.env.IA_CHAVE || a?.ia_chave);
+}
+
+/* Uma linha para o /admin: ligada ou nao, e o dia de hoje. */
+async function resumoDaIA() {
+  const a = await ajustes().catch(() => ({}));
+  const temChave = !!(process.env.IA_CHAVE || a?.ia_chave);
+  const estado = !temChave ? "⚪ sem chave" : a?.ia_ligada === "0" ? "⚪ desligada" : "🟢 ligada";
+  const hoje = usoDaIA.dia === hojeISO() ? usoDaIA : { perguntas: 0, respostas: 0, semFolego: 0, tokens: 0, entrada: 0, emCache: 0 };
+  return `${estado} · hoje: ${hoje.respostas}/${hoje.perguntas} respondidas` +
+    (hoje.semFolego ? ` · ${hoje.semFolego} sem fôlego` : "") +
+    (hoje.tokens ? ` · ${Math.round(hoje.tokens / 1000)}k tokens (${Math.round((100 * hoje.emCache) / Math.max(1, hoje.entrada))}% da entrada em cache)` : "");
+}
+
 async function atenderNoPrivado(msg) {
   const texto = String(msg.content || "").trim();
   /* O ESCOLHIDO, não o de palpite: é ele que decide se a conversa abre
@@ -19673,7 +20164,19 @@ async function atenderNoPrivado(msg) {
     return falarNoPrivado(msg, telaDoIdioma());
   }
 
-  if (podeApresentar(msg.author.id)) {
+  /* Pergunta para mim: a IA responde. O cartao de apresentacao fica para
+     quem chegou sem perguntar nada -- e ele nao aparece no meio da conversa
+     com a IA. */
+  const ia = await responderComIA(msg, texto).catch((e) => {
+    console.error("ia: falhou:", e?.message || e);
+    return "nao";
+  });
+  if (ia === "respondeu") {
+    marcarApresentado(msg.author.id);
+    return;
+  }
+
+  if (ia !== "traduzir" && podeApresentar(msg.author.id)) {
     /* Sem idioma escolhido, a PRIMEIRA tela e' a pergunta do idioma -- e nao a
        apresentacao. Me apresentar em portugues para quem fala turco e' entregar
        uma parede de texto que ele nao le, com a saida escondida embaixo. */
@@ -19998,6 +20501,7 @@ client.on("interactionCreate", async (inter) => {
       if (inter.customId === "admin:chaves") return await salvarChaves(inter);
       if (inter.customId === "admin:visao") return await salvarVisao(inter);
       if (inter.customId === "admin:fala") return await salvarFala(inter);
+      if (inter.customId === "admin:ia") return await salvarIA(inter);
       if (inter.customId === "admin:novocomando") return await salvarComando(inter);
       if (inter.customId === "admin:busca") return await procurarServidor(inter);
       return;

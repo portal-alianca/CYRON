@@ -348,10 +348,22 @@ export const RECURSOS = [
     nome: { pt: "/help, a porta que qualquer um acha", en: "/help, the door anyone can find" },
     como: { pt: "/help", en: "/help" },
     oque: {
-      pt: "Um menu fechado com os assuntos que de fato perguntam, cada um com resposta escrita. Sem campo livre: prometer um atendente que não existe é pior do que dizer o que eu sei fazer.",
-      en: "A closed menu of the questions people actually ask, each with a written answer. No free text box: promising a support agent that does not exist is worse than saying what I can do.",
+      pt: "Um menu fechado com os assuntos que de fato perguntam, cada um com resposta escrita. Para perguntar do seu jeito, o privado do bot responde com IA.",
+      en: "A closed menu of the questions people actually ask, each with a written answer. To ask in your own words, the bot's DMs answer with AI.",
     },
     prova: "comandoAjuda",
+  },
+  {
+    chave: "ia-no-privado",
+    categoria: "chegar",
+    plano: "gratis",
+    nome: { pt: "Pergunte à CYRON, no privado", en: "Ask CYRON, in DMs" },
+    como: { pt: "Mandar a pergunta no privado do bot", en: "Send your question to the bot's DMs" },
+    oque: {
+      pt: "Uma IA responde, na sua língua, qualquer dúvida sobre a CYRON: como instalar, quanto custa, como ligar os níveis, o que faz um golpe do duelo. Ela lê o roteiro do próprio bot antes de responder, não mexe em nada do seu servidor e, quando não sabe, manda para o suporte. Texto que não é pergunta continua indo para o tradutor.",
+      en: "An AI answers, in your language, any question about CYRON: how to install, how much it costs, how to turn on levels, what a duel move does. It reads the bot's own script before answering, never touches your server, and sends you to support when it doesn't know. Text that isn't a question still goes to the translator.",
+    },
+    prova: "responderComIA",
   },
   {
     chave: "mylanguage",
