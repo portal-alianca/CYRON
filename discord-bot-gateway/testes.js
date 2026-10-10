@@ -4158,7 +4158,7 @@ function conferirCartao(onde, embed, componentes = []) {
       "nomeDoIdioma", "planoDe", "ABAS_DO_ADMIN", "ABA_DO_BOTAO", "abaDoAdmin", "linhasDoAdmin",
       "PRECO_MENSAL", "reais", "situacaoDoPagamento", "faixaPaga", "BARRINHAS", "grafiquinho",
       "variacaoEmTexto", "embedDoResumo", "embedDoDinheiro", "embedDoCrescimento",
-      "embedDosServidores", "embedDasFerramentas", "errosAgrupados"]);
+      "embedDosServidores", "embedDasFerramentas", "errosAgrupados", "usoDaIA", "resumoDaIA"]);
 
     const dia = 864e5;
     const futuro = (d) => new Date(Date.now() + d * dia).toISOString();
@@ -4226,7 +4226,13 @@ function conferirCartao(onde, embed, componentes = []) {
     const { embed, servidores: lista } = await A.embedDosServidores();
     conferirCartao("a aba Servidores", embed, A.linhasDoAdmin("servidores", lista));
     ok("quem saiu não entra na lista", lista.length, 37);
-    conferirCartao("a aba Ferramentas", await A.embedDasFerramentas());
+    const ajustesAntes = globalThis.ajustes;
+    globalThis.ajustes = async () => ({ ia_chave: "x" });
+    const ferramentas = await A.embedDasFerramentas();
+    conferirCartao("a aba Ferramentas", ferramentas);
+    verdade("a aba Ferramentas diz se a IA do privado está ligada",
+      /🟢 ligada/.test(ferramentas.fields.find((f) => /IA do privado/.test(f.name))?.value || ""));
+    globalThis.ajustes = ajustesAntes;
 
     globalThis.errosRecentes = Array.from({ length: 30 }, (_, i) => ({
       onde: i % 3 ? "espelho" : `lugar-${i}`, porque: "algo deu errado ".repeat(20), quando: Date.now() - i * 60000 }));
@@ -11522,6 +11528,215 @@ function conferirCartao(onde, embed, componentes = []) {
     idx.indexOf('acao.startsWith("modo:")') > idx.indexOf("podeAdministrar(inter)", idx.indexOf("async function cliquePainel")));
   const sql = readFileSync(`${aqui}/../supabase/migracoes/010-modo.sql`, "utf8");
   verdade("no banco, o modo só aceita os três valores", /check \(modo in \('traducao', 'ferramentas', 'escolher'\)\)/.test(sql));
+}
+
+/* ====== A IA DO PRIVADO ======
+ *
+ * Pergunta mandada no privado vai para uma IA (Groq, plano grátis) que lê o
+ * roteiro do bot antes de responder. Aqui a Groq é de mentira: nenhum teste
+ * encosta na rede. O que se confere: o que vai para a IA, o que volta para a
+ * pessoa, e que o privado continua o mesmo quando a IA não existe. */
+{
+  const roteiroJs = await import("./roteiro.js");
+  const { LINK_DO_CONTATO } = await import("./suporte.js");
+  const elencoIA = await import("./duelo-elenco.js");
+  Object.assign(globalThis, { QUEM_SOU: roteiroJs.QUEM_SOU, REGRAS: roteiroJs.REGRAS, DUVIDAS: roteiroJs.DUVIDAS, LINK_DO_CONTATO,
+    PERSONAGENS: elencoIA.PERSONAGENS, ESPACOS: elencoIA.ESPACOS, EFEITOS: elencoIA.EFEITOS,
+    NIVEIS_DO_PERSONAGEM: elencoIA.NIVEIS_DO_PERSONAGEM });
+  Object.assign(globalThis, carregar(["TRADUCOES_DO_EVENTO", "LEMBRETES", "SUPORTE_HORAS", "TRADUCOES_DAS_BOAS_VINDAS",
+    "TRADUCOES_DA_HORA", "GLOBAIS_DO_CYRON", "PRECOS", "SITE_DO_CYRON", "LINGUAS_MENU", "ESPACOS_ORDEM", "DUELO_VIDA",
+    "DUELO_ENERGIA_INICIAL", "DUELO_ENERGIA_TURNO", "DUELO_ENERGIA_MAX", "DUELO_TEMPO", "DUELO_AUSENCIAS",
+    "DUELO_MORTE_SUBITA", "DUELO_XP", "DUELO_TREINOS_DIA", "DUELO_DUELOS_DIA", "PATENTES", "descricaoDaHabilidade",
+    "venceEm", "hojeISO", "botaoDeSuporte"]));
+  const IA = carregar(["IA_URL", "IA_MODELOS", "IA_POR_DIA", "IA_MEMORIA", "IA_CONVERSA", "IA_TURNOS", "IA_PERGUNTA_MAX",
+    "IA_RESPOSTA_MAX", "IA_FILA_MAX", "IA_CONVERSAS_MAX", "IA_TRADUZIR", "HOSTS_DA_IA", "conversasDaIA", "perguntasHoje",
+    "usoDaIA", "chaveDaIA", "tetoDaIA", "COMECOS_DE_PERGUNTA", "parecePergunta", "vaiParaAIA",
+    "GOLPES_DO_MENU_DE_CONTEXTO", "roteiroDaIA", "primeiraFrase", "roteiroGuardado", "roteiroAtual", "OUTROS_NOMES_DOS_HEROIS",
+    "golpesCitados", "PALAVRAS_QUE_NAO_DIZEM_NADA", "funcoesCitadas", "perguntarAIA", "limparRespostaDaIA", "filaDaIA", "naFilaDaIA", "responderComIA",
+    "conferirChaveDaIA", "janelaDaIA", "iaPronta", "TRADUZIR_A_PERGUNTA"]);
+
+  /* ---- o que é pergunta ---- */
+  for (const t of ["como ligo os níveis?", "Como ligo os níveis", "how do I change my language", "Wie funktioniert das Duell",
+    "o que faz a cyron", "/perfil", "Por que não traduz?", "cuánto cuesta el plan", "какие языки ты знаешь",
+    "ما هو السعر؟", "料金はいくら？"]) {
+    verdade(`é pergunta: "${t}"`, IA.parecePergunta(t));
+  }
+  for (const t of ["bom dia pessoal, hoje tem evento às 20h", "Good morning everyone", "Ich komme später", "kkkkk",
+    "", "x".repeat(700) + "?"]) {
+    verdade(`não é pergunta: "${t.slice(0, 40)}"`, !IA.parecePergunta(t));
+  }
+  const agora = Date.now();
+  verdade("numa conversa aberta, o curto vai para a IA (\"obrigado\")",
+    IA.vaiParaAIA("obrigado", { ultima: agora - 60000 }, agora));
+  verdade("conversa velha (mais de 10 min): o curto volta para o tradutor",
+    !IA.vaiParaAIA("obrigado", { ultima: agora - 11 * 60000 }, agora));
+  verdade("e o comprido sem pergunta segue para o tradutor mesmo na conversa",
+    !IA.vaiParaAIA("Hoje à noite a gente se encontra no castelo para o evento do urso, levem tropas. ".repeat(3),
+      { ultima: agora - 60000 }, agora));
+
+  /* ---- o roteiro ---- */
+  const roteiro = IA.roteiroDaIA({ convite: "https://discord.com/oauth2/authorize?client_id=1", suporte: "https://discord.gg/suporte", beta: "" });
+  verdade("o roteiro diz quem ela é e as regras", roteiro.startsWith(roteiroJs.QUEM_SOU) && roteiroJs.REGRAS.every((r) => roteiro.includes(r)));
+  verdade("e ensina a resposta de quando é texto para traduzir", roteiro.includes(IA.IA_TRADUZIR));
+  for (const r of doCliente()) verdade(`o roteiro sabe da função "${r.nome.pt}"`, roteiro.includes(r.nome.pt));
+  for (const c of GLOBAIS_DO_CYRON.filter((x) => x.name !== "admin")) {
+    verdade(`o roteiro sabe do comando ${c.name}`, roteiro.includes(c.type === 3 ? `Apps → ${c.name}` : `/${c.name}`));
+  }
+  verdade("o /admin (do dono) fica fora do roteiro", !/\/admin\b/.test(roteiro));
+  verdade("os preços são os de verdade", roteiro.includes("R$ 29,90 ou US$ 6 por mês") && roteiro.includes("R$ 79 ou US$ 15 por mês"));
+  verdade("os números do duelo vêm do código", roteiro.includes(`${DUELO_VIDA} de vida`) &&
+    roteiro.includes(`${ESPACOS.suprema.energia} de energia`) && PERSONAGENS.every((p) => roteiro.includes(p.nome)));
+  verdade("as 20 línguas estão lá", LINGUAS_MENU.every((l) => roteiro.includes(l[3] || l[1])));
+  verdade("nenhum {marcador} ficou sem trocar", !/\{(convite|suporte|site|contato|preco_pro|preco_alianca|beta)\}/.test(roteiro));
+  verdade("o link de instalação e o do suporte entram", roteiro.includes("client_id=1") && roteiro.includes("https://discord.gg/suporte"));
+  verdade("com o beta, o roteiro avisa", IA.roteiroDaIA({ beta: "Agora a CYRON está em beta" }).includes("Agora a CYRON está em beta"));
+  /* O plano grátis da Groq aceita 8 mil tokens por minuto, e o roteiro vai em
+     toda pergunta. ~3,3 letras por token em português, com folga. */
+  const tokens = Math.ceil(roteiro.length / 3.3);
+  verdade(`o roteiro cabe no plano grátis (${roteiro.length} letras, ~${tokens} tokens; teto 5200)`, tokens <= 5200);
+  /* Todo link que a IA vê no roteiro é um que ela pode mandar. */
+  const linksDoRoteiro = [...roteiro.matchAll(/https?:\/\/[^\s)]+/g)].map((m) => new URL(m[0]).hostname);
+  verdade("todo link do roteiro passa no filtro da resposta",
+    linksDoRoteiro.length > 3 && linksDoRoteiro.every((h) => IA.HOSTS_DA_IA.some((ok) => h === ok || h.endsWith(`.${ok}`))));
+
+  /* ---- os golpes de quem a conversa cita ---- */
+  verdade("o nome de uma habilidade traz o herói dela", /^Alexandre, o Grande: /.test(IA.golpesCitados("o que faz a Carga de Bucéfalo?")));
+  verdade("o nome em outra língua também (Napoleon)", /^Napoleão Bonaparte: /.test(IA.golpesCitados("is Napoleon good?")));
+  verdade("sem acento também (cleopatra)", /^Cleópatra: /.test(IA.golpesCitados("cleopatra é boa?")));
+  ok("pergunta sem herói não leva golpe nenhum", IA.golpesCitados("como ligo os níveis?"), "");
+  verdade("a pergunta sobre níveis traz o texto inteiro da função de níveis",
+    IA.funcoesCitadas("como ligo os níveis?").startsWith("Níveis, /perfil e cargos por nível"));
+  verdade("em inglês também (levels)", IA.funcoesCitadas("how do levels work").includes("Níveis, /perfil e cargos por nível"));
+  verdade("pelo comando (/boas-vindas)", IA.funcoesCitadas("o /boas-vindas aceita gif?").includes("Boas-vindas com foto"));
+  ok("conversa fiada não traz função nenhuma", IA.funcoesCitadas("obrigado"), "");
+  ok("o resumo é a primeira frase", IA.primeiraFrase("Uma coisa. Outra coisa."), "Uma coisa.");
+  verdade("e cada golpe vem com o que faz", IA.golpesCitados("Alexandre").includes(descricaoDaHabilidade(PERSONAGENS[0].kit.basica[0])));
+
+  /* ---- a resposta, limpa ---- */
+  const suja = "# Título\nVeja https://golpe.example/x e https://hicyron.github.io/recursos.html e [aqui](https://malicioso.io). @everyone";
+  const limpa = IA.limparRespostaDaIA(suja);
+  verdade("link de fora da lista sai", !/golpe\.example|malicioso\.io/.test(limpa));
+  verdade("o do site fica", limpa.includes("https://hicyron.github.io/recursos.html"));
+  verdade("link markdown sem endereço vira só o texto", limpa.includes("aqui") && !limpa.includes("]("));
+  verdade("título com # vira negrito", limpa.startsWith("**Título**"));
+  verdade("@everyone não chama ninguém", !/@everyone/.test(limpa));
+  verdade("resposta enorme é cortada para caber", IA.limparRespostaDaIA("Frase longa. ".repeat(400)).length <= IA.IA_RESPOSTA_MAX + 2);
+
+  /* ---- a Groq de mentira ---- */
+  const resposta = (status, corpo, cab = {}) => ({ ok: status >= 200 && status < 300, status,
+    headers: { get: (n) => cab[n] ?? null }, json: async () => corpo });
+  const chamadas = [];
+  const groq = (fila) => async (url, op) => {
+    chamadas.push({ url, corpo: op?.body ? JSON.parse(op.body) : null, cab: op?.headers });
+    return fila.shift() || resposta(500, {});
+  };
+  let r = await IA.perguntarAIA([{ role: "user", content: "oi?" }], "gsk_x",
+    groq([resposta(200, { choices: [{ message: { content: "Olá!" } }], usage: { total_tokens: 10 } })]));
+  ok("resposta da Groq", [r.texto, r.modelo], ["Olá!", IA.IA_MODELOS[0]]);
+  verdade("vai no endereço certo, com a chave", chamadas[0].url === `${IA.IA_URL}/chat/completions` && chamadas[0].cab.Authorization === "Bearer gsk_x");
+  verdade("pensa pouco (rápido e barato) e tem teto de tamanho",
+    chamadas[0].corpo.reasoning_effort === "low" && chamadas[0].corpo.max_completion_tokens <= 1000);
+  chamadas.length = 0;
+  r = await IA.perguntarAIA([], "k", groq([resposta(429, {}, { "retry-after": "7" }),
+    resposta(200, { choices: [{ message: { content: "Do segundo" } }] })]));
+  ok("esgotou o primeiro modelo: responde o segundo", [r.texto, chamadas.map((c) => c.corpo.model)], ["Do segundo", IA.IA_MODELOS]);
+  r = await IA.perguntarAIA([], "k", groq([resposta(429, {}, { "retry-after": "7" }), resposta(429, {}, { "retry-after": "30" })]));
+  ok("os dois esgotados: sem fôlego, com a espera maior", r, { erro: "limite", espera: 30 });
+  r = await IA.perguntarAIA([], "k", groq([resposta(401, {})]));
+  ok("chave recusada não tenta o outro modelo à toa", r, { erro: "chave" });
+
+  /* ---- a conversa inteira ---- */
+  globalThis.client = { user: { id: "1" } };
+  globalThis.linkDeConvite = () => "https://discord.com/oauth2/authorize?client_id=1";
+  globalThis.BETA = false; globalThis.BETA_ATE = "";
+  let ajustesIA = { ia_chave: "cifrada" };
+  globalThis.ajustes = async () => ajustesIA;
+  globalThis.decifrar = (x) => (x === "cifrada" ? "gsk_teste" : "");
+  globalThis.idiomaEscolhido = async () => "pt";
+  globalThis.nalingua = async (idioma, g, ...f) => f;
+  globalThis.telaDeAjuda = async () => ({ embeds: [{ title: "menu de assuntos" }], components: [] });
+  const falado = [];
+  globalThis.falarNoPrivado = async (msg, carga) => { falado.push(carga); return true; };
+  const fetchDeVerdade = globalThis.fetch;
+  const fila = [];
+  chamadas.length = 0;
+  globalThis.fetch = groq(fila);
+  const dm = (id = "u1") => ({ author: { id }, channel: { sendTyping: async () => {} } });
+
+  ok("texto comum não vai para a IA", await IA.responderComIA(dm(), "bom dia pessoal, hoje tem evento às 20h"), "nao");
+  ok("e não chama a Groq", chamadas.length, 0);
+  ajustesIA = {};
+  ok("sem chave: o privado fica como era", await IA.responderComIA(dm(), "como ligo os níveis?"), "nao");
+  ajustesIA = { ia_chave: "cifrada", ia_ligada: "0" };
+  ok("desligada no /admin: idem", await IA.responderComIA(dm(), "como ligo os níveis?"), "nao");
+  ok("e nenhuma das duas chama a Groq", chamadas.length, 0);
+
+  ajustesIA = { ia_chave: "cifrada" };
+  fila.push(resposta(200, { choices: [{ message: { content: "Use `/niveis` com ligar = True." } }],
+    usage: { total_tokens: 4000, prompt_tokens: 3900, prompt_tokens_details: { cached_tokens: 3500 } } }));
+  ok("pergunta: a IA responde", await IA.responderComIA(dm(), "como ligo os níveis?"), "respondeu");
+  const enviada = chamadas[0].corpo.messages;
+  verdade("o roteiro vai primeiro, como sistema (é ele que entra no cache)", enviada[0].role === "system" && enviada[0].content.includes(roteiroJs.QUEM_SOU));
+  verdade("e a pergunta por último, com o detalhe da função citada para consulta",
+    enviada.at(-1).role === "user" && enviada.at(-1).content.startsWith("como ligo os níveis?\n\n(Para consulta, do roteiro: Níveis"));
+  verdade("a resposta chega com a marca de IA e o botão de suporte",
+    falado[0].content.startsWith("Use `/niveis`") && /🤖 CYRON AI/.test(falado[0].content) &&
+    falado[0].components[0].components.some((c) => c.url === SUPORTE.link));
+  verdade("e o 🌐 para quem só queria traduzir", falado[0].components[0].components.some((c) => c.custom_id === IA.TRADUZIR_A_PERGUNTA));
+  verdade("o uso do dia é contado (com o que veio do cache)", IA.usoDaIA.respostas === 1 && IA.usoDaIA.emCache === 3500);
+
+  fila.push(resposta(200, { choices: [{ message: { content: "De nada!" } }] }));
+  ok("na conversa aberta, \"obrigado\" também é com a IA", await IA.responderComIA(dm(), "obrigado"), "respondeu");
+  ok("e ela lembra da conversa", chamadas[1].corpo.messages.slice(1).map((m) => m.role), ["user", "assistant", "user"]);
+
+  fila.push(resposta(200, { choices: [{ message: { content: "[TRADUZIR]" } }] }));
+  ok("a IA viu que era texto para traduzir", await IA.responderComIA(dm(), "see you all tonight"), "traduzir");
+  ok("e essa não conta no limite do dia", IA.perguntasHoje.get("u1").n, 2);
+
+  ajustesIA = { ia_chave: "cifrada", ia_por_dia: "2" };
+  falado.length = 0;
+  const antes = chamadas.length;
+  ok("passou do limite do dia: menu de assuntos", await IA.responderComIA(dm(), "e o duelo, como funciona?"), "respondeu");
+  verdade("com uma frase honesta, e sem chamar a Groq", falado[0].embeds[0].title === "menu de assuntos" &&
+    /Por hoje/.test(falado[0].content) && chamadas.length === antes);
+
+  ajustesIA = { ia_chave: "cifrada" };
+  falado.length = 0;
+  fila.push(resposta(429, {}), resposta(429, {}));
+  ok("Groq sem fôlego: menu de assuntos", await IA.responderComIA(dm("u2"), "quanto custa?"), "respondeu");
+  verdade("e a pergunta perdida não gasta o limite", /sem fôlego/.test(falado[0].content) && IA.perguntasHoje.get("u2").n === 0);
+  globalThis.fetch = fetchDeVerdade;
+
+  /* ---- o /admin ---- */
+  ajustesIA = {};
+  const janela = await IA.janelaDaIA();
+  ok("a janela da IA tem chave, ligada e perguntas por dia",
+    janela.components.map((l) => l.components[0].custom_id), ["ia_chave", "ia_ligada", "ia_por_dia"]);
+  ok("conferir a chave: aceita", (await IA.conferirChaveDaIA("k", async () => resposta(200, {}))).ok, true);
+  ok("conferir a chave: recusada", (await IA.conferirChaveDaIA("k", async () => resposta(401, {}))).ok, false);
+  ajustesIA = { ia_chave: "x" };
+  verdade("pronta com chave", await IA.iaPronta());
+  ajustesIA = { ia_chave: "x", ia_ligada: "0" };
+  verdade("desligada não está pronta", !(await IA.iaPronta()));
+
+  /* ---- a costura no código ---- */
+  const idxIA = semComentarios(fonte);
+  const atender = idxIA.slice(idxIA.indexOf("async function atenderNoPrivado"), idxIA.indexOf("async function comandoAjuda"));
+  verdade("o privado pergunta à IA antes de se apresentar e antes do tradutor",
+    atender.indexOf("responderComIA(") > 0 && atender.indexOf("responderComIA(") < atender.indexOf("podeApresentar(") &&
+    atender.indexOf("responderComIA(") < atender.indexOf("guardarPraTraduzir("));
+  verdade("quando a IA responde, o cartão de apresentação não vem junto",
+    /if \(ia === "respondeu"\) \{\s*marcarApresentado\(msg\.author\.id\);\s*return;/.test(atender));
+  verdade("o 🌐 da resposta tem rota, antes do deferUpdate que trocaria o cartão",
+    /async function cliqueNoPrivado\(inter\) \{\s*if \(inter\.customId === TRADUZIR_A_PERGUNTA\) return traduzirAPergunta\(inter\);\s*await inter\.deferUpdate\(\)/.test(idxIA));
+    verdade("o botão 🧠 abre a janela, e a janela tem quem a receba",
+    /acao === "ia" && inter\.isButton\(\)\) return inter\.showModal\(janelaValida\(await janelaDaIA\(\)\)\)/.test(idxIA) &&
+    /inter\.customId === "admin:ia"\) return await salvarIA\(inter\)/.test(idxIA));
+  verdade("a chave é testada antes de gravar, e gravada cifrada",
+    /const teste = await conferirChaveDaIA\(chave\);\s*if \(!teste\.ok\)[^\n]*\n\s*await porAjuste\("ia_chave", cifrar\(chave\)\)/.test(idxIA));
+  verdade("a conversa não vai ao banco", !/sbPost\([^)]*conversasDaIA|sbPost\("cyron_ia/.test(idxIA));
+  const priv = readFileSync(`${aqui}/../cyron/privacidade.html`, "utf8");
+  verdade("a privacidade conta que a pergunta vai para a Groq", /Groq/.test(priv) && /30 minutos/.test(priv));
 }
 
 let resumiu = false;
