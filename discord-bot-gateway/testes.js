@@ -11544,7 +11544,7 @@ function conferirCartao(onde, embed, componentes = []) {
     PERSONAGENS: elencoIA.PERSONAGENS, ESPACOS: elencoIA.ESPACOS, EFEITOS: elencoIA.EFEITOS,
     NIVEIS_DO_PERSONAGEM: elencoIA.NIVEIS_DO_PERSONAGEM });
   Object.assign(globalThis, carregar(["TRADUCOES_DO_EVENTO", "LEMBRETES", "SUPORTE_HORAS", "TRADUCOES_DAS_BOAS_VINDAS",
-    "TRADUCOES_DA_HORA", "GLOBAIS_DO_CYRON", "PRECOS", "SITE_DO_CYRON", "LINGUAS_MENU", "ESPACOS_ORDEM", "DUELO_VIDA",
+    "TRADUCOES_DA_HORA", "OPCAO_DE_MEMBRO", "GLOBAIS_DO_CYRON", "PRECOS", "SITE_DO_CYRON", "LINGUAS_MENU", "ESPACOS_ORDEM", "DUELO_VIDA",
     "DUELO_ENERGIA_INICIAL", "DUELO_ENERGIA_TURNO", "DUELO_ENERGIA_MAX", "DUELO_TEMPO", "DUELO_AUSENCIAS",
     "DUELO_MORTE_SUBITA", "DUELO_XP", "DUELO_TREINOS_DIA", "DUELO_DUELOS_DIA", "PATENTES", "descricaoDaHabilidade",
     "venceEm", "hojeISO", "botaoDeSuporte"]));
@@ -11737,6 +11737,97 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("a conversa não vai ao banco", !/sbPost\([^)]*conversasDaIA|sbPost\("cyron_ia/.test(idxIA));
   const priv = readFileSync(`${aqui}/../cyron/privacidade.html`, "utf8");
   verdade("a privacidade conta que a pergunta vai para a Groq", /Groq/.test(priv) && /30 minutos/.test(priv));
+}
+
+/* ====== MARCAR ALGUÉM NAS SALAS POR IDIOMA ======
+ *
+ * Na sala -pt, /abraco @Maelle dava "Usuário inválido": a opção de pessoa do
+ * Discord só aceita quem enxerga a sala, e a Maelle lê na sala dela. Agora o
+ * "membro" é texto com sugestão do servidor inteiro, e o cartão também vai
+ * para as outras salas da conversa, cada uma na sua língua. */
+{
+  const M = carregar(["nomeComparavel", "sugestoesDeMembros", "membroDaOpcao", "salasIrmas", "cartaoDaInteracao",
+    "INTERACOES", "nomesDaInteracao", "comandoInteracao"]);
+  const membro = (id, displayName, username, bot = false, globalName = null) =>
+    ({ id, displayName, user: { id, username, globalName, bot } });
+  /* Ids do tamanho dos do Discord (17 a 20 algarismos). */
+  const ID = (n) => `10000000000000000${n}`;
+  const gente = [membro(ID(1), "Maelle", "maelle_kgs"), membro(ID(2), "Mário", "mario"), membro(ID(3), "Ana Maelle", "aninha"),
+    membro(ID(4), "CYRON", "cyron", true), membro(ID(5), "tiago", "tiago")];
+
+  const s1 = M.sugestoesDeMembros(gente, "mae");
+  ok("quem começa com o digitado vem antes de quem só contém", s1.map((x) => x.value), [ID(1), ID(3)]);
+  ok("o nome mostra o @ quando é diferente do apelido", s1[0].name, "Maelle (@maelle_kgs)");
+  ok("sem acento também acha (mario → Mário)", M.sugestoesDeMembros(gente, "mario").map((x) => x.value), [ID(2)]);
+  verdade("bot não aparece", !M.sugestoesDeMembros(gente, "").some((x) => x.value === ID(4)));
+  ok("@ no começo do que foi digitado é ignorado", M.sugestoesDeMembros(gente, "@tia").map((x) => x.value), [ID(5)]);
+  ok("no máximo 25 (o teto do Discord)", M.sugestoesDeMembros(Array.from({ length: 40 }, (_, i) => membro(String(i), `P${i}`, `p${i}`)), "").length, 25);
+
+  /* O valor que chega: id da lista, menção, ou nome digitado à mão. */
+  const guild = {
+    members: {
+      fetch: async (id) => gente.find((m) => m.id === id) || Promise.reject(new Error("não")),
+      search: async ({ query }) => new Map(gente.filter((m) => nomeDe(m).startsWith(query.toLowerCase())).map((m) => [m.id, m])),
+    },
+  };
+  const nomeDe = (m) => m.displayName.toLowerCase();
+  const inter = (valor) => ({ guild, options: { get: () => (valor == null ? null : { value: valor }) } });
+  ok("pelo id escolhido na lista", (await M.membroDaOpcao(inter(ID(1)))).id, ID(1));
+  ok("por menção", (await M.membroDaOpcao(inter(`<@${ID(2)}>`))).id, ID(2));
+  ok("pelo nome digitado sem escolher", (await M.membroDaOpcao(inter("@Maelle"))).id, ID(1));
+  ok("ninguém com esse nome: nada", await M.membroDaOpcao(inter("zzz")), null);
+  ok("opção vazia: nada", await M.membroDaOpcao(inter(null)), null);
+
+  /* As salas irmãs. */
+  let plano = "pago";
+  globalThis.servidorDoGuild = async () => ({ id: "s1" });
+  globalThis.planoDe = () => plano;
+  globalThis.canaisEspelho = async () => [{ canal_id: "c-pt", idioma: "pt" }, { canal_id: "c-en", idioma: "en" }, { canal_id: "c-es", idioma: "es" }];
+  globalThis.replicasDoIdioma = async () => [{ canal_id: "r-pt", idioma: "pt", tipo: "avisos" }, { canal_id: "r-en", idioma: "en", tipo: "avisos" },
+    { canal_id: "e-en", idioma: "en", tipo: "eventos" }];
+  globalThis.fontesReplica = async () => new Map([["fonte-avisos", "avisos"]]);
+  ok("no chat espelhado: as outras línguas", (await M.salasIrmas("g", "c-pt")).map((c) => c.canal_id), ["c-en", "c-es"]);
+  ok("numa réplica: as irmãs do mesmo canal", (await M.salasIrmas("g", "r-pt")).map((c) => c.canal_id), ["r-en"]);
+  ok("no canal-fonte: as réplicas dele", (await M.salasIrmas("g", "fonte-avisos")).map((c) => c.canal_id), ["r-pt", "r-en"]);
+  ok("canal comum: nenhuma", await M.salasIrmas("g", "outro"), []);
+  plano = "gratis";
+  ok("no grátis, o chat não atravessa (igual ao espelho)", await M.salasIrmas("g", "c-pt"), []);
+  plano = "pago";
+
+  /* O comando inteiro: /abraco na sala -pt, em quem lê em inglês. */
+  const enviados = [];
+  const canal = (id) => ({ send: async (c) => { enviados.push({ id, ...c }); } });
+  globalThis.client = { channels: { fetch: async (id) => canal(id) } };
+  globalThis.linguaDe = async () => "pt";
+  globalThis.idiomaEscolhido = async (id) => (id === ID(1) ? "en" : "pt");
+  globalThis.gifDaInteracao = async () => "https://x/hug.gif";
+  globalThis.nalingua = async (i, g, ...f) => f;
+  let resposta = null;
+  const comando = (valor) => ({ guildId: "g", channelId: "c-pt", user: { id: ID(5), username: "tiago" },
+    member: { displayName: "Tiago" }, guild: { ...guild, channels: { cache: new Map() } },
+    options: { get: () => ({ value: valor }) }, deferReply: async () => {}, editReply: async (r) => { resposta = r; } });
+  await M.comandoInteracao(comando(ID(1)), "abraco");
+  verdade("a resposta marca a Maelle e diz o abraço em português e inglês",
+    resposta.content === `<@${ID(1)}>` && resposta.embeds[0].title === "🤗 Abraço · Hug");
+  ok("o cartão vai para as outras salas da conversa", enviados.map((e) => e.id), ["c-en", "c-es"]);
+  verdade("cada sala lê a ação na língua dela", enviados[1].embeds[0].title.startsWith("🤗 Abrazo"));
+  verdade("o sino toca só na sala da língua da Maelle",
+    enviados[0].content === `<@${ID(1)}>` && enviados[0].allowedMentions.users[0] === ID(1) &&
+    enviados[1].content === "" && enviados[1].allowedMentions.users.length === 0);
+  enviados.length = 0;
+  await M.comandoInteracao(comando("ninguém"), "abraco");
+  verdade("pessoa que não existe: aviso, e nada vai para as outras salas", /Não achei/.test(resposta.content) && enviados.length === 0);
+
+  /* A costura. */
+  const fonteM = semComentarios(fonte);
+  for (const n of ["abraco", "beijo", "tapa", "cafune"]) {
+    verdade(`/${n}: "membro" é texto com sugestão`, new RegExp(`name: "${n}",[^]{0,400}options: \\[OPCAO_DE_MEMBRO\\]`).test(fonteM));
+  }
+  verdade("/perfil também", /name: "perfil",[^]{0,500}options: \[\{ \.\.\.OPCAO_DE_MEMBRO, required: false/.test(fonteM));
+  ok("a opção é texto com autocompletar", [OPCAO_DE_MEMBRO.type, OPCAO_DE_MEMBRO.autocomplete], [3, true]);
+  verdade("o autocompletar desses comandos vem do servidor inteiro",
+    /if \(INTERACOES\[inter\.commandName\] \|\| inter\.commandName === "perfil"\) return sugerirMembros\(inter\);/.test(fonteM));
+  verdade("o /perfil acha a pessoa pela opção nova", /const alvo = pediu \? await membroDaOpcao\(inter\) : inter\.member;/.test(fonteM));
 }
 
 let resumiu = false;
