@@ -10289,7 +10289,12 @@ async function comandoPerfil(inter) {
   await inter.deferReply();
   const idioma = await linguaDe(inter);
   const servidor = await servidorDoGuild(inter.guildId);
-  const alvo = inter.options.getMember("membro") || inter.member;
+  const pediu = inter.options.get("membro")?.value;
+  const alvo = pediu ? await membroDaOpcao(inter) : inter.member;
+  if (!alvo) {
+    const [t] = await nalingua(idioma, inter.guildId, "Não achei essa pessoa neste servidor. Escolha o nome na lista que aparece enquanto você digita.");
+    return inter.editReply({ content: `🤷 ${t}` });
+  }
   /* O duelo entra no perfil de quem ja' duelou -- mesmo com os niveis do
      chat desligados, ai' o perfil mostra so' o duelo. */
   const resumo = resumoDoDuelo(await sb(`cyron_duelo_personagem?user_id=eq.${alvo.id}&select=personagem,xp,vitorias,derrotas`).catch(() => null));
@@ -10766,24 +10771,129 @@ async function gifDaInteracao(reacao) {
   return null;
 }
 
+/* QUEM FOI MARCADO, em qualquer sala.
+
+   As salas por idioma so' deixam cada um ver a da propria lingua, e a opcao
+   "pessoa" do Discord so' sugere (e so' aceita) quem enxerga a sala. Na sala
+   -pt, marcar quem le em ingles dava "Usuario invalido" (print do Tiago, com
+   a Maelle). Por isso a opcao "membro" do /abraco, /beijo, /tapa, /cafune e
+   /perfil e' TEXTO com sugestao: a lista vem daqui, do servidor inteiro, e o
+   valor escolhido e' o id da pessoa. Nenhuma permissao de sala muda. */
+function nomeComparavel(s) {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/^@/, "").trim();
+}
+
+/* A lista que aparece enquanto a pessoa digita: quem comeca com o que foi
+   digitado primeiro, depois quem so' contem. Sem bots. Pura. */
+function sugestoesDeMembros(membros, digitado, max = 25) {
+  const q = nomeComparavel(digitado);
+  const nomes = (m) => [m.displayName, m.user?.globalName, m.user?.username].filter(Boolean).map(nomeComparavel);
+  const pontos = (m) => (!q ? 1 : nomes(m).some((n) => n.startsWith(q)) ? 2 : nomes(m).some((n) => n.includes(q)) ? 1 : 0);
+  return membros
+    .filter((m) => m?.user && !m.user.bot)
+    .map((m) => ({ m, p: pontos(m) }))
+    .filter((x) => x.p > 0)
+    .sort((a, b) => b.p - a.p || String(a.m.displayName).localeCompare(String(b.m.displayName)))
+    .slice(0, max)
+    .map(({ m }) => {
+      const arroba = m.user.username && nomeComparavel(m.user.username) !== nomeComparavel(m.displayName) ? ` (@${m.user.username})` : "";
+      return { name: `${m.displayName}${arroba}`.slice(0, 100), value: m.id };
+    });
+}
+
+async function sugerirMembros(inter) {
+  const guild = inter.guild;
+  if (!guild) return inter.respond([]).catch(() => {});
+  const digitado = String(inter.options.getFocused() || "");
+  const naMemoria = [...guild.members.cache.values()];
+  let lista = sugestoesDeMembros(naMemoria, digitado);
+  /* Pouca gente na memoria com esse nome: pergunta ao Discord (o autocompletar
+     tem 3 segundos, e a busca responde bem antes disso). */
+  if (nomeComparavel(digitado) && lista.length < 5) {
+    const achados = await guild.members.search({ query: digitado.replace(/^@/, "").trim(), limit: 25 }).catch(() => null);
+    if (achados?.size) {
+      lista = sugestoesDeMembros([...new Map([...naMemoria, ...achados.values()].map((m) => [m.id, m])).values()], digitado);
+    }
+  }
+  return inter.respond(lista).catch(() => {});
+}
+
+/* O membro que veio na opcao: o id escolhido na lista, uma <@mencao>, ou um
+   nome digitado sem escolher da lista. null quando nao ha' ninguem assim. */
+async function membroDaOpcao(inter, nome = "membro") {
+  const bruto = String(inter.options.get(nome)?.value ?? "").trim();
+  if (!bruto || !inter.guild) return null;
+  const id = bruto.match(/^<@!?(\d{17,20})>$|^(\d{17,20})$/);
+  if (id) {
+    const porId = await inter.guild.members.fetch(id[1] || id[2]).catch(() => null);
+    if (porId) return porId;
+  }
+  const q = bruto.replace(/^@/, "").trim();
+  const achados = await inter.guild.members.search({ query: q, limit: 10 }).catch(() => null);
+  const lista = [...(achados?.values() || [])].filter((m) => !m.user?.bot);
+  return lista.find((m) => [m.displayName, m.user.username, m.user.globalName].some((n) => nomeComparavel(n) === nomeComparavel(q)))
+    || lista[0] || null;
+}
+
+/* As outras salas da MESMA conversa, uma por lingua: as irmas do chat
+   espelhado, as replicas irmas, ou as replicas de um canal-fonte. As mesmas
+   regras do espelho: sala de conversa so' atravessa no plano pago. */
+async function salasIrmas(guildId, canalId) {
+  const servidor = await servidorDoGuild(guildId).catch(() => null);
+  if (!servidor) return [];
+  const pago = planoDe(servidor) === "pago";
+  const espelho = pago ? await canaisEspelho(servidor.id) : [];
+  if (espelho.some((c) => c.canal_id === canalId)) return espelho.filter((c) => c.canal_id !== canalId);
+  const replicas = await replicasDoIdioma(servidor.id);
+  const aqui = replicas.find((r) => r.canal_id === canalId);
+  if (aqui) return pago ? replicas.filter((r) => r.tipo === aqui.tipo && r.canal_id !== canalId) : [];
+  const tipo = (await fontesReplica(servidor.id)).get(canalId);
+  return tipo ? replicas.filter((r) => r.tipo === tipo) : [];
+}
+
+/* O cartao da interacao. Puro. */
+function cartaoDaInteracao(chave, linguas, de, para, gif) {
+  const it = INTERACOES[chave];
+  return { color: 0xEB459E, title: `${it.emoji} ${nomesDaInteracao(chave, ...linguas).join(" · ")}`,
+    description: `**${de}** → **${para}**`, ...(gif ? { image: { url: gif } } : {}) };
+}
+
 async function comandoInteracao(inter, chave) {
   const it = INTERACOES[chave];
   await inter.deferReply();
-  const alvo = inter.options.getMember("membro");
-  const alvoUser = inter.options.getUser("membro");
-  if (!alvoUser) return inter.editReply({ content: "—" });
+  const alvo = await membroDaOpcao(inter);
+  const alvoUser = alvo?.user;
+  if (!alvoUser) {
+    const [t] = await nalingua(await linguaDe(inter), inter.guildId,
+      "Não achei essa pessoa neste servidor. Escolha o nome na lista que aparece enquanto você digita.");
+    return inter.editReply({ content: `🤷 ${t}` });
+  }
   const [minha, dele] = await Promise.all([linguaDe(inter), idiomaEscolhido(alvoUser.id).catch(() => "")]);
   const gif = await gifDaInteracao(it.reacao);
   const limpo = (t) => String(t || "").replace(/([*_`~|>\\])/g, "\\$1");
   const de = limpo(inter.member?.displayName || inter.user.username);
-  const para = limpo(alvo?.displayName || alvoUser.username);
+  const para = limpo(alvo.displayName || alvoUser.username);
   const marcar = alvoUser.id !== inter.user.id && !alvoUser.bot;
-  return inter.editReply({
+  await inter.editReply({
     content: marcar ? `<@${alvoUser.id}>` : "",
-    embeds: [{ color: 0xEB459E, title: `${it.emoji} ${nomesDaInteracao(chave, minha, dele).join(" · ")}`,
-      description: `**${de}** → **${para}**`, ...(gif ? { image: { url: gif } } : {}) }],
+    embeds: [cartaoDaInteracao(chave, [minha, dele], de, para, gif)],
     allowedMentions: { users: marcar ? [alvoUser.id] : [] },
   });
+  /* E nas outras salas da conversa, cada uma com o nome da acao na lingua
+     dela. Quem recebeu le na sala da lingua dele, e sem isto nunca veria o
+     abraco. O sino toca so' na sala da lingua de quem recebeu: e' a que ele
+     enxerga, e quem enxerga todas (o ADM) nao leva oito avisos. */
+  const irmas = await salasIrmas(inter.guildId, inter.channelId).catch(() => []);
+  for (const sala of irmas) {
+    const canal = inter.guild?.channels.cache.get(sala.canal_id) || await client.channels.fetch(sala.canal_id).catch(() => null);
+    if (typeof canal?.send !== "function") continue;
+    const sino = marcar && dele && sala.idioma === dele;
+    await canal.send({
+      content: sino ? `<@${alvoUser.id}>` : "",
+      embeds: [cartaoDaInteracao(chave, [sala.idioma, dele], de, para, gif)],
+      allowedMentions: { users: sino ? [alvoUser.id] : [] },
+    }).catch((e) => console.error("interacao: nao levei a outra sala:", e?.message || e));
+  }
 }
 
 /* ---------------- 🛠️ /suporte: acesso do dono da CYRON, COM permissao ----------------
@@ -20515,6 +20625,9 @@ client.on("interactionCreate", async (inter) => {
     /* Autocompletar do nome do evento: sem isto o oficial teria que digitar
        "Urso (Bear Trap) 1" exatamente igual, acentos e parenteses inclusive. */
     if (inter.isAutocomplete()) {
+      /* "membro" do /abraco, /beijo, /tapa, /cafune e /perfil: o servidor
+         inteiro, e nao so' quem enxerga a sala. */
+      if (INTERACOES[inter.commandName] || inter.commandName === "perfil") return sugerirMembros(inter);
       /* O autocompletar precisa saber DE QUAL comando ele veio.
 
          Havia um só, do jogo, e a lista de eventos do Kingshot respondia a
@@ -22069,6 +22182,12 @@ const TRADUCOES_DA_HORA = {
   },
 };
 
+/* "membro" como texto com sugestao, e nao como opcao de pessoa: a de pessoa
+   recusa quem nao enxerga a sala ("Usuario invalido" nas salas por idioma).
+   Ver sugerirMembros. */
+const OPCAO_DE_MEMBRO = { type: 3, name: "membro", required: true, autocomplete: true, max_length: 100,
+  description: "Em quem / Who" };
+
 const GLOBAIS_DO_CYRON = [
   {
     name: "cyron",
@@ -22190,28 +22309,28 @@ const GLOBAIS_DO_CYRON = [
     nameLocalizations: { "en-US": "hug", "en-GB": "hug", "es-ES": "abrazo" },
     description: "Dar um abraço / Give a hug",
     dmPermission: false,
-    options: [{ type: 6, name: "membro", required: true, description: "Em quem / Who" }],
+    options: [OPCAO_DE_MEMBRO],
   },
   {
     name: "beijo",
     nameLocalizations: { "en-US": "kiss", "en-GB": "kiss", "es-ES": "beso" },
     description: "Dar um beijo / Give a kiss",
     dmPermission: false,
-    options: [{ type: 6, name: "membro", required: true, description: "Em quem / Who" }],
+    options: [OPCAO_DE_MEMBRO],
   },
   {
     name: "tapa",
     nameLocalizations: { "en-US": "slap", "en-GB": "slap", "es-ES": "bofetada" },
     description: "Dar um tapa / Slap someone",
     dmPermission: false,
-    options: [{ type: 6, name: "membro", required: true, description: "Em quem / Who" }],
+    options: [OPCAO_DE_MEMBRO],
   },
   {
     name: "cafune",
     nameLocalizations: { "en-US": "pat", "en-GB": "pat", "es-ES": "caricia" },
     description: "Fazer cafuné / Headpat someone",
     dmPermission: false,
-    options: [{ type: 6, name: "membro", required: true, description: "Em quem / Who" }],
+    options: [OPCAO_DE_MEMBRO],
   },
   {
     name: "perfil",
@@ -22220,7 +22339,7 @@ const GLOBAIS_DO_CYRON = [
     descriptionLocalizations: { "en-US": "Your card: level, XP and rank", "en-GB": "Your card: level, XP and rank",
       "es-ES": "Tu tarjeta: nivel, XP y posición", "pt-BR": "Seu cartão: nível, XP e posição" },
     dmPermission: false,
-    options: [{ type: 6, name: "membro", required: false, description: "Ver o de outra pessoa / See someone else's",
+    options: [{ ...OPCAO_DE_MEMBRO, required: false, description: "Ver o de outra pessoa / See someone else's",
       descriptionLocalizations: { "en-US": "See someone else's", "en-GB": "See someone else's", "es-ES": "Ver el de otra persona" } }],
   },
   {
