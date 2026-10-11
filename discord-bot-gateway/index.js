@@ -11626,11 +11626,28 @@ async function cliqueDoPainel(inter) {
     cancelarDuelo(estado.id);
     return inter.editReply(await telaDoPainel(eu, "herois", idx, `⚠️ ${await fala("Não consegui mandar o desafio neste canal.")}`, ctx));
   }
+  /* Desafio aberto: qualquer um aceita, entao ele aparece em todas as salas
+     de idioma da conversa. Quem aceitar numa delas joga por la'. */
+  estado.convites = [];
+  for (const sala of await salasIrmas(inter.guildId, estado.msg.channelId).catch(() => [])) {
+    const c = inter.guild?.channels.cache.get(sala.canal_id) || await client.channels.fetch(sala.canal_id).catch(() => null);
+    const convite = typeof c?.send === "function" ? await c.send(conteudo).catch(() => null) : null;
+    if (convite) estado.convites.push(convite);
+  }
   return inter.editReply(await telaDoPainel(eu, "herois", idx, `✅ ${await fala("Seu desafio está no canal!")}`, ctx));
 }
 
 async function comandoDuelo(inter) {
-  const alvo = inter.options.getUser("oponente");
+  /* "oponente" e' texto com sugestao do servidor inteiro (como o "membro" do
+     /abraco): a opcao de pessoa recusava quem le em outra sala de idioma. */
+  const pediu = inter.options.get("oponente")?.value;
+  const alvoMembro = pediu ? await membroDaOpcao(inter, "oponente") : null;
+  const alvo = alvoMembro?.user || null;
+  if (pediu && !alvo) {
+    const [t] = await nalingua(await linguaDe(inter), inter.guildId,
+      "Não achei essa pessoa neste servidor. Escolha o nome na lista que aparece enquanto você digita.");
+    return inter.reply({ flags: 64, content: `🤷 ${t}` });
+  }
   /* Sem oponente: o painel do duelo, so' para quem pediu. */
   if (!alvo) {
     await inter.deferReply({ flags: 64 });
@@ -11656,7 +11673,7 @@ async function comandoDuelo(inter) {
   const estado = { id, guildId: inter.guildId, canalId: inter.channelId, msg: null, historico: [], jogadas: 0, vez: 0,
     vencedor: null, treino: !contraHumano, escolhas: {},
     pessoas: [{ userId: inter.user.id, nome: inter.member?.displayName || inter.user.username },
-      contraHumano ? { userId: alvo.id, nome: inter.options.getMember("oponente")?.displayName || alvo.username } : { bot: true }] };
+      contraHumano ? { userId: alvo.id, nome: alvoMembro?.displayName || alvo.username } : { bot: true }] };
   duelos.set(id, estado);
   duelistaEm.set(inter.user.id, id);
   if (contraHumano) duelistaEm.set(alvo.id, id);
@@ -11668,10 +11685,56 @@ async function comandoDuelo(inter) {
   estado.tx = tx;
   if (tx === DUELO_TEXTOS && estado.idioma !== "pt") prepararLingua(estado, estado.idioma).catch(() => {});
   const titulo = contraHumano ? `⚔️ <@${inter.user.id}> ${tx.desafiou} <@${alvo.id}> ${tx.paraDuelo}` : `⚔️ <@${inter.user.id}> ${tx.vaiTreinar} 🤖 CYRON`;
-  await inter.reply({ content: `${titulo}\n-# ${tx.cadaUm}`,
+  const convite = { content: `${titulo}\n-# ${tx.cadaUm}`,
     components: escolhaDePersonagem(id, contraHumano ? "1 · 2" : (inter.member?.displayName || "🤖"), tx),
-    allowedMentions: { users: contraHumano ? [alvo.id] : [] } });
+    allowedMentions: { users: contraHumano ? [alvo.id] : [] } };
+  await inter.reply(convite);
   estado.msg = await inter.fetchReply().catch(() => null);
+  /* Quem foi desafiado le em outra sala de idioma: o desafio (e depois a
+     luta) vai para la' tambem. */
+  if (contraHumano) await levarDueloAQuemNaoVe(estado, inter.guild, [alvo.id], convite).catch(() => {});
+}
+
+/* AS SALAS POR IDIOMA NO DUELO.
+
+   Cada um so' enxerga a sala da propria lingua. Um duelo comecado na sala
+   -pt contra quem le na -en ficava invisivel para o outro: ele nao via o
+   desafio, nao escolhia heroi, nao jogava. Agora a mensagem do duelo ganha
+   uma COPIA na sala que o outro enxerga, e as duas andam juntas: toda
+   edicao (escolha, cada jogada, o fim) vai para as duas. Os botoes sao os
+   mesmos -- o id do duelo esta' neles --, entao jogar por qualquer uma das
+   copias da' no mesmo.
+
+   So' ganha copia quem NAO enxerga a sala do duelo: o ADM, que ve todas,
+   joga na de origem. Uma copia por sala, e no maximo uma por jogador. */
+function mensagensDoDuelo(estado) {
+  return [estado.msg, ...(estado.copias || []), ...(estado.convites || [])].filter(Boolean);
+}
+
+async function salaDeQuemNaoVe(guild, canalDoDuelo, userId) {
+  if (!guild || !canalDoDuelo) return null;
+  const membro = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+  if (!membro) return null;
+  const ve = (c) => !!c?.permissionsFor?.(membro)?.has(PermissionFlagsBits.ViewChannel);
+  if (ve(canalDoDuelo)) return null;
+  for (const sala of await salasIrmas(guild.id, canalDoDuelo.id).catch(() => [])) {
+    const c = guild.channels.cache.get(sala.canal_id) || await client.channels.fetch(sala.canal_id).catch(() => null);
+    if (ve(c) && typeof c.send === "function") return c;
+  }
+  return null;
+}
+
+async function levarDueloAQuemNaoVe(estado, guild, userIds, carga) {
+  const canal = estado.msg?.channel;
+  if (!canal || !guild) return;
+  estado.copias ??= [];
+  const ja = new Set([canal.id, ...estado.copias.map((m) => m.channelId)]);
+  for (const id of userIds) {
+    const sala = await salaDeQuemNaoVe(guild, canal, id);
+    if (!sala || ja.has(sala.id)) continue;
+    const copia = await sala.send(carga).catch((e) => { console.error("duelo: nao levei a outra sala:", e?.message || e); return null; });
+    if (copia) { estado.copias.push(copia); ja.add(sala.id); }
+  }
 }
 
 function cancelarDuelo(id, motivo = "") {
@@ -11680,7 +11743,11 @@ function cancelarDuelo(id, motivo = "") {
   clearTimeout(estado.expira); clearTimeout(estado.relogio);
   for (const p of estado.pessoas) if (p?.userId && duelistaEm.get(p.userId) === id) duelistaEm.delete(p.userId);
   duelos.delete(id);
-  if (motivo && estado.msg && estado.vencedor === null) estado.msg.edit({ content: `${motivo} ${(estado.tx || DUELO_TEXTOS).cancelado}`, components: [], embeds: [] }).catch(() => {});
+  if (motivo && estado.vencedor === null) {
+    for (const m of mensagensDoDuelo(estado)) {
+      m.edit({ content: `${motivo} ${(estado.tx || DUELO_TEXTOS).cancelado}`, components: [], embeds: [] }).catch(() => {});
+    }
+  }
 }
 
 async function cliqueDuelo(inter) {
@@ -11704,8 +11771,11 @@ async function cliqueDuelo(inter) {
     estado.expira = setTimeout(() => cancelarDuelo(id, "⌛"), DUELO_ESCOLHA);
     const h = personagemPorId(estado.escolhas[0]);
     const tx = estado.tx || DUELO_TEXTOS;
-    return inter.update({ content: `⚔️ <@${inter.user.id}> ${tx.aceitou} <@${estado.pessoas[0].userId}> (${h.bandeira} **${h.curto}**)!\n-# <@${inter.user.id}>, ${tx.escolhaAbaixo}`,
-      components: escolhaDePersonagem(id, estado.pessoas[1].nome, tx), allowedMentions: { parse: [] } });
+    const carga = { content: `⚔️ <@${inter.user.id}> ${tx.aceitou} <@${estado.pessoas[0].userId}> (${h.bandeira} **${h.curto}**)!\n-# <@${inter.user.id}>, ${tx.escolhaAbaixo}`,
+      components: escolhaDePersonagem(id, estado.pessoas[1].nome, tx), allowedMentions: { parse: [] } };
+    await inter.update(carga);
+    aceitoNaSala(estado, inter.message?.id, carga);
+    return;
   }
   /* 🤖 no desafio: so' quem desafiou, e so' enquanto ninguem aceitou. */
   if (acao === "treino") {
@@ -11717,6 +11787,8 @@ async function cliqueDuelo(inter) {
     estado.treino = true;
     estado.comecando = true;
     await inter.deferUpdate();
+    /* Treino e' so' de quem desafiou: os convites das outras salas saem. */
+    aceitoNaSala(estado, estado.msg?.id, null);
     return comecarDuelo(estado);
   }
   const indice = estado.pessoas.findIndex((p) => p?.userId === inter.user.id);
@@ -11759,6 +11831,20 @@ async function cliqueDuelo(inter) {
     await inter.deferUpdate();
     await jogar(estado, indice, hab);
   }
+}
+
+/* O desafio aberto foi aceito (ou virou treino). O convite da sala onde
+   aceitaram vira a copia do duelo; os das outras salas somem. A mensagem de
+   origem recebe a mesma tela. Puro sobre o estado, fora os envios. */
+function aceitoNaSala(estado, clicada, carga) {
+  const convites = estado.convites || [];
+  estado.convites = [];
+  estado.copias ??= [];
+  for (const m of convites) {
+    if (m.id === clicada) estado.copias.push(m);
+    else m.delete().catch(() => {});
+  }
+  if (carga && estado.msg && clicada !== estado.msg.id) estado.msg.edit(carga).catch(() => {});
 }
 
 async function comecarDuelo(estado) {
@@ -11965,8 +12051,10 @@ async function editarDuelo(estado) {
   estado.imagem = Boolean(cartaz);
   /* attachments: [] tira o quadro anterior; sem isso a mensagem acumula. */
   const anexo = cartaz ? { files: [{ attachment: cartaz, name: "duelo.jpg" }], attachments: [] } : { attachments: [] };
-  return await estado.msg?.edit({ content: "", ...telaDoDuelo(estado), ...anexo })
-    .catch((e) => console.error("duelo: nao editei:", e?.message || e));
+  /* A tela vai para a mensagem do duelo e para as copias nas outras salas
+     de idioma (ver levarDueloAQuemNaoVe). */
+  return await Promise.all(mensagensDoDuelo(estado).map((m) => m.edit({ content: "", ...telaDoDuelo(estado), ...anexo })
+    .catch((e) => console.error("duelo: nao editei:", e?.message || e))));
 }
 
 /* A FICHA DO PERSONAGEM (/codex personagem): um pergaminho com o retrato,
@@ -12400,7 +12488,8 @@ async function terminarDuelo(estado) {
   /* A revanche vale por 5 minutos: os mesmos dois, os mesmos herois. */
   estado.revancheAte = Date.now() + DUELO_REVANCHE;
   revanches.set(estado.id, { pessoas: estado.pessoas, escolhas: { ...estado.escolhas }, treino: estado.treino,
-    idioma: estado.idioma, tx: estado.tx, guildId: estado.guildId, ate: estado.revancheAte, querem: new Set(), msg: estado.msg });
+    idioma: estado.idioma, tx: estado.tx, guildId: estado.guildId, ate: estado.revancheAte, querem: new Set(), msg: estado.msg,
+    msgs: mensagensDoDuelo(estado) });
   for (const [id, r] of revanches) if (r.ate < Date.now()) revanches.delete(id);
   await editarDuelo(estado);
   estado.base = null;
@@ -12429,12 +12518,18 @@ async function cliqueRevanche(inter, id) {
   r.querem.add(eu);
   if (humanos.some((p) => !r.querem.has(p.userId))) {
     const outro = humanos.find((p) => !r.querem.has(p.userId));
-    return inter.reply({ content: `🔁 <@${eu}> ${r.tx?.querRevanche || DUELO_TEXTOS.querRevanche} <@${outro.userId}>, ${r.tx?.toqueAceitar || DUELO_TEXTOS.toqueAceitar}`,
-      allowedMentions: { users: [outro.userId] } });
+    const pedido = { content: `🔁 <@${eu}> ${r.tx?.querRevanche || DUELO_TEXTOS.querRevanche} <@${outro.userId}>, ${r.tx?.toqueAceitar || DUELO_TEXTOS.toqueAceitar}`,
+      allowedMentions: { users: [outro.userId] } };
+    await inter.reply(pedido);
+    /* O outro pode estar lendo a copia, em outra sala de idioma: o pedido vai
+       para la' tambem. */
+    for (const m of r.msgs || []) if (m.channelId !== inter.channelId) m.channel?.send(pedido).catch(() => {});
+    return;
   }
   if (humanos.some((p) => duelistaEm.has(p.userId))) return inter.reply({ flags: 64, content: `⚔️ ${await fala("A outra pessoa já está em outro duelo.")}` });
   revanches.delete(id);
   await inter.update({ components: [] }).catch(() => inter.deferUpdate().catch(() => {}));
+  for (const m of r.msgs || []) if (m.id !== inter.message?.id) m.edit({ components: [] }).catch(() => {});
   const escolhas = { ...r.escolhas };
   if (r.treino) {
     const outros = PERSONAGENS.filter((x) => x.id !== escolhas[0]);
@@ -12447,6 +12542,8 @@ async function cliqueRevanche(inter, id) {
     allowedMentions: { parse: [] } }).catch(() => null) ||
     await inter.followUp({ content: "🔁", flags: 0 }).catch(() => null);
   if (!estado.msg) return cancelarDuelo(estado.id);
+  await levarDueloAQuemNaoVe(estado, inter.guild, humanos.map((p) => p.userId),
+    { content: `🔁 ${humanos.map((p) => `<@${p.userId}>`).join(" × ")}`, allowedMentions: { parse: [] } }).catch(() => {});
   estado.comecando = true;
   await comecarDuelo(estado);
 }
@@ -20625,9 +20722,10 @@ client.on("interactionCreate", async (inter) => {
     /* Autocompletar do nome do evento: sem isto o oficial teria que digitar
        "Urso (Bear Trap) 1" exatamente igual, acentos e parenteses inclusive. */
     if (inter.isAutocomplete()) {
-      /* "membro" do /abraco, /beijo, /tapa, /cafune e /perfil: o servidor
-         inteiro, e nao so' quem enxerga a sala. */
-      if (INTERACOES[inter.commandName] || inter.commandName === "perfil") return sugerirMembros(inter);
+      /* "membro" do /abraco, /beijo, /tapa, /cafune e /perfil, e o
+         "oponente" do /duelo: o servidor inteiro, e nao so' quem enxerga a
+         sala. */
+      if (INTERACOES[inter.commandName] || inter.commandName === "perfil" || inter.commandName === "duelo") return sugerirMembros(inter);
       /* O autocompletar precisa saber DE QUAL comando ele veio.
 
          Havia um só, do jogo, e a lista de eventos do Kingshot respondia a
@@ -22272,7 +22370,8 @@ const GLOBAIS_DO_CYRON = [
     descriptionLocalizations: { "en-US": "Duel with characters from history", "en-GB": "Duel with characters from history",
       "es-ES": "Duelo de personajes de la historia", "pt-BR": "Duelo de personagens da história" },
     dmPermission: false,
-    options: [{ type: 6, name: "oponente", required: false, description: "Contra quem (vazio: treino contra a CYRON) / Opponent (empty: training)" }],
+    options: [{ ...OPCAO_DE_MEMBRO, name: "oponente", required: false,
+      description: "Contra quem (vazio: treino contra a CYRON) / Opponent (empty: training)" }],
   },
   {
     name: "equipar",

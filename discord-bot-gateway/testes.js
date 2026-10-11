@@ -11826,8 +11826,72 @@ function conferirCartao(onde, embed, componentes = []) {
   verdade("/perfil também", /name: "perfil",[^]{0,500}options: \[\{ \.\.\.OPCAO_DE_MEMBRO, required: false/.test(fonteM));
   ok("a opção é texto com autocompletar", [OPCAO_DE_MEMBRO.type, OPCAO_DE_MEMBRO.autocomplete], [3, true]);
   verdade("o autocompletar desses comandos vem do servidor inteiro",
-    /if \(INTERACOES\[inter\.commandName\] \|\| inter\.commandName === "perfil"\) return sugerirMembros\(inter\);/.test(fonteM));
+    /if \(INTERACOES\[inter\.commandName\] \|\| inter\.commandName === "perfil" \|\| inter\.commandName === "duelo"\) return sugerirMembros\(inter\);/.test(fonteM));
   verdade("o /perfil acha a pessoa pela opção nova", /const alvo = pediu \? await membroDaOpcao\(inter\) : inter\.member;/.test(fonteM));
+}
+
+/* ====== O DUELO ENTRE SALAS DE IDIOMA ======
+ *
+ * Duelo começado na sala -pt contra quem lê na -en ficava invisível para o
+ * outro. Agora a mensagem do duelo ganha uma cópia na sala que ele enxerga,
+ * e as duas andam juntas. */
+{
+  const D = carregar(["mensagensDoDuelo", "salaDeQuemNaoVe", "levarDueloAQuemNaoVe", "aceitoNaSala"]);
+  const log = [];
+  const mensagem = (id, canal) => ({ id, channelId: canal, channel: { id: canal },
+    edit: async (c) => { log.push(["edit", id, c?.content ?? null]); return true; },
+    delete: async () => { log.push(["delete", id]); } });
+
+  ok("as mensagens do duelo: a de origem, as cópias e os convites",
+    D.mensagensDoDuelo({ msg: { id: "a" }, copias: [{ id: "b" }], convites: [{ id: "c" }] }).map((m) => m.id), ["a", "b", "c"]);
+  ok("duelo sem cópia: só a de origem", D.mensagensDoDuelo({ msg: { id: "a" } }).map((m) => m.id), ["a"]);
+
+  /* Quem enxerga o quê: a Maelle (en) só vê a sala -en; o ADM vê todas. */
+  const vê = { maelle: ["c-en"], adm: ["c-pt", "c-en", "c-es"], tiago: ["c-pt"] };
+  const enviados = [];
+  const sala = (id) => ({ id, permissionsFor: (m) => ({ has: () => vê[m.id].includes(id) }),
+    send: async (c) => { const m = mensagem(`copia-${id}`, id); enviados.push([id, c]); return m; } });
+  const salas = new Map(["c-pt", "c-en", "c-es"].map((id) => [id, sala(id)]));
+  const guild = { id: "g", members: { cache: new Map(Object.keys(vê).map((id) => [id, { id }])), fetch: async () => null },
+    channels: { cache: salas } };
+  globalThis.salasIrmas = async (g, canal) => ["c-pt", "c-en", "c-es"].filter((c) => c !== canal).map((c) => ({ canal_id: c }));
+  ok("quem não vê a sala do duelo: a sala que ela vê", (await D.salaDeQuemNaoVe(guild, salas.get("c-pt"), "maelle"))?.id, "c-en");
+  ok("quem vê (o ADM): nenhuma, joga na de origem", await D.salaDeQuemNaoVe(guild, salas.get("c-pt"), "adm"), null);
+
+  const estado = { msg: { ...mensagem("orig", "c-pt"), channel: salas.get("c-pt") } };
+  await D.levarDueloAQuemNaoVe(estado, guild, ["maelle", "adm"], { content: "desafio" });
+  ok("o desafio vai só para a sala de quem não via", enviados.map((e) => e[0]), ["c-en"]);
+  ok("e vira cópia do duelo", estado.copias.map((m) => m.channelId), ["c-en"]);
+  await D.levarDueloAQuemNaoVe(estado, guild, ["maelle"], { content: "de novo" });
+  ok("uma cópia por sala, nunca duas", estado.copias.length, 1);
+
+  /* Desafio aberto aceito na sala -en: o convite dela fica, os outros saem,
+     e a de origem recebe a mesma tela. */
+  const aberto = { msg: mensagem("orig", "c-pt"), convites: [mensagem("conv-en", "c-en"), mensagem("conv-es", "c-es")] };
+  log.length = 0;
+  D.aceitoNaSala(aberto, "conv-en", { content: "aceitou" });
+  await new Promise((r) => setTimeout(r, 0));
+  ok("o convite de onde aceitaram vira cópia", aberto.copias.map((m) => m.id), ["conv-en"]);
+  verdade("os outros convites somem, e a origem mostra quem aceitou",
+    log.some((l) => l[0] === "delete" && l[1] === "conv-es") && log.some((l) => l[0] === "edit" && l[1] === "orig" && l[2] === "aceitou") &&
+    !log.some((l) => l[1] === "conv-en"));
+  ok("e não sobra convite", aberto.convites, []);
+
+  const fonteD = semComentarios(fonte);
+  verdade("o /duelo aceita oponente de qualquer sala (texto com sugestão)",
+    /name: "duelo",[^]{0,600}options: \[\{ \.\.\.OPCAO_DE_MEMBRO, name: "oponente", required: false/.test(fonteD) &&
+    /const alvoMembro = pediu \? await membroDaOpcao\(inter, "oponente"\) : null;/.test(fonteD));
+  verdade("o desafio direto vai para a sala do desafiado",
+    /if \(contraHumano\) await levarDueloAQuemNaoVe\(estado, inter\.guild, \[alvo\.id\], convite\)/.test(fonteD));
+  verdade("cada jogada edita todas as mensagens do duelo",
+    /async function editarDuelo[^]*?mensagensDoDuelo\(estado\)\.map\(\(m\) => m\.edit\(/.test(fonteD));
+  verdade("cancelar avisa em todas", /function cancelarDuelo[^]*?for \(const m of mensagensDoDuelo\(estado\)\)/.test(fonteD));
+  verdade("o desafio aberto do painel aparece em todas as salas da conversa",
+    /estado\.convites = \[\];\s*for \(const sala of await salasIrmas\(inter\.guildId, estado\.msg\.channelId\)/.test(fonteD));
+  verdade("treino tira os convites das outras salas", /aceitoNaSala\(estado, estado\.msg\?\.id, null\);\s*return comecarDuelo\(estado\);/.test(fonteD));
+  verdade("a revanche chega na sala do outro e o novo duelo também",
+    /for \(const m of r\.msgs \|\| \[\]\) if \(m\.channelId !== inter\.channelId\) m\.channel\?\.send\(pedido\)/.test(fonteD) &&
+    /await levarDueloAQuemNaoVe\(estado, inter\.guild, humanos\.map\(\(p\) => p\.userId\)/.test(fonteD));
 }
 
 let resumiu = false;
